@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from collections import OrderedDict
+
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
 
 from .domain import DatasetMetadata, SortSpec
 
@@ -8,26 +10,34 @@ INVALID_INDEX = QModelIndex()
 
 
 class DatasetTableModel(QAbstractTableModel):
+    """Virtual table model that keeps only a bounded number of SQLite pages."""
+
     page_requested = Signal(int, int)
+    page_loaded = Signal(int, int)
     sort_requested = Signal(object)
 
     def __init__(
-        self, metadata: DatasetMetadata, columns: list[str], page_size: int = 500
+        self,
+        metadata: DatasetMetadata,
+        columns: list[str],
+        page_size: int = 500,
+        max_cached_pages: int = 12,
     ) -> None:
         super().__init__()
         self.metadata = metadata
         self.columns = columns
         self.page_size = page_size
-        self.rows: list[tuple[object, ...]] = []
+        self.max_cached_pages = max_cached_pages
         self.filtered_count = metadata.row_count
-        self.loading = False
         self.sort_spec: SortSpec | None = None
+        self._pages: OrderedDict[int, tuple[tuple[object, ...], ...]] = OrderedDict()
+        self._loading_pages: set[int] = set()
         self._variable_by_name = {
             variable.name: variable for variable in metadata.variables
         }
 
     def rowCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
-        return 0 if parent.isValid() else len(self.rows)
+        return 0 if parent.isValid() else self.filtered_count
 
     def columnCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
         return 0 if parent.isValid() else len(self.columns)
@@ -35,11 +45,21 @@ class DatasetTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
         if (
             not index.isValid()
-            or index.row() >= len(self.rows)
+            or index.row() >= self.filtered_count
             or index.column() >= len(self.columns)
         ):
             return None
-        value = self.rows[index.row()][index.column()]
+        offset = self._page_offset(index.row())
+        page = self._pages.get(offset)
+        if page is None:
+            if role in {Qt.DisplayRole, Qt.EditRole, Qt.ToolTipRole}:
+                self.request_row(index.row())
+            return None
+        self._pages.move_to_end(offset)
+        local_row = index.row() - offset
+        if local_row >= len(page):
+            return None
+        value = page[local_row][index.column()]
         if role in {Qt.DisplayRole, Qt.EditRole}:
             return "" if value is None else str(value)
         if role == Qt.TextAlignmentRole and isinstance(value, (int, float)):
@@ -76,18 +96,24 @@ class DatasetTableModel(QAbstractTableModel):
             else Qt.NoItemFlags
         )
 
-    def canFetchMore(self, parent: QModelIndex = INVALID_INDEX) -> bool:
-        return (
-            not parent.isValid()
-            and not self.loading
-            and len(self.rows) < self.filtered_count
+    def _page_offset(self, row: int) -> int:
+        return (row // self.page_size) * self.page_size
+
+    def request_row(self, row: int) -> None:
+        if not self.columns or not 0 <= row < self.filtered_count:
+            return
+        offset = self._page_offset(row)
+        if offset in self._pages or offset in self._loading_pages:
+            return
+        self._loading_pages.add(offset)
+        QTimer.singleShot(
+            0, lambda offset=offset: self.page_requested.emit(offset, self.page_size)
         )
 
-    def fetchMore(self, parent: QModelIndex = INVALID_INDEX) -> None:
-        if not self.canFetchMore(parent):
-            return
-        self.loading = True
-        self.page_requested.emit(len(self.rows), self.page_size)
+    def is_row_loaded(self, row: int) -> bool:
+        offset = self._page_offset(row)
+        page = self._pages.get(offset)
+        return page is not None and row - offset < len(page)
 
     def reset_query(
         self, *, columns: list[str] | None = None, filtered_count: int | None = None
@@ -95,27 +121,59 @@ class DatasetTableModel(QAbstractTableModel):
         self.beginResetModel()
         if columns is not None:
             self.columns = list(columns)
-        self.rows.clear()
+        self._pages.clear()
+        self._loading_pages.clear()
         self.filtered_count = (
             self.metadata.row_count if filtered_count is None else filtered_count
         )
-        self.loading = False
         self.endResetModel()
-        self.fetchMore()
+        if self.columns and self.filtered_count:
+            self.request_row(0)
 
-    def append_page(
-        self, rows: tuple[tuple[object, ...], ...], filtered_count: int
+    def set_page(
+        self,
+        offset: int,
+        rows: tuple[tuple[object, ...], ...],
+        filtered_count: int,
     ) -> None:
-        self.filtered_count = filtered_count
-        if rows:
-            first = len(self.rows)
-            self.beginInsertRows(QModelIndex(), first, first + len(rows) - 1)
-            self.rows.extend(rows)
-            self.endInsertRows()
-        self.loading = False
+        self._loading_pages.discard(offset)
+        if filtered_count != self.filtered_count:
+            self.beginResetModel()
+            self.filtered_count = filtered_count
+            self._pages.clear()
+            self._loading_pages.clear()
+            self.endResetModel()
+        if not rows:
+            return
+        self._pages[offset] = rows
+        self._pages.move_to_end(offset)
+        while len(self._pages) > self.max_cached_pages:
+            self._pages.popitem(last=False)
+        bottom = min(offset + len(rows), self.filtered_count) - 1
+        if bottom >= offset and self.columns:
+            self.dataChanged.emit(
+                self.index(offset, 0),
+                self.index(bottom, len(self.columns) - 1),
+                [Qt.DisplayRole, Qt.EditRole, Qt.ToolTipRole],
+            )
+            self.page_loaded.emit(offset, bottom)
 
-    def load_failed(self) -> None:
-        self.loading = False
+    def set_available_count(self, row_count: int) -> None:
+        if row_count == self.filtered_count:
+            return
+        if row_count > self.filtered_count:
+            self.beginInsertRows(QModelIndex(), self.filtered_count, row_count - 1)
+            self.filtered_count = row_count
+            self.endInsertRows()
+        else:
+            self.beginResetModel()
+            self.filtered_count = row_count
+            self._pages.clear()
+            self._loading_pages.clear()
+            self.endResetModel()
+
+    def load_failed(self, offset: int) -> None:
+        self._loading_pages.discard(offset)
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
         if not 0 <= column < len(self.columns):

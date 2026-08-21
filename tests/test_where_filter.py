@@ -10,6 +10,10 @@ VARIABLES = (
     VariableMetadata("USUBJID", kind="character", length=20),
     VariableMetadata("AESER", kind="character", length=1),
     VariableMetadata("AGE", kind="numeric", length=8),
+    VariableMetadata("AGE2", kind="numeric", length=8),
+    VariableMetadata("AEENDTC", kind="character", length=20),
+    VariableMetadata("AESTDTC", kind="character", length=20),
+    VariableMetadata("ARMCD", kind="character", length=8),
 )
 
 
@@ -64,6 +68,33 @@ class WhereFilterTests(unittest.TestCase):
 
     def test_empty_where_means_no_filter_in_engine(self) -> None:
         self.assertEqual(self.engine.compile("  \n ").sql, "")
+
+    def test_column_to_column_comparisons_and_sas_logical_symbols(self) -> None:
+        compiled = self.engine.compile(
+            'AESTDTC <= AEENDTC & AGE GT AGE2 | AESER NE "N"'
+        )
+        self.assertIn('"AESTDTC" <= "AEENDTC"', compiled.sql)
+        self.assertIn('"AGE" > "AGE2"', compiled.sql)
+        self.assertIn(" AND ", compiled.sql)
+        self.assertIn(" OR ", compiled.sql)
+        self.assertEqual(compiled.parameters, ("N",))
+
+    def test_question_contains_between_like_is_missing_and_prefix(self) -> None:
+        question = self.engine.compile('ARMCD ? "PKO"')
+        self.assertIn("instr", question.sql)
+        self.assertEqual(question.parameters, ("PKO",))
+        between = self.engine.compile("AGE BETWEEN 18 AND 65")
+        self.assertIn('"AGE" BETWEEN ? AND ?', between.sql)
+        like = self.engine.compile('USUBJID LIKE "101-%"')
+        self.assertIn('"USUBJID" LIKE ?', like.sql)
+        missing = self.engine.compile("AESER IS NOT MISSING")
+        self.assertIn("NOT", missing.sql)
+        prefix = self.engine.compile('USUBJID =: "101"')
+        self.assertIn("substr", prefix.sql)
+
+    def test_column_comparison_rejects_incompatible_types(self) -> None:
+        with self.assertRaisesRegex(WhereValidationError, "Cannot compare"):
+            self.engine.compile("AGE = USUBJID")
 
 
 if __name__ == "__main__":

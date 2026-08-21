@@ -105,6 +105,16 @@ QFrame#wherePanel {
     background: #f7fbff;
     border: 1px solid #c5d9ec;
 }
+QFrame#findBar {
+    background: #eef7ff;
+    border: 1px solid #b7d6ef;
+}
+QLabel#cacheNotice {
+    background: #e6f3ff;
+    border: 1px solid #a9d2f2;
+    color: #0f5f9f;
+    padding: 6px 9px;
+}
 QLabel#whereTitle { color: #0f6fb5; font-weight: 700; }
 QLabel#panelTitle { color: #174b73; font-weight: 700; }
 QToolButton:hover { background: #e1f0ff; border-radius: 3px; }

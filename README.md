@@ -7,13 +7,17 @@
 - 同时打开多个 `.sas7bdat`，使用可关闭、可移动的 Tab 切换。
 - 源文件先分块复制到本次会话的临时目录；复制结束后，读取、筛选、排序和导出都只访问临时文件/缓存。
 - 关闭 Tab 清理对应副本；退出清理整个会话；启动时清理超过 24 小时且不属于仍在运行进程的异常退出遗留目录。
-- `QTableView + QAbstractTableModel`，每批默认加载 500 行，支持双向滚动、列宽调整、表头排序、单元格/行/区域复制。
+- 大文件复制完成后先读取 metadata 和首批 20,000 行并显示 Tab，其余行继续在后台写入本地缓存；缓存期间仍可浏览首批及随后到达的数据。
+- `QTableView + QAbstractTableModel` 虚拟行模型，每页默认 500 行、内存中只保留有限页面；可以直接滚动/跳到远端页面，不需要先加载前面的所有行。
 - 可折叠 Variables 面板、显示列勾选、Select All、变量定位、变量搜索，以及 Variable/Label/Type/Length/Format metadata。
-- 手写 SAS-like WHERE；支持 `=`、`!=`、`^=`、`>`、`>=`、`<`、`<=`、`AND`、`OR`、`NOT`、`IN`、`NOT IN`、`CONTAINS`、`MISSING()`、`NOT MISSING()` 和括号。
+- 手写 SAS-like WHERE；支持列与常量或列与列比较，例如 `AESTDTC <= AEENDTC`。
+- 比较符支持 `=`/`EQ`、`!=`/`^=`/`~=`/`<>`/`NE`、`>`/`GT`、`>=`/`GE`、`<`/`LT`、`<=`/`LE`，以及字符前缀修饰符 `=:` 等。
+- 逻辑与条件支持 `AND`/`&`、`OR`/`|`/`!`、`NOT`/`^`/`~`、`IN`、`NOT IN`、`BETWEEN ... AND ...`、`CONTAINS`/`?`、`LIKE`、`IS NULL`、`IS MISSING`、`MISSING()` 和括号。
 - `Ctrl+Enter` 或 Apply 执行；语法/类型/变量错误会指出原因和位置，并保留输入。
 - 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。
-- Reload 从原始路径生成新副本，并尽量保留显示列、WHERE 输入、已应用筛选和排序。
+- `Ctrl+F` 在当前筛选、排序结果的当前显示列中查找文本；`F3`/`Shift+F3` 查找下一个/上一个；`Ctrl+G` 按当前结果行号跳转。
+- Reload 从原始路径生成新副本，并尽量保留显示列、WHERE 输入和已应用筛选；大文件重新缓存完成后再应用 WHERE。
 - 文件复制、SAS 读取、缓存构建、查询筛选、Reload 和 CSV 导出均通过 Qt 线程池运行。
 
 界面采用紧凑的传统 Windows 桌面布局：菜单栏、图标工具栏、数据集 Tab、左侧 Variables、右侧数据表、底部 WHERE、最底部状态栏。左侧 Filter variables 与右上角 Search Variable 同步。
@@ -22,11 +26,11 @@
 
 ## 开发运行
 
-建议在 Windows 10/11 上使用 64 位 Python 3.11 或 3.12。PySide6/pyreadstat 的可用 wheel 与 Python 版本相关，因此项目暂不声明 Python 3.14 支持。
+要求 64 位 Python 3.11 或更新版本；目标电脑的 Python 3.11.5 可直接使用。项目只声明下限 `>=3.11`，没有把 3.11.5、3.12 或某个最高版本写死。实际能否安装仍取决于 PySide6 和 pyreadstat 是否为该 Python 版本提供 wheel，内部发布建议固定使用已经验收过的 Python 3.11.5 构建 EXE。
 
 ```powershell
 cd C:\path\to\sas7bdat-viewer
-py -3.12 -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m clinical_data_viewer
@@ -39,11 +43,15 @@ python -m clinical_data_viewer
 - Open：可一次选择一个或多个文件。
 - 表头：首次点击升序，再次点击降序；相同行值按源行顺序稳定显示。
 - Copy：选择单元格、整行或矩形区域后按 `Ctrl+C`；右键可复制列名。
-- Variables：顶部列表是当前显示列；展开 All Variables 可查看完整 metadata 并勾选隐藏列。
+- Variables：顶部列表是当前显示列；展开 All Variables 可查看完整 metadata 并勾选隐藏列。Select All 在“全选”和“全部取消”之间切换；部分选择或全部取消后再次点击会恢复全部变量。允许暂时隐藏全部列，此时 Apply、Find、Go to Row 和 Export 不可用。
 - WHERE：`Ctrl+Enter`、Apply 执行；Clear 不修改数据，只恢复完整显示。
+- Find：`Ctrl+F` 打开查找栏，Enter 或 `F3` 查找下一个，`Shift+F3` 查找上一个。查找范围始终是当前筛选结果和当前显示列。
+- Go to Row：`Ctrl+G` 输入当前结果中的 1-based 行号。虚拟表格会直接请求对应页面。
 - Filter History：双击或 Use Condition 只会回填 WHERE，需 Apply 后执行。
 - Export CSV：弹出 Windows Save As，导出时界面仍可使用。
 - Reload：源文件不存在或新内容读取失败时保留旧 Tab 数据。
+
+大文件的完整缓存尚未完成时，表格会显示蓝色提示和 `Rows cached` 状态。此阶段允许浏览、复制和调整显示变量；筛选、排序、全文查找、行跳转和 CSV 导出会暂时禁用，因为这些操作必须基于完整数据才不会产生误导结果。缓存完成后自动启用，无需重新打开文件。
 
 ## 源文件与临时文件
 
@@ -74,7 +82,7 @@ Windows 默认目录：
 
 ```powershell
 cd C:\path\to\sas7bdat-viewer
-py -3.12 -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements-build.txt
@@ -117,7 +125,7 @@ python -m clinical_data_viewer
 
 1. 用 Open 同时选择 2–3 个 SDTM/ADaM `.sas7bdat`，确认每个文件生成独立 Tab。
 2. 核对总行数、变量数，以及 Variable、Label、Type、Length、Format metadata。
-3. 勾选/取消变量，确认主表立即只显示当前变量；点击变量应定位对应列。
+3. 先取消 Select All，再次点击 Select All，确认全部变量能恢复；逐个勾选/取消变量，确认主表立即只显示当前变量；点击变量应定位对应列。
 4. 点击表头测试升序/降序；选择单元格、整行和矩形区域后按 `Ctrl+C`。
 5. 执行组合 WHERE，例如：
 
@@ -125,9 +133,11 @@ python -m clinical_data_viewer
    AESER = "Y" and TRTEMFL = "Y" and USUBJID = "101-001"
    ```
 
-6. 分别验证 `IN`、`NOT IN`、`CONTAINS`、`MISSING()`、`NOT MISSING()`、`AND/OR/NOT` 和括号。
-7. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。
-8. 关闭程序再启动，确认成功执行过的 WHERE 能从当前数据集历史和全局历史恢复。
+6. 分别验证 `IN`、`NOT IN`、`CONTAINS`/`?`、`AND`/`&`、`OR`/`|`、`BETWEEN`、`LIKE`、`IS NULL/MISSING`、比较助记符和括号。
+7. 验证列对列条件，例如 `AESTDTC <= AEENDTC`，并确认字符列与数值列比较会给出明确类型错误。
+8. 按 `Ctrl+F` 查找当前显示文本，并用 `F3`/`Shift+F3` 前后查找；按 `Ctrl+G` 跳到第 1 行、末行和一个远端中间行。
+9. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。
+10. 关闭程序再启动，确认成功执行过的 WHERE 能从当前数据集历史和全局历史恢复。
 
 完整人工检查表也保存在 [docs/windows-acceptance.md](docs/windows-acceptance.md)。
 
@@ -152,14 +162,15 @@ Copy-Item ".\manual-test\lock-test-backup.sas7bdat" ".\manual-test\lock-test.sas
 
 ### 6. 验证 Reload、CSV 和临时清理
 
-- 修改或重新生成测试源文件，点击 Reload；确认显示新内容，并尽量保留 WHERE、显示变量和排序。
+- 修改或重新生成测试源文件，点击 Reload；确认显示新内容，并尽量保留 WHERE 和显示变量。大文件缓存完成后 WHERE 应自动重用。
 - 先筛选、隐藏若干变量并排序，然后 Export CSV；确认导出的行数、行顺序和列集合与当前视图完全一致，文件开头包含 UTF-8 BOM。
 - 加载过程中拖动窗口、切换其他 Tab；导出大 CSV 时继续操作界面，确认没有主线程冻结。
+- 用行数超过 20,000 的数据集验证：首批行显示后 Tab 可立即浏览，底部缓存行数持续增加；缓存完成前筛选/排序/查找/跳转/导出不可用，完成后自动恢复。
 - 打开文件后检查 `%LOCALAPPDATA%\ClinicalDataViewer\temp`；关闭对应 Tab 后其 dataset 子目录应消失，正常退出后本次 `cde-*` 会话目录应消失。
 
 ## 如何打包为 Windows EXE
 
-Windows EXE 必须在 Windows 64 位环境构建；macOS 不能用 PyInstaller 直接交叉生成可用的 Windows EXE。建议使用 Python 3.12 64 位。
+Windows EXE 必须在 Windows 64 位环境构建；macOS 不能用 PyInstaller 直接交叉生成可用的 Windows EXE。目标环境建议使用已经验收的 Python 3.11.5 64 位，但构建配置没有限定到这个补丁版本。
 
 ### 方法一：使用自动构建脚本（推荐）
 
@@ -168,6 +179,18 @@ Windows EXE 必须在 Windows 64 位环境构建；macOS 不能用 PyInstaller �
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\build_windows.ps1
+```
+
+脚本不会写死 `py -3.12`。它优先使用当前 `python`，其次使用 Windows `py` launcher，也可以明确传入任意 Python 3.11+ 解释器而不修改脚本：
+
+```powershell
+.\scripts\build_windows.ps1 -PythonExe "C:\Path\To\Python311\python.exe"
+```
+
+如果已有 `.venv` 来自另一个 Python，需要重建时：
+
+```powershell
+.\scripts\build_windows.ps1 -PythonExe "C:\Path\To\Python311\python.exe" -RecreateVenv
 ```
 
 脚本会依次：
@@ -188,7 +211,7 @@ dist\SASDataViewer.exe
 
 ```powershell
 cd C:\path\to\sas7bdat-viewer
-py -3.12 -m venv .venv
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements-build.txt

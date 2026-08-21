@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
-from ..domain import DatasetHandle
+from ..domain import CacheProgress, DatasetHandle
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
 from ..sas_reader import SasDatasetReader
@@ -261,6 +262,8 @@ class MainWindow(QMainWindow):
             self.tabs.insertTab(current_index, tab, source_path.name)
             self.tabs.setCurrentIndex(current_index)
             tab.start()
+            if not handle.cache_complete:
+                self._continue_cache(tab)
 
         def failed(message: str, details: str) -> None:
             loading.progress.setRange(0, 1)
@@ -269,7 +272,7 @@ class MainWindow(QMainWindow):
 
         self._submit(
             loading,
-            lambda worker: self.reader.load(source_path, worker.report),
+            lambda worker: self.reader.load_initial(source_path, worker.report),
             completed,
             failed,
         )
@@ -287,7 +290,66 @@ class MainWindow(QMainWindow):
         tab.clear_requested.connect(lambda owner=tab: self._clear_filter(owner))
         tab.history_requested.connect(lambda owner=tab: self.show_history(owner))
         tab.sort_changed.connect(lambda _sort, owner=tab: self._refresh_status(owner))
+        tab.find_requested.connect(
+            lambda text, forward, start, generation, owner=tab: self._find_text(
+                owner, text, forward, start, generation
+            )
+        )
         return tab
+
+    def _continue_cache(self, tab: DatasetTab, when_complete=None) -> None:
+        initial_handle = tab.handle
+
+        def progress_changed(progress: CacheProgress) -> None:
+            if self.tabs.indexOf(tab) < 0:
+                return
+            metadata = replace(
+                tab.handle.metadata,
+                row_count=max(tab.handle.metadata.row_count, progress.total_rows),
+            )
+            tab.handle = replace(
+                tab.handle,
+                metadata=metadata,
+                cached_row_count=progress.cached_rows,
+                cache_complete=progress.complete,
+            )
+            tab.set_cache_state(
+                progress.cached_rows, progress.total_rows, progress.complete
+            )
+            self._refresh_status(tab)
+
+        def completed(handle: DatasetHandle) -> None:
+            if self.tabs.indexOf(tab) < 0:
+                return
+            tab.handle = handle
+            tab.set_cache_state(
+                handle.cached_row_count, handle.metadata.row_count, True
+            )
+            self._sync_active_tab()
+            self._refresh_status(tab)
+            if when_complete is not None:
+                when_complete(handle)
+
+        def failed(message: str, details: str) -> None:
+            if self.tabs.indexOf(tab) < 0:
+                return
+            tab.cache_notice.setVisible(True)
+            tab.cache_notice.setText(
+                "Background caching stopped. Reload the dataset to try again."
+            )
+            tab.cache_failed = True
+            self._sync_active_tab()
+            self._show_error("Dataset Cache Failed", message, details)
+
+        self._submit(
+            tab,
+            lambda worker: self.reader.continue_cache(
+                initial_handle, worker.report, worker.report_data
+            ),
+            completed,
+            failed,
+            progress_data=progress_changed,
+        )
 
     def _load_page(
         self, tab: DatasetTab, generation: int, offset: int, limit: int
@@ -318,7 +380,15 @@ class MainWindow(QMainWindow):
             if self.tabs.indexOf(tab) < 0 or generation != tab.generation:
                 return
             tab.recount_next = False
-            tab.model.append_page(page.rows, page.filtered_count)
+            displayed_count = page.filtered_count
+            if not compiled.sql and sort is None:
+                displayed_count = max(
+                    displayed_count,
+                    tab.handle.metadata.row_count
+                    if tab.cache_complete
+                    else tab.handle.cached_row_count,
+                )
+            tab.model.set_page(offset, page.rows, displayed_count)
             if offset == 0 and tab.pending_history_text:
                 self.history.add(tab.handle.source_path, tab.pending_history_text)
                 tab.pending_history_text = ""
@@ -326,12 +396,54 @@ class MainWindow(QMainWindow):
 
         def failed(message: str, details: str) -> None:
             if generation == tab.generation:
-                tab.model.load_failed()
+                tab.model.load_failed(offset)
             self._show_error("Dataset Query Failed", message, details)
 
         self._submit(tab, query, completed, failed)
 
+    def _find_text(
+        self,
+        tab: DatasetTab,
+        text: str,
+        forward: bool,
+        start_row: int,
+        generation: int,
+    ) -> None:
+        if (
+            self.tabs.indexOf(tab) < 0
+            or generation != tab.generation
+            or not tab.cache_complete
+            or not tab.visible_columns
+        ):
+            return
+        handle = tab.handle
+        columns = tuple(tab.visible_columns)
+        compiled = tab.compiled_filter
+        sort = tab.model.sort_spec
+
+        def completed(result) -> None:
+            if self.tabs.indexOf(tab) >= 0 and generation == tab.generation:
+                tab.show_find_result(result)
+
+        self._submit(
+            tab,
+            lambda _worker: self.store.find_text(
+                handle.database_path,
+                handle.metadata,
+                columns,
+                compiled,
+                sort,
+                text,
+                start_row,
+                forward=forward,
+            ),
+            completed,
+            lambda message, details: self._show_error("Find Failed", message, details),
+        )
+
     def _apply_filter(self, tab: DatasetTab, where_text: str) -> None:
+        if not tab.cache_complete or not tab.visible_columns:
+            return
         try:
             compiled = FilterEngine(tab.handle.metadata.variables).compile(where_text)
         except ValueError as error:
@@ -341,6 +453,8 @@ class MainWindow(QMainWindow):
         self._refresh_status(tab)
 
     def _clear_filter(self, tab: DatasetTab) -> None:
+        if not tab.cache_complete:
+            return
         tab.clear_filter()
         self._refresh_status(tab)
 
@@ -354,6 +468,7 @@ class MainWindow(QMainWindow):
         if tab:
             tab.set_visible_columns(columns)
             self._refresh_status(tab)
+            self._sync_active_tab()
 
     def _locate_variable(self, variable: str) -> None:
         tab = self.current_dataset_tab()
@@ -362,14 +477,16 @@ class MainWindow(QMainWindow):
 
     def reload_current(self) -> None:
         tab = self.current_dataset_tab()
-        if not tab:
+        if not tab or tab.reload_in_progress:
             return
         source_path = tab.handle.source_path
         old_directory = tab.handle.temporary_path.parent
         preserved_visible = list(tab.visible_columns)
         editor_text = tab.where_editor.toPlainText()
         applied_where = tab.applied_where
+        tab.reload_in_progress = True
         tab.setEnabled(False)
+        self._sync_active_tab()
         self.task_status.setText(f"Reloading {source_path.name}…")
 
         def completed(handle: DatasetHandle) -> None:
@@ -378,42 +495,58 @@ class MainWindow(QMainWindow):
                 return
             known = {variable.name for variable in handle.metadata.variables}
             visible = [name for name in preserved_visible if name in known]
-            if not visible:
-                visible = [variable.name for variable in handle.metadata.variables]
-            try:
-                compiled = FilterEngine(handle.metadata.variables).compile(
-                    applied_where
-                )
-            except ValueError as error:
-                compiled = FilterEngine(handle.metadata.variables).compile("")
-                QMessageBox.warning(
-                    self,
-                    "WHERE Not Reapplied",
-                    f"The dataset was reloaded, but the previous WHERE condition is no longer valid:\n{error}",
-                )
-            tab.replace_handle(handle, visible, compiled)
+            empty_filter = FilterEngine(handle.metadata.variables).compile("")
+            tab.replace_handle(handle, visible, empty_filter)
             tab.where_editor.setPlainText(editor_text)
-            tab.applied_where = applied_where if compiled.sql else ""
+            tab.applied_where = ""
+            tab.reload_in_progress = False
             tab.setEnabled(True)
             self._pending_removals.setdefault(tab, []).append(old_directory)
             self._cleanup_pending(tab)
             self.variables_panel.set_dataset(handle.metadata, visible)
             self._refresh_status(tab)
+            self._sync_active_tab()
+
+            def reapply(final_handle: DatasetHandle) -> None:
+                if not applied_where:
+                    return
+                try:
+                    compiled = FilterEngine(final_handle.metadata.variables).compile(
+                        applied_where
+                    )
+                except ValueError as error:
+                    QMessageBox.warning(
+                        self,
+                        "WHERE Not Reapplied",
+                        "The dataset was reloaded, but the previous WHERE condition "
+                        f"is no longer valid:\n{error}",
+                    )
+                    return
+                tab.apply_filter(compiled, applied_where, add_history=False)
+                tab.applied_where = applied_where
+                self._refresh_status(tab)
+
+            if handle.cache_complete:
+                reapply(handle)
+            else:
+                self._continue_cache(tab, reapply)
 
         def failed(message: str, details: str) -> None:
+            tab.reload_in_progress = False
             tab.setEnabled(True)
+            self._sync_active_tab()
             self._show_error("Reload Failed", message, details)
 
         self._submit(
             tab,
-            lambda worker: self.reader.load(source_path, worker.report),
+            lambda worker: self.reader.load_initial(source_path, worker.report),
             completed,
             failed,
         )
 
     def export_current(self) -> None:
         tab = self.current_dataset_tab()
-        if not tab:
+        if not tab or not tab.cache_complete or not tab.visible_columns:
             return
         initial_directory = Path(
             self.settings.last_export_directory or str(tab.handle.source_path.parent)
@@ -478,15 +611,16 @@ class MainWindow(QMainWindow):
     def _sync_active_tab(self, _index: int | None = None) -> None:
         tab = self.current_dataset_tab()
         enabled = tab is not None
-        for action in (
-            self.reload_action,
-            self.export_action,
-            self.clear_action,
-            self.close_tab_action,
-        ):
-            action.setEnabled(
-                enabled or (action is self.close_tab_action and self.tabs.count() > 0)
-            )
+        self.reload_action.setEnabled(
+            enabled
+            and not tab.reload_in_progress
+            and (tab.cache_complete or tab.cache_failed)
+        )
+        self.export_action.setEnabled(
+            enabled and tab.cache_complete and bool(tab.visible_columns)
+        )
+        self.clear_action.setEnabled(enabled and tab.cache_complete)
+        self.close_tab_action.setEnabled(self.tabs.count() > 0)
         self.variables_panel.set_dataset(
             tab.handle.metadata, tab.visible_columns
         ) if tab else self.variables_panel.set_dataset(None)
@@ -499,9 +633,15 @@ class MainWindow(QMainWindow):
             self.filter_status.setText("")
             self.source_status.setText("Source: —")
             return
-        self.rows_status.setText(
-            f"Rows: {tab.model.filtered_count:,} / {tab.handle.metadata.row_count:,}"
-        )
+        if tab.cache_complete:
+            self.rows_status.setText(
+                f"Rows: {tab.model.filtered_count:,} / {tab.handle.metadata.row_count:,}"
+            )
+        else:
+            self.rows_status.setText(
+                f"Rows cached: {tab.handle.cached_row_count:,} / "
+                f"{tab.handle.metadata.row_count:,}"
+            )
         self.columns_status.setText(f"Columns: {len(tab.visible_columns)}")
         self.filter_status.setText("Filtered" if tab.compiled_filter.sql else "")
         self.filter_status.setProperty("filtered", bool(tab.compiled_filter.sql))
@@ -509,12 +649,16 @@ class MainWindow(QMainWindow):
         self.filter_status.style().polish(self.filter_status)
         self.source_status.setText(f"Source:  {tab.handle.source_path}")
 
-    def _submit(self, owner: QWidget, function, completed, failed) -> None:
+    def _submit(
+        self, owner: QWidget, function, completed, failed, progress_data=None
+    ) -> None:
         worker = Worker(function)
         self._workers.setdefault(owner, set()).add(worker)
         worker.signals.progress.connect(self.task_status.setText)
         worker.signals.result.connect(completed)
         worker.signals.error.connect(failed)
+        if progress_data is not None:
+            worker.signals.progress_data.connect(progress_data)
 
         def finished() -> None:
             self._workers.get(owner, set()).discard(worker)

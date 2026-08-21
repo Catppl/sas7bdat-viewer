@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import math
-import os
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .domain import DatasetHandle, DatasetMetadata, VariableMetadata
+from .domain import CacheProgress, DatasetHandle, DatasetMetadata, VariableMetadata
 from .filter_engine import quote_identifier
 from .temp_manager import TempManager
 
 ProgressCallback = Callable[[str], None]
+CacheProgressCallback = Callable[[CacheProgress], None]
 
 
 def _import_pyreadstat():
@@ -19,7 +20,8 @@ def _import_pyreadstat():
         import pyreadstat
     except ImportError as error:
         raise RuntimeError(
-            "pyreadstat is not installed. Install desktop/Windows dependencies before opening a SAS dataset."
+            "pyreadstat is not installed. Install desktop/Windows dependencies "
+            "before opening a SAS dataset."
         ) from error
     return pyreadstat
 
@@ -39,13 +41,22 @@ def normalize_value(value: Any) -> object:
 
 
 class SasDatasetReader:
-    """Copies a source dataset, then builds a disk-backed read-only query cache."""
+    """Copy the source, expose an initial cache, then append the rest in WAL mode."""
 
     def __init__(self, temp_manager: TempManager, chunk_size: int = 20_000) -> None:
         self.temp_manager = temp_manager
         self.chunk_size = chunk_size
 
     def load(
+        self, source_path: Path, progress: ProgressCallback | None = None
+    ) -> DatasetHandle:
+        """Build the complete cache. Kept for non-UI callers and tests."""
+        handle = self.load_initial(source_path, progress)
+        if handle.cache_complete:
+            return handle
+        return self.continue_cache(handle, progress)
+
+    def load_initial(
         self, source_path: Path, progress: ProgressCallback | None = None
     ) -> DatasetHandle:
         notify = progress or (lambda _message: None)
@@ -60,20 +71,93 @@ class SasDatasetReader:
         database_path = dataset_directory / "dataset.sqlite"
         try:
             notify("Reading SAS metadata…")
-            variables = self._read_variables(temporary_path)
-            notify("Building local query cache…")
-            row_count = self._build_cache(
-                temporary_path, database_path, variables, notify
+            variables, reported_rows = self._read_metadata(temporary_path)
+            notify(f"Loading the first {self.chunk_size:,} rows…")
+            first_chunk = self._read_first_chunk(temporary_path)
+            cached_rows = self._create_cache(
+                database_path, variables, first_chunk, reported_rows
             )
-            metadata = DatasetMetadata(source_path.stem, row_count, variables)
+            total_rows = reported_rows if reported_rows is not None else cached_rows
+            cache_complete = cached_rows < self.chunk_size or (
+                reported_rows is not None and cached_rows >= reported_rows
+            )
+            metadata = DatasetMetadata(source_path.stem, total_rows, variables)
             return DatasetHandle(
-                source_path.resolve(), temporary_path, database_path, metadata
+                source_path.resolve(),
+                temporary_path,
+                database_path,
+                metadata,
+                cached_rows,
+                cache_complete,
             )
         except BaseException:
             self.temp_manager.remove_dataset(dataset_directory)
             raise
 
-    def _read_variables(self, dataset_path: Path) -> tuple[VariableMetadata, ...]:
+    def continue_cache(
+        self,
+        handle: DatasetHandle,
+        progress: ProgressCallback | None = None,
+        cache_progress: CacheProgressCallback | None = None,
+    ) -> DatasetHandle:
+        if handle.cache_complete:
+            return handle
+        notify = progress or (lambda _message: None)
+        report_cache = cache_progress or (lambda _progress: None)
+        pyreadstat = _import_pyreadstat()
+        variables = handle.metadata.variables
+        names = [variable.name for variable in variables]
+        columns = ", ".join(quote_identifier(name) for name in names)
+        placeholders = ", ".join("?" for _ in names)
+        insert_sql = f"INSERT INTO dataset ({columns}) VALUES ({placeholders})"
+        cached_rows = handle.cached_row_count
+        total_hint = handle.metadata.row_count
+        connection = sqlite3.connect(handle.database_path)
+        try:
+            reader = pyreadstat.read_file_in_chunks(
+                pyreadstat.read_sas7bdat,
+                str(handle.temporary_path),
+                chunksize=self.chunk_size,
+                offset=cached_rows,
+                output_format="dict",
+                user_missing=True,
+                disable_datetime_conversion=True,
+            )
+            for chunk, _meta in reader:
+                chunk_length = len(next(iter(chunk.values()), ()))
+                rows = zip(*(chunk[name] for name in names))
+                connection.executemany(
+                    insert_sql,
+                    ([normalize_value(value) for value in row] for row in rows),
+                )
+                cached_rows += chunk_length
+                connection.execute(
+                    "UPDATE cache_info SET cached_rows = ?", (cached_rows,)
+                )
+                connection.commit()
+                visible_total = max(total_hint, cached_rows)
+                notify(f"Caching rows… {cached_rows:,} / {visible_total:,}")
+                report_cache(CacheProgress(cached_rows, visible_total))
+            total_rows = cached_rows
+            connection.execute(
+                "UPDATE cache_info SET cached_rows = ?, total_rows = ?, complete = 1",
+                (total_rows, total_rows),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        complete = replace(
+            handle,
+            metadata=replace(handle.metadata, row_count=total_rows),
+            cached_row_count=total_rows,
+            cache_complete=True,
+        )
+        report_cache(CacheProgress(total_rows, total_rows, True))
+        return complete
+
+    def _read_metadata(
+        self, dataset_path: Path
+    ) -> tuple[tuple[VariableMetadata, ...], int | None]:
         pyreadstat = _import_pyreadstat()
         _data, meta = pyreadstat.read_sas7bdat(
             str(dataset_path),
@@ -103,26 +187,35 @@ class SasDatasetReader:
             )
         if not variables:
             raise ValueError("The dataset does not contain any variables.")
-        return tuple(variables)
+        raw_rows = getattr(meta, "number_rows", None)
+        reported_rows = int(raw_rows) if raw_rows is not None else None
+        return tuple(variables), reported_rows
 
-    def _build_cache(
+    def _read_first_chunk(self, dataset_path: Path) -> dict[str, object]:
+        pyreadstat = _import_pyreadstat()
+        data, _meta = pyreadstat.read_sas7bdat(
+            str(dataset_path),
+            row_limit=self.chunk_size,
+            output_format="dict",
+            user_missing=True,
+            disable_datetime_conversion=True,
+        )
+        return data
+
+    def _create_cache(
         self,
-        dataset_path: Path,
         database_path: Path,
         variables: tuple[VariableMetadata, ...],
-        progress: ProgressCallback,
+        first_chunk: dict[str, object],
+        total_rows: int | None,
     ) -> int:
-        pyreadstat = _import_pyreadstat()
-        partial = database_path.with_suffix(".sqlite.part")
-        if partial.exists():
-            partial.unlink()
-        connection = sqlite3.connect(partial)
-        row_count = 0
+        connection = sqlite3.connect(database_path)
         try:
-            connection.execute("PRAGMA journal_mode=OFF")
-            connection.execute("PRAGMA synchronous=OFF")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=NORMAL")
             definitions = ", ".join(
-                f"{quote_identifier(variable.name)} {'REAL' if variable.kind == 'numeric' else 'TEXT'}"
+                f"{quote_identifier(variable.name)} "
+                f"{'REAL' if variable.kind == 'numeric' else 'TEXT'}"
                 for variable in variables
             )
             connection.execute(
@@ -131,33 +224,28 @@ class SasDatasetReader:
             names = [variable.name for variable in variables]
             columns = ", ".join(quote_identifier(name) for name in names)
             placeholders = ", ".join("?" for _ in names)
-            insert_sql = f"INSERT INTO dataset ({columns}) VALUES ({placeholders})"
-            reader = pyreadstat.read_file_in_chunks(
-                pyreadstat.read_sas7bdat,
-                str(dataset_path),
-                chunksize=self.chunk_size,
-                output_format="dict",
-                user_missing=True,
-                disable_datetime_conversion=True,
+            rows = zip(*(first_chunk.get(name, ()) for name in names))
+            connection.executemany(
+                f"INSERT INTO dataset ({columns}) VALUES ({placeholders})",
+                ([normalize_value(value) for value in row] for row in rows),
             )
-            for chunk, _meta in reader:
-                first = next(iter(chunk.values()), ())
-                chunk_length = len(first)
-                rows = zip(*(chunk[name] for name in names))
-                connection.executemany(
-                    insert_sql,
-                    ([normalize_value(value) for value in row] for row in rows),
-                )
-                row_count += chunk_length
-                connection.commit()
-                progress(f"Caching rows… {row_count:,}")
+            cached_rows = int(
+                connection.execute("SELECT count(*) FROM dataset").fetchone()[0]
+            )
+            complete = int(
+                cached_rows < self.chunk_size
+                or (total_rows is not None and cached_rows >= total_rows)
+            )
             connection.execute(
-                "CREATE INDEX dataset_source_order ON dataset(_source_row)"
+                "CREATE TABLE cache_info "
+                "(cached_rows INTEGER NOT NULL, total_rows INTEGER, "
+                "complete INTEGER NOT NULL)"
             )
-            connection.execute("CREATE TABLE cache_info (row_count INTEGER NOT NULL)")
-            connection.execute("INSERT INTO cache_info VALUES (?)", (row_count,))
+            connection.execute(
+                "INSERT INTO cache_info VALUES (?, ?, ?)",
+                (cached_rows, total_rows, complete),
+            )
             connection.commit()
+            return cached_rows
         finally:
             connection.close()
-        os.replace(partial, database_path)
-        return row_count

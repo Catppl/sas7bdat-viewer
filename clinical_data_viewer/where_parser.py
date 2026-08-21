@@ -34,23 +34,54 @@ class Token:
 
 
 @dataclass(frozen=True, slots=True)
+class LiteralOperand:
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
+class VariableOperand:
+    name: str
+
+
+Operand = LiteralOperand | VariableOperand
+
+
+@dataclass(frozen=True, slots=True)
 class Comparison:
     variable: str
     operator: str
-    value: object
+    operand: Operand
+    prefix: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class InPredicate:
     variable: str
-    values: tuple[object, ...]
+    values: tuple[LiteralOperand, ...]
     negated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class ContainsPredicate:
     variable: str
-    value: object
+    operand: Operand
+    negated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BetweenPredicate:
+    variable: str
+    lower: Operand
+    upper: Operand
+    negated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LikePredicate:
+    variable: str
+    pattern: LiteralOperand
+    escape: str | None = None
+    negated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,10 +105,22 @@ Expression = (
     Comparison
     | InPredicate
     | ContainsPredicate
+    | BetweenPredicate
+    | LikePredicate
     | MissingPredicate
     | UnaryNot
     | BooleanExpression
 )
+
+
+COMPARISON_MNEMONICS = {
+    "EQ": "=",
+    "NE": "!=",
+    "GT": ">",
+    "LT": "<",
+    "GE": ">=",
+    "LE": "<=",
+}
 
 
 class Lexer:
@@ -112,7 +155,7 @@ class Lexer:
             elif char == ",":
                 self.position += 1
                 result.append(Token(TokenKind.COMMA, char, start))
-            elif char in "=!^><":
+            elif char in "=!^><~?:&|":
                 result.append(Token(TokenKind.OPERATOR, self._operator(), start))
             else:
                 raise WhereSyntaxError(
@@ -189,14 +232,30 @@ class Lexer:
 
     def _operator(self) -> str:
         start = self.position
+        char = self.text[self.position]
         self.position += 1
-        if self.position < len(self.text) and self.text[self.position] == "=":
+        if self.position < len(self.text):
+            pair = char + self.text[self.position]
+            if pair in {"!=", "^=", "~=", "<>", ">=", "<=", "||", "!!"}:
+                self.position += 1
+                if pair in {"||", "!!"}:
+                    raise WhereSyntaxError(
+                        "String concatenation is not supported in this version",
+                        self.text,
+                        start,
+                    )
+                operator = pair
+            else:
+                operator = char
+        else:
+            operator = char
+        if self.position < len(self.text) and self.text[self.position] == ":":
+            if operator not in {"=", "!=", "^=", "~=", "<>", ">", ">=", "<", "<="}:
+                raise WhereSyntaxError(
+                    "The ':' modifier requires a comparison operator", self.text, start
+                )
             self.position += 1
-        operator = self.text[start : self.position]
-        if operator not in {"=", "!=", "^=", ">", ">=", "<", "<="}:
-            raise WhereSyntaxError(
-                f"Unsupported operator {operator!r}", self.text, start
-            )
+            operator += ":"
         return operator
 
 
@@ -228,11 +287,22 @@ class Parser:
             and str(self.current.value).upper() == value
         )
 
+    def _operator(self, values: set[str]) -> bool:
+        return (
+            self.current.kind is TokenKind.OPERATOR
+            and str(self.current.value) in values
+        )
+
     def _consume_keyword(self, value: str) -> bool:
         if self._keyword(value):
             self._advance()
             return True
         return False
+
+    def _consume_operator(self, values: set[str]) -> str | None:
+        if self._operator(values):
+            return str(self._advance().value)
+        return None
 
     def _expect(self, kind: TokenKind, message: str) -> Token:
         if self.current.kind is not kind:
@@ -241,18 +311,18 @@ class Parser:
 
     def _or_expression(self) -> Expression:
         expression = self._and_expression()
-        while self._consume_keyword("OR"):
+        while self._consume_keyword("OR") or self._consume_operator({"|", "!"}):
             expression = BooleanExpression(expression, "OR", self._and_expression())
         return expression
 
     def _and_expression(self) -> Expression:
         expression = self._not_expression()
-        while self._consume_keyword("AND"):
+        while self._consume_keyword("AND") or self._consume_operator({"&"}):
             expression = BooleanExpression(expression, "AND", self._not_expression())
         return expression
 
     def _not_expression(self) -> Expression:
-        if self._consume_keyword("NOT"):
+        if self._consume_keyword("NOT") or self._consume_operator({"^", "~"}):
             return UnaryNot(self._not_expression())
         if self.current.kind is TokenKind.LPAREN:
             self._advance()
@@ -270,40 +340,115 @@ class Parser:
             self._expect(TokenKind.RPAREN, "Expected ')' after variable name")
             return MissingPredicate(str(variable))
 
-        variable_token = self._expect(
-            TokenKind.IDENTIFIER, "Expected a variable name or MISSING()"
+        variable = str(
+            self._expect(
+                TokenKind.IDENTIFIER, "Expected a variable name or MISSING()"
+            ).value
         )
-        variable = str(variable_token.value)
-        negated_in = self._consume_keyword("NOT")
+
+        if self._consume_keyword("IS"):
+            negated = self._consume_keyword("NOT")
+            if not (self._consume_keyword("NULL") or self._consume_keyword("MISSING")):
+                raise WhereSyntaxError(
+                    "Expected NULL or MISSING after IS",
+                    self.text,
+                    self.current.position,
+                )
+            expression: Expression = MissingPredicate(variable)
+            return UnaryNot(expression) if negated else expression
+
+        negated = self._consume_keyword("NOT")
         if self._consume_keyword("IN"):
-            return self._in_predicate(variable, negated_in)
-        if negated_in:
+            return self._in_predicate(variable, negated)
+        if self._consume_keyword("BETWEEN"):
+            lower = self._operand()
+            if not self._consume_keyword("AND"):
+                raise WhereSyntaxError(
+                    "Expected AND inside BETWEEN", self.text, self.current.position
+                )
+            return BetweenPredicate(variable, lower, self._operand(), negated)
+        if self._consume_keyword("LIKE"):
+            pattern = self._literal_operand("LIKE requires a quoted string pattern")
+            if not isinstance(pattern.value, str):
+                raise WhereSyntaxError(
+                    "LIKE requires a quoted string pattern",
+                    self.text,
+                    self.current.position,
+                )
+            escape = None
+            if self._consume_keyword("ESCAPE"):
+                escape_operand = self._literal_operand(
+                    "ESCAPE requires one quoted character"
+                )
+                if (
+                    not isinstance(escape_operand.value, str)
+                    or len(escape_operand.value) != 1
+                ):
+                    raise WhereSyntaxError(
+                        "ESCAPE requires one quoted character",
+                        self.text,
+                        self.current.position,
+                    )
+                escape = escape_operand.value
+            return LikePredicate(variable, pattern, escape, negated)
+        if self._consume_keyword("CONTAINS") or self._consume_operator({"?"}):
+            return ContainsPredicate(variable, self._operand(), negated)
+        if negated:
             raise WhereSyntaxError(
-                "Expected IN after NOT", self.text, self.current.position
+                "Expected IN, BETWEEN, LIKE, CONTAINS, or ? after NOT",
+                self.text,
+                self.current.position,
             )
-        if self._consume_keyword("CONTAINS"):
-            return ContainsPredicate(variable, self._literal())
-        operator = self._expect(
-            TokenKind.OPERATOR,
-            "Expected a comparison operator, IN, NOT IN, or CONTAINS",
+
+        operator, prefix = self._comparison_operator()
+        return Comparison(variable, operator, self._operand(), prefix)
+
+    def _comparison_operator(self) -> tuple[str, bool]:
+        if self.current.kind is TokenKind.IDENTIFIER:
+            mnemonic = str(self.current.value).upper()
+            if mnemonic in COMPARISON_MNEMONICS:
+                self._advance()
+                prefix = bool(self._consume_operator({":"}))
+                return COMPARISON_MNEMONICS[mnemonic], prefix
+        if self.current.kind is TokenKind.OPERATOR:
+            raw = str(self.current.value)
+            base = raw.removesuffix(":")
+            if base in {"=", "!=", "^=", "~=", "<>", ">", ">=", "<", "<="}:
+                self._advance()
+                normalized = "!=" if base in {"^=", "~=", "<>"} else base
+                return normalized, raw.endswith(":")
+        raise WhereSyntaxError(
+            "Expected a comparison operator, IN, BETWEEN, LIKE, CONTAINS, or ?",
+            self.text,
+            self.current.position,
         )
-        return Comparison(variable, str(operator.value), self._literal())
 
     def _in_predicate(self, variable: str, negated: bool) -> InPredicate:
         self._expect(TokenKind.LPAREN, "Expected '(' after IN")
-        values = [self._literal()]
+        values = [self._literal_operand("IN values must be quoted strings or numbers")]
         while self.current.kind is TokenKind.COMMA:
             self._advance()
-            values.append(self._literal())
+            values.append(
+                self._literal_operand("IN values must be quoted strings or numbers")
+            )
         self._expect(TokenKind.RPAREN, "Expected ')' after IN values")
         return InPredicate(variable, tuple(values), negated)
 
-    def _literal(self) -> object:
+    def _operand(self) -> Operand:
         if self.current.kind in {TokenKind.STRING, TokenKind.NUMBER}:
-            return self._advance().value
+            return LiteralOperand(self._advance().value)
+        if self.current.kind is TokenKind.IDENTIFIER:
+            return VariableOperand(str(self._advance().value))
         raise WhereSyntaxError(
-            "Expected a quoted string or number", self.text, self.current.position
+            "Expected a quoted string, number, or variable name",
+            self.text,
+            self.current.position,
         )
+
+    def _literal_operand(self, message: str) -> LiteralOperand:
+        if self.current.kind in {TokenKind.STRING, TokenKind.NUMBER}:
+            return LiteralOperand(self._advance().value)
+        raise WhereSyntaxError(message, self.text, self.current.position)
 
 
 def parse_where(text: str) -> Expression:

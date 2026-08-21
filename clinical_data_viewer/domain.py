@@ -26,6 +26,8 @@ class DatasetHandle:
     temporary_path: Path
     database_path: Path
     metadata: DatasetMetadata
+    cached_row_count: int = 0
+    cache_complete: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,3 +40,16 @@ class SortSpec:
 class PageResult:
     rows: tuple[tuple[object, ...], ...]
     filtered_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CacheProgress:
+    cached_rows: int
+    total_rows: int
+    complete: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class FindResult:
+    row_index: int
+    column_name: str

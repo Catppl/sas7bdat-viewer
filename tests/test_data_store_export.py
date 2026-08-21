@@ -25,15 +25,18 @@ class DataStoreExportTests(unittest.TestCase):
         self.database = self.root / "dataset.sqlite"
         with closing(sqlite3.connect(self.database)) as connection:
             connection.execute(
-                'CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "USUBJID" TEXT, "AESER" TEXT, "AGE" REAL)'
+                'CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "USUBJID" TEXT, '
+                '"AESER" TEXT, "AGE" REAL, "AESTDTC" TEXT, "AEENDTC" TEXT, '
+                '"ARMCD" TEXT)'
             )
             connection.executemany(
-                'INSERT INTO dataset("USUBJID", "AESER", "AGE") VALUES (?, ?, ?)',
+                'INSERT INTO dataset("USUBJID", "AESER", "AGE", "AESTDTC", '
+                '"AEENDTC", "ARMCD") VALUES (?, ?, ?, ?, ?, ?)',
                 [
-                    ("101-001", "Y", 45),
-                    ("101-002", "N", 51),
-                    ("101-003", "Y", 30),
-                    ("101-004", "Y", 60),
+                    ("101-001", "Y", 45, "2024-01-01", "2024-01-02", "PKO1"),
+                    ("101-002", "N", 51, "2024-02-02", "2024-02-01", "pko"),
+                    ("101-003", "Y", 30, "2024-03-01", "2024-03-01", "PK2"),
+                    ("101-004", "Y", 60, "2024-04-01", "2024-04-03", "XX"),
                 ],
             )
             connection.commit()
@@ -44,6 +47,9 @@ class DataStoreExportTests(unittest.TestCase):
                 VariableMetadata("USUBJID", kind="character"),
                 VariableMetadata("AESER", kind="character"),
                 VariableMetadata("AGE", kind="numeric"),
+                VariableMetadata("AESTDTC", kind="character"),
+                VariableMetadata("AEENDTC", kind="character"),
+                VariableMetadata("ARMCD", kind="character"),
             ),
         )
         self.compiled = FilterEngine(self.metadata.variables).compile(
@@ -85,6 +91,47 @@ class DataStoreExportTests(unittest.TestCase):
         self.assertEqual(
             rows, [["USUBJID", "AGE"], ["101-004", "60.0"], ["101-001", "45.0"]]
         )
+
+    def test_find_uses_current_filter_sort_and_visible_columns(self) -> None:
+        result = DataStore().find_text(
+            self.database,
+            self.metadata,
+            ["USUBJID", "AGE"],
+            self.compiled,
+            SortSpec("AGE", ascending=False),
+            "101-001",
+            -1,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.row_index, 1)
+        self.assertEqual(result.column_name, "USUBJID")
+
+    def test_column_comparison_and_contains_are_executed_case_sensitively(self) -> None:
+        compiled = FilterEngine(self.metadata.variables).compile(
+            'AESTDTC > AEENDTC & ARMCD ? "pko"'
+        )
+        result = DataStore().query_page(
+            self.database,
+            self.metadata,
+            ["USUBJID"],
+            compiled,
+            None,
+            0,
+            500,
+        )
+        self.assertEqual(result.rows, (("101-002",),))
+
+        upper_case = FilterEngine(self.metadata.variables).compile('ARMCD LIKE "PK%"')
+        result = DataStore().query_page(
+            self.database,
+            self.metadata,
+            ["USUBJID"],
+            upper_case,
+            None,
+            0,
+            500,
+        )
+        self.assertEqual(result.rows, (("101-001",), ("101-003",)))
 
 
 if __name__ == "__main__":

@@ -39,6 +39,7 @@ class CsvExporter:
                 ) as connection,
                 temporary.open("w", encoding="utf-8-sig", newline="") as stream,
             ):
+                connection.execute("PRAGMA case_sensitive_like=ON")
                 writer = csv.writer(stream, lineterminator="\n")
                 writer.writerow(selected)
                 cursor = connection.execute(sql, compiled_filter.parameters)

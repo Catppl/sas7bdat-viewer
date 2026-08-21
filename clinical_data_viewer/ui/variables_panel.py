@@ -56,7 +56,7 @@ class VariablesPanel(QWidget):
         layout.addWidget(self.displayed_label)
         self.select_all = QCheckBox("Select All")
         self.select_all.setChecked(True)
-        self.select_all.stateChanged.connect(self._set_all)
+        self.select_all.clicked.connect(self._toggle_all_selection)
         layout.addWidget(self.select_all)
         self.displayed_tree = QTreeWidget()
         self.displayed_tree.setHeaderHidden(True)
@@ -172,15 +172,15 @@ class VariablesPanel(QWidget):
     def visible_variables(self) -> list[str]:
         return list(self._visible)
 
-    def _set_all(self, state: int) -> None:
-        if self._updating or not self._metadata or state == Qt.PartiallyChecked:
+    def _toggle_all_selection(self, _checked: bool) -> None:
+        if self._updating or not self._metadata:
             return
-        if state == Qt.Checked:
-            self._visible = [variable.name for variable in self._metadata.variables]
-        else:
-            self._visible = (
-                [self._metadata.variables[0].name] if self._metadata.variables else []
-            )
+        total = len(self._metadata.variables)
+        self._visible = (
+            []
+            if total and len(self._visible) == total
+            else [variable.name for variable in self._metadata.variables]
+        )
         self._rebuild()
         self.visibility_changed.emit(self.visible_variables())
 
@@ -188,11 +188,6 @@ class VariablesPanel(QWidget):
         if self._updating or column != 0 or item.checkState(0) == Qt.Checked:
             return
         name = item.data(0, Qt.UserRole)
-        if len(self._visible) == 1:
-            self._updating = True
-            item.setCheckState(0, Qt.Checked)
-            self._updating = False
-            return
         self._visible = [entry for entry in self._visible if entry != name]
         self.visibility_changed.emit(self.visible_variables())
         QTimer.singleShot(0, self._rebuild)
@@ -204,11 +199,6 @@ class VariablesPanel(QWidget):
         if item.checkState(0) == Qt.Checked and name not in self._visible:
             self._visible.append(name)
         elif item.checkState(0) == Qt.Unchecked and name in self._visible:
-            if len(self._visible) == 1:
-                self._updating = True
-                item.setCheckState(0, Qt.Checked)
-                self._updating = False
-                return
             self._visible.remove(name)
         self.visibility_changed.emit(self.visible_variables())
         QTimer.singleShot(0, self._rebuild)

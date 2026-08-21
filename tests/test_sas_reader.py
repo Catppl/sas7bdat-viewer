@@ -27,17 +27,48 @@ class FakePyreadstat:
                 readstat_variable_types={"USUBJID": "string", "AGE": "double"},
                 variable_storage_width={"USUBJID": 20, "AGE": 8},
                 original_variable_types={"USUBJID": "$20.", "AGE": "8."},
+                number_rows=3,
             )
+        if kwargs.get("row_limit"):
+            return {
+                "USUBJID": ["101-001", "101-002"],
+                "AGE": [45, 52],
+            }, None
         raise AssertionError("Unexpected direct data read")
 
     def read_file_in_chunks(self, reader, dataset, **kwargs):
         path = Path(dataset).resolve()
         self.read_paths.append(path)
-        yield {"USUBJID": ["101-001", "101-002"], "AGE": [45, 52]}, None
-        yield {"USUBJID": ["101-003"], "AGE": [30]}, None
+        subjects = ["101-001", "101-002", "101-003"]
+        ages = [45, 52, 30]
+        offset = kwargs.get("offset", 0)
+        chunk_size = kwargs.get("chunksize", len(subjects))
+        for start in range(offset, len(subjects), chunk_size):
+            end = start + chunk_size
+            yield {"USUBJID": subjects[start:end], "AGE": ages[start:end]}, None
 
 
 class SasReaderTests(unittest.TestCase):
+    def test_initial_load_exposes_first_chunk_before_background_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "adsl.sas7bdat"
+            source.write_bytes(b"sas fixture placeholder")
+            manager = TempManager(root / "temp")
+            fake = FakePyreadstat(source)
+            with patch(
+                "clinical_data_viewer.sas_reader._import_pyreadstat", return_value=fake
+            ):
+                reader = SasDatasetReader(manager, chunk_size=2)
+                initial = reader.load_initial(source)
+                self.assertFalse(initial.cache_complete)
+                self.assertEqual(initial.cached_row_count, 2)
+                complete = reader.continue_cache(initial)
+            self.assertTrue(complete.cache_complete)
+            self.assertEqual(complete.cached_row_count, 3)
+            self.assertEqual(complete.metadata.row_count, 3)
+            manager.cleanup()
+
     def test_reader_uses_only_temp_copy_after_copy_and_builds_cache(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

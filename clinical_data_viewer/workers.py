@@ -12,6 +12,7 @@ class WorkerSignals(QObject):
     result = Signal(object)
     error = Signal(str, str)
     progress = Signal(str)
+    progress_data = Signal(object)
     finished = Signal()
 
 
@@ -40,6 +41,11 @@ class Worker(QRunnable):
         if self.cancelled:
             raise WorkerCancelled()
         self.signals.progress.emit(message)
+
+    def report_data(self, value: object) -> None:
+        if self.cancelled:
+            raise WorkerCancelled()
+        self.signals.progress_data.emit(value)
 
     @Slot()
     def run(self) -> None:
