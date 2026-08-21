@@ -468,7 +468,7 @@ class MainWindow(QMainWindow):
         if tab:
             tab.set_visible_columns(columns)
             self._refresh_status(tab)
-            self._sync_active_tab()
+            self._sync_dataset_actions(tab)
 
     def _locate_variable(self, variable: str) -> None:
         tab = self.current_dataset_tab()
@@ -610,6 +610,13 @@ class MainWindow(QMainWindow):
 
     def _sync_active_tab(self, _index: int | None = None) -> None:
         tab = self.current_dataset_tab()
+        self._sync_dataset_actions(tab)
+        self.variables_panel.set_dataset(
+            tab.handle.metadata, tab.visible_columns
+        ) if tab else self.variables_panel.set_dataset(None)
+        self._refresh_status(tab)
+
+    def _sync_dataset_actions(self, tab: DatasetTab | None) -> None:
         enabled = tab is not None
         self.reload_action.setEnabled(
             enabled
@@ -621,10 +628,6 @@ class MainWindow(QMainWindow):
         )
         self.clear_action.setEnabled(enabled and tab.cache_complete)
         self.close_tab_action.setEnabled(self.tabs.count() > 0)
-        self.variables_panel.set_dataset(
-            tab.handle.metadata, tab.visible_columns
-        ) if tab else self.variables_panel.set_dataset(None)
-        self._refresh_status(tab)
 
     def _refresh_status(self, tab: DatasetTab | None) -> None:
         if not tab:

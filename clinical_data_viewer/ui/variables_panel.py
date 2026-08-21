@@ -27,6 +27,7 @@ class VariablesPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("variablesPanel")
         self._updating = False
+        self._rebuild_pending = False
         self._metadata: DatasetMetadata | None = None
         self._visible: list[str] = []
         self._search_text = ""
@@ -105,6 +106,7 @@ class VariablesPanel(QWidget):
         self._rebuild()
 
     def _rebuild(self) -> None:
+        self._rebuild_pending = False
         self._updating = True
         self.displayed_tree.clear()
         self.all_tree.clear()
@@ -190,7 +192,7 @@ class VariablesPanel(QWidget):
         name = item.data(0, Qt.UserRole)
         self._visible = [entry for entry in self._visible if entry != name]
         self.visibility_changed.emit(self.visible_variables())
-        QTimer.singleShot(0, self._rebuild)
+        self._schedule_rebuild()
 
     def _all_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._updating or column != 0:
@@ -201,6 +203,12 @@ class VariablesPanel(QWidget):
         elif item.checkState(0) == Qt.Unchecked and name in self._visible:
             self._visible.remove(name)
         self.visibility_changed.emit(self.visible_variables())
+        self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        if self._rebuild_pending:
+            return
+        self._rebuild_pending = True
         QTimer.singleShot(0, self._rebuild)
 
     def _toggle_all_variables(self, checked: bool) -> None:
