@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 
@@ -278,8 +279,11 @@ class MainWindow(QMainWindow):
             return
         self.settings.last_open_directory = str(Path(files[0]).parent)
         self.settings.save()
-        for value in files:
-            self._open_path(Path(value))
+        self.open_paths(Path(value) for value in files)
+
+    def open_paths(self, paths: Iterable[Path]) -> None:
+        for source_path in paths:
+            self._open_path(Path(source_path))
 
     def _open_path(self, source_path: Path) -> None:
         loading = LoadingPage(source_path)
@@ -495,6 +499,10 @@ class MainWindow(QMainWindow):
     def _apply_filter(self, tab: DatasetTab, where_text: str) -> None:
         if not tab.cache_complete or not tab.visible_columns:
             return
+        if tab.column_filters and not tab.where_editor_is_dirty():
+            tab.reapply_current_filter(add_history=True)
+            self._refresh_status(tab)
+            return
         try:
             compiled = FilterEngine(tab.handle.metadata.variables).compile(where_text)
         except ValueError as error:
@@ -539,8 +547,23 @@ class MainWindow(QMainWindow):
         )
         if variable is None:
             return
+        editor_was_dirty = tab.where_editor_is_dirty()
+        editor_text = tab.where_editor.toPlainText()
+        promoted_filter = None
+        if editor_was_dirty:
+            try:
+                promoted_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                    editor_text
+                )
+            except ValueError as error:
+                QMessageBox.warning(self, "Invalid WHERE Condition", str(error))
+                return
         generation = tab.generation
-        context_filter = tab.filter_context_without(variable_name)
+        context_filter = (
+            promoted_filter
+            if promoted_filter is not None
+            else tab.filter_context_without(variable_name)
+        )
         self.task_status.setText(f"Loading values for {variable_name}…")
 
         def completed(values) -> None:
@@ -550,6 +573,11 @@ class MainWindow(QMainWindow):
                 or tab is not self.current_dataset_tab()
             ):
                 return
+            if editor_was_dirty and tab.where_editor.toPlainText() != editor_text:
+                self.task_status.setText(
+                    "WHERE changed while values were loading; reopen the column filter."
+                )
+                return
             dialog = ColumnFilterDialog(
                 variable,
                 values,
@@ -557,6 +585,8 @@ class MainWindow(QMainWindow):
                 self,
             )
             if dialog.exec():
+                if promoted_filter is not None:
+                    tab.apply_filter(promoted_filter, editor_text, add_history=False)
                 tab.set_column_filter(variable_name, dialog.result_spec)
                 self._refresh_status(tab)
 
@@ -716,6 +746,7 @@ class MainWindow(QMainWindow):
         old_directory = tab.handle.temporary_path.parent
         preserved_visible = list(tab.visible_columns)
         editor_text = tab.where_editor.toPlainText()
+        editor_was_dirty = tab.where_editor_is_dirty()
         applied_where = tab.applied_where
         preserved_column_filters = dict(tab.column_filters)
         tab.reload_in_progress = True
@@ -758,6 +789,8 @@ class MainWindow(QMainWindow):
                 tab.apply_filter(compiled, applied_where, add_history=False)
                 tab.applied_where = applied_where
                 tab.restore_column_filters(preserved_column_filters)
+                if editor_was_dirty:
+                    tab.where_editor.setPlainText(editor_text)
                 self._refresh_status(tab)
 
             if handle.cache_complete:

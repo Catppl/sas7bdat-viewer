@@ -8,7 +8,12 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from clinical_data_viewer.column_filters import ColumnFilterSpec, combine_filters
+from clinical_data_viewer.column_filters import (
+    ColumnFilterSpec,
+    combine_filters,
+    compose_where_text,
+    render_column_filter,
+)
 from clinical_data_viewer.csv_exporter import CsvExporter
 from clinical_data_viewer.data_store import DataStore
 from clinical_data_viewer.domain import (
@@ -98,6 +103,69 @@ class AnalysisAndColumnFilterTests(unittest.TestCase):
             50,
         )
         self.assertEqual(result.rows, (("A",), ("A",), ("C",), (None,)))
+
+    def test_column_filters_render_as_equivalent_sas_like_where(self) -> None:
+        manual_text = 'FLAG = "Y"'
+        filters = {
+            "AVAL": ColumnFilterSpec(
+                "AVAL", "include", (1.0, 4.0), include_missing=False
+            ),
+            "ARMCD": ColumnFilterSpec("ARMCD", "exclude", ("B",), include_missing=True),
+        }
+        text = compose_where_text(manual_text, filters, self.metadata.variables)
+        self.assertEqual(
+            text,
+            '(FLAG = "Y") AND (AVAL IN (1, 4)) AND '
+            '((ARMCD NOT IN ("B") OR MISSING(ARMCD)))',
+        )
+        rendered = FilterEngine(self.metadata.variables).compile(text)
+        combined = combine_filters(
+            FilterEngine(self.metadata.variables).compile(manual_text),
+            filters,
+            self.metadata.variables,
+        )
+        rendered_rows = (
+            DataStore()
+            .query_page(
+                self.database,
+                self.metadata,
+                ["USUBJID", "ARMCD", "AVAL"],
+                rendered,
+                None,
+                0,
+                50,
+            )
+            .rows
+        )
+        combined_rows = (
+            DataStore()
+            .query_page(
+                self.database,
+                self.metadata,
+                ["USUBJID", "ARMCD", "AVAL"],
+                combined,
+                None,
+                0,
+                50,
+            )
+            .rows
+        )
+        self.assertEqual(rendered_rows, combined_rows)
+
+    def test_renderer_quotes_character_values_and_supports_conditions(self) -> None:
+        variable = VariableMetadata("ARMCD", kind="character")
+        self.assertEqual(
+            render_column_filter(
+                ColumnFilterSpec("ARMCD", "include", ('A"B',), False), variable
+            ),
+            'ARMCD IN ("A""B")',
+        )
+        self.assertEqual(
+            render_column_filter(
+                ColumnFilterSpec("ARMCD", "contains", lower="PKO"), variable
+            ),
+            'ARMCD CONTAINS "PKO"',
+        )
 
     def test_export_uses_combined_filter_visible_columns_and_sort(self) -> None:
         combined = combine_filters(

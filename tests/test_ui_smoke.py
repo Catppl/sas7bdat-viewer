@@ -23,6 +23,7 @@ class UiSmokeTests(unittest.TestCase):
             DatasetMetadata,
             VariableMetadata,
         )
+        from clinical_data_viewer.filter_engine import FilterEngine
         from clinical_data_viewer.filter_history import FilterHistory
         from clinical_data_viewer.resources import resource_path
         from clinical_data_viewer.settings import AppSettings
@@ -131,6 +132,10 @@ class UiSmokeTests(unittest.TestCase):
                 numeric_tab.filter_frame.isVisible() or not numeric_tab.isVisible()
             )
             self.assertIn('"PARAMCD" IN (?)', numeric_tab.compiled_filter.sql)
+            self.assertEqual(
+                numeric_tab.where_editor.toPlainText(), 'PARAMCD IN ("ALT")'
+            )
+            self.assertEqual(numeric_tab.pending_history_text, 'PARAMCD IN ("ALT")')
             numeric_tab.resize(650, 420)
             numeric_tab.show()
             application.processEvents()
@@ -173,8 +178,36 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(numeric_tab.table.selected_row_numbers(), [0, 2])
             numeric_tab.table._context_index = numeric_tab.model.index(0, 2)
             self.assertTrue(numeric_tab.table._context_variable_is_numeric())
-            numeric_tab.show_comparison_highlights(("AVAL",))
+            numeric_tab.model.set_page(
+                0,
+                (
+                    ("101", "ALT", 1.0),
+                    ("102", "ALT", 2.0),
+                    ("103", "ALT", 3.0),
+                ),
+                3,
+            )
+            numeric_tab.show_comparison_highlights(("AVAL",), (0, 2))
             self.assertEqual(numeric_tab.model.highlighted_columns, {"AVAL"})
+            self.assertEqual(numeric_tab.model.highlighted_rows, {0, 2})
+            self.assertIsNotNone(
+                numeric_tab.model.data(numeric_tab.model.index(0, 2), Qt.BackgroundRole)
+            )
+            self.assertIsNone(
+                numeric_tab.model.data(numeric_tab.model.index(1, 2), Qt.BackgroundRole)
+            )
+            self.assertIsNotNone(
+                numeric_tab.model.data(numeric_tab.model.index(2, 2), Qt.BackgroundRole)
+            )
+            numeric_tab.where_editor.setPlainText("AVAL > 1")
+            self.assertTrue(numeric_tab.where_editor_is_dirty())
+            numeric_tab.apply_filter(
+                FilterEngine(numeric_metadata.variables).compile("AVAL > 1"),
+                "AVAL > 1",
+                add_history=True,
+            )
+            self.assertEqual(numeric_tab.column_filters, {})
+            self.assertEqual(numeric_tab.where_editor.toPlainText(), "AVAL > 1")
             numeric_tab.close()
             window.close()
             application.processEvents()

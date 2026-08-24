@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..column_filters import ColumnFilterSpec, combine_filters
+from ..column_filters import ColumnFilterSpec, combine_filters, compose_where_text
 from ..domain import DatasetHandle, FindResult, SortSpec
 from ..filter_engine import CompiledFilter
 from ..table_model import DatasetTableModel
@@ -176,6 +176,7 @@ class DatasetTab(QWidget):
         self.column_filters: dict[str, ColumnFilterSpec] = {}
         self.compiled_filter = CompiledFilter("", ())
         self.applied_where = ""
+        self._last_synced_where_text = ""
         self.pending_history_text = ""
         self.generation = 0
         self.recount_next = False
@@ -365,12 +366,20 @@ class DatasetTab(QWidget):
     def apply_filter(
         self, compiled: CompiledFilter, where_text: str, *, add_history: bool
     ) -> None:
+        self.column_filters.clear()
         self.where_compiled_filter = compiled
         self._rebuild_combined_filter()
         self.applied_where = where_text.strip()
-        self.pending_history_text = (
-            self.applied_where if add_history and self.applied_where else ""
-        )
+        self._sync_where_editor()
+        self.pending_history_text = self.current_where_text() if add_history else ""
+        self.generation += 1
+        self.recount_next = True
+        self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+        self._rebuild_filter_chips()
+        self.analysis_invalidated.emit()
+
+    def reapply_current_filter(self, *, add_history: bool) -> None:
+        self.pending_history_text = self.current_where_text() if add_history else ""
         self.generation += 1
         self.recount_next = True
         self.model.reset_query(filtered_count=self.handle.metadata.row_count)
@@ -386,6 +395,7 @@ class DatasetTab(QWidget):
         self.generation += 1
         self.recount_next = False
         self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+        self._sync_where_editor()
         self._rebuild_filter_chips()
         self.analysis_invalidated.emit()
 
@@ -575,7 +585,13 @@ class DatasetTab(QWidget):
             self.where_compiled_filter, filters, self.handle.metadata.variables
         )
 
-    def set_column_filter(self, variable: str, spec: ColumnFilterSpec | None) -> None:
+    def set_column_filter(
+        self,
+        variable: str,
+        spec: ColumnFilterSpec | None,
+        *,
+        add_history: bool = True,
+    ) -> None:
         if spec is None or (
             spec.mode == "exclude" and not spec.values and spec.include_missing
         ):
@@ -583,6 +599,8 @@ class DatasetTab(QWidget):
         else:
             self.column_filters[variable] = spec
         self._rebuild_combined_filter()
+        self._sync_where_editor()
+        self.pending_history_text = self.current_where_text() if add_history else ""
         self.generation += 1
         self.recount_next = True
         self.model.reset_query(filtered_count=self.handle.metadata.row_count)
@@ -593,11 +611,13 @@ class DatasetTab(QWidget):
         if variable in self.column_filters:
             self.set_column_filter(variable, None)
 
-    def clear_column_filters(self) -> None:
+    def clear_column_filters(self, *, add_history: bool = True) -> None:
         if not self.column_filters:
             return
         self.column_filters.clear()
         self._rebuild_combined_filter()
+        self._sync_where_editor()
+        self.pending_history_text = self.current_where_text() if add_history else ""
         self.generation += 1
         self.recount_next = True
         self.model.reset_query(filtered_count=self.handle.metadata.row_count)
@@ -612,6 +632,7 @@ class DatasetTab(QWidget):
             name: spec for name, spec in filters.items() if name in known
         }
         self._rebuild_combined_filter()
+        self._sync_where_editor()
         self._rebuild_filter_chips()
         if reset_query:
             self.generation += 1
@@ -625,6 +646,21 @@ class DatasetTab(QWidget):
             self.column_filters,
             self.handle.metadata.variables,
         )
+
+    def current_where_text(self) -> str:
+        return compose_where_text(
+            self.applied_where,
+            self.column_filters,
+            self.handle.metadata.variables,
+        )
+
+    def where_editor_is_dirty(self) -> bool:
+        return self.where_editor.toPlainText().strip() != self._last_synced_where_text
+
+    def _sync_where_editor(self) -> None:
+        text = self.current_where_text()
+        self.where_editor.setPlainText(text)
+        self._last_synced_where_text = text
 
     def _rebuild_filter_chips(self) -> None:
         while self.filter_layout.count() > 3:
@@ -652,22 +688,18 @@ class DatasetTab(QWidget):
         self.filter_header.set_filtered_sections(sections)
 
     def filter_description(self) -> str:
-        parts = []
-        if self.applied_where:
-            parts.append(f"WHERE {self.applied_where}")
-        if self.column_filters:
-            parts.append("Column filters: " + ", ".join(self.column_filters))
-        return "; ".join(parts) if parts else "All rows"
+        text = self.current_where_text()
+        return f"WHERE {text}" if text else "All rows"
 
     def show_comparison_highlights(
         self, variables: tuple[str, ...], rows: tuple[int, ...] = ()
     ) -> None:
         self._compared_rows = rows
-        self.model.set_highlighted_columns(set(variables))
+        self.model.set_highlighted_cells(set(rows), set(variables))
 
     def clear_comparison_highlights(self) -> None:
         self._compared_rows = None
-        self.model.set_highlighted_columns(set())
+        self.model.clear_highlights()
 
     def _selection_changed(self) -> None:
         if self._compared_rows is None:

@@ -37,6 +37,7 @@ class DatasetTableModel(QAbstractTableModel):
             variable.name: variable for variable in metadata.variables
         }
         self.highlighted_columns: set[str] = set()
+        self.highlighted_rows: set[int] = set()
 
     def rowCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
         return 0 if parent.isValid() else self.filtered_count
@@ -70,6 +71,7 @@ class DatasetTableModel(QAbstractTableModel):
             return "Missing" if value is None else str(value)
         if (
             role == Qt.BackgroundRole
+            and index.row() in self.highlighted_rows
             and self.columns[index.column()] in self.highlighted_columns
         ):
             return QColor("#fff2b2")
@@ -92,8 +94,6 @@ class DatasetTableModel(QAbstractTableModel):
                 if variable.format:
                     details.append(f"Format: {variable.format}")
                 return "\n".join(details)
-            if role == Qt.BackgroundRole and variable.name in self.highlighted_columns:
-                return QColor("#ffe699")
         if orientation == Qt.Vertical and role == Qt.DisplayRole:
             return section + 1
         return None
@@ -184,17 +184,33 @@ class DatasetTableModel(QAbstractTableModel):
     def load_failed(self, offset: int) -> None:
         self._loading_pages.discard(offset)
 
-    def set_highlighted_columns(self, columns: set[str]) -> None:
-        if columns == self.highlighted_columns:
+    def set_highlighted_cells(self, rows: set[int], columns: set[str]) -> None:
+        rows = {row for row in rows if 0 <= row < self.filtered_count}
+        if columns == self.highlighted_columns and rows == self.highlighted_rows:
             return
+        changed_rows = self.highlighted_rows | rows
         self.highlighted_columns = set(columns)
-        if self.filtered_count and self.columns:
-            self.dataChanged.emit(
-                self.index(0, 0),
-                self.index(self.filtered_count - 1, len(self.columns) - 1),
-                [Qt.BackgroundRole],
-            )
-        self.headerDataChanged.emit(Qt.Horizontal, 0, max(0, len(self.columns) - 1))
+        self.highlighted_rows = rows
+        if self.columns:
+            for row in sorted(changed_rows):
+                self.dataChanged.emit(
+                    self.index(row, 0),
+                    self.index(row, len(self.columns) - 1),
+                    [Qt.BackgroundRole],
+                )
+
+    def clear_highlights(self) -> None:
+        if self.highlighted_rows or self.highlighted_columns:
+            changed_rows = set(self.highlighted_rows)
+            self.highlighted_rows.clear()
+            self.highlighted_columns.clear()
+            for row in sorted(changed_rows):
+                if self.columns and row < self.filtered_count:
+                    self.dataChanged.emit(
+                        self.index(row, 0),
+                        self.index(row, len(self.columns) - 1),
+                        [Qt.BackgroundRole],
+                    )
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
         if not 0 <= column < len(self.columns):

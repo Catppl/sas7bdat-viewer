@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -149,7 +152,27 @@ QProgressBar::chunk { background: #1684d8; }
 """
 
 
+def dataset_paths_from_arguments(arguments: Sequence[str]) -> tuple[Path, ...]:
+    """Return dataset paths supplied by a shell or Windows file association."""
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for argument in arguments:
+        value = argument.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        candidate = Path(value).expanduser()
+        if candidate.suffix.lower() != ".sas7bdat":
+            continue
+        resolved = candidate.resolve(strict=False)
+        key = str(resolved).casefold() if sys.platform == "win32" else str(resolved)
+        if key not in seen:
+            seen.add(key)
+            paths.append(resolved)
+    return tuple(paths)
+
+
 def main() -> int:
+    startup_paths = dataset_paths_from_arguments(sys.argv[1:])
     application = QApplication(sys.argv)
     application.setApplicationName("SASDataViewer")
     application.setOrganizationName("ClinicalDataViewer")
@@ -164,6 +187,8 @@ def main() -> int:
     )
     window = MainWindow(settings, temp_manager, history)
     window.show()
+    if startup_paths:
+        QTimer.singleShot(0, lambda: window.open_paths(startup_paths))
     return application.exec()
 
 

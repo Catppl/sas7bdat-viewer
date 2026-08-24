@@ -14,12 +14,12 @@
 - 比较符支持 `=`/`EQ`、`!=`/`^=`/`~=`/`<>`/`NE`、`>`/`GT`、`>=`/`GE`、`<`/`LT`、`<=`/`LE`，以及字符前缀修饰符 `=:` 等。
 - 逻辑与条件支持 `AND`/`&`、`OR`/`|`/`!`、`NOT`/`^`/`~`、`IN`、`NOT IN`、`BETWEEN ... AND ...`、`CONTAINS`/`?`、`LIKE`、`IS NULL`、`IS MISSING`、`MISSING()` 和括号。
 - `Ctrl+Enter` 或 Apply 执行；语法/类型/变量错误会指出原因和位置，并保留输入。
-- 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。
+- 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。列头互动筛选会同步生成可编辑的 SAS-like WHERE，并与手写条件作为一条完整条件保存。
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。
-- 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；蓝色筛选标签可逐列清除。
+- 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
 - 数值列右键提供 `PROC MEANS`；统计基于“手写 WHERE + 列头筛选”后的完整结果，后台计算固定 `USUBJID` 受试者数、非缺失 N、NMISS、Mean、SD、SE、Median、Q1、Q3、Min、Max 和均值 Student-t CI。
 - `Tools > Analysis` 可随时显示/隐藏右侧 Analysis 面板；右键 `Settings…` 或 Tools > Settings 可设置 PROC MEANS 显示统计量、0–10 位小数和置信水平。显示采用 `ROUND_HALF_UP` 四舍五入，不改变原值；非数值列的 PROC MEANS 菜单自动禁用。
-- 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，在主表用浅黄色标出差异列，并在右侧 Analysis > Row Comparison 列出各行值。
+- 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Ctrl+F` 在当前筛选、排序结果的当前显示列中查找文本；`F3`/`Shift+F3` 查找下一个/上一个；`Ctrl+G` 按当前结果行号跳转。
 - Reload 从原始路径生成新副本，并尽量保留显示列、WHERE 输入和已应用筛选；大文件重新缓存完成后再应用 WHERE。
 - 文件复制、SAS 读取、缓存构建、查询筛选、Reload 和 CSV 导出均通过 Qt 线程池运行。
@@ -45,16 +45,17 @@ python -m clinical_data_viewer
 ## 操作
 
 - Open：可一次选择一个或多个文件。
+- 命令行/文件关联：程序接受一个或多个 `.sas7bdat` 路径，例如 `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`。Windows 将扩展名关联到该 EXE 后，双击数据集会启动一个 Viewer 窗口并自动打开传入文件；当前版本不把新文件转交给已经运行的窗口。
 - 表头：首次点击升序，再次点击降序；相同行值按源行顺序稳定显示。
-- 列头筛选：点击列名主体仍然排序；点击表头最右侧 `▼` 打开当前列筛选。当前列候选值会遵循手写 WHERE 和其他列筛选。高基数列最多载入前 2,000 个候选值，此时取消选中的值按排除条件处理，也可切换 Condition 精确输入。
+- 列头筛选：点击列名主体仍然排序；点击表头最右侧 `▼` 打开当前列筛选。当前列候选值会遵循手写 WHERE 和其他列筛选。高基数列最多载入前 2,000 个候选值，此时取消选中的值按排除条件处理，也可切换 Condition 精确输入。成功应用后，编辑框会生成如 `FOLDERSEQ IN (3, 4)` 的完整 SAS-like WHERE。
 - Copy：选择单元格、整行或矩形区域后按 `Ctrl+C`；右键可复制列名。
 - PROC MEANS：在数值列单元格上右键选择 PROC MEANS；结果显示在右侧 Analysis。小写 `n (Subjects)` 是当前过滤结果中该分析变量非缺失且 `USUBJID` 非缺失的唯一受试者数；`N (Values)` 才是分析变量非缺失观测数。若没有 `USUBJID`，受试者数显示为不可用，不会用其他列替代。
-- Row Comparison：点击左侧行号选择整行，按住 `Ctrl` 点击其他行号进行非连续多选，右键 Compare Selected Rows。字符空值和 NULL 都视为 missing；数值按未格式化原值比较。筛选、排序或 Reload 后旧比较自动清除。
+- Row Comparison：点击左侧行号选择整行，按住 `Ctrl` 点击其他行号进行非连续多选，右键 Compare Selected Rows。黄色背景仅应用到选中比较行中有差异的列，不会涂满该列的其他行。字符空值和 NULL 都视为 missing；数值按未格式化原值比较。筛选、排序或 Reload 后旧比较自动清除。
 - Variables：顶部列表是当前显示列；展开 All Variables 可查看完整 metadata 并勾选隐藏列。Select All 在“全选”和“全部取消”之间切换；部分选择或全部取消后再次点击会恢复全部变量。允许暂时隐藏全部列，此时 Apply、Find、Go to Row 和 Export 不可用。
-- WHERE：`Ctrl+Enter`、Apply 执行；Clear 不修改数据，只恢复完整显示。
+- WHERE：`Ctrl+Enter`、Apply 执行；Clear 不修改数据，只恢复完整显示。列头筛选生成的条件可以继续手工编辑；手工改写后 Apply 会把编辑框整体作为唯一条件来源，并清除旧筛选标签，避免同一条件重复执行。
 - Find：`Ctrl+F` 打开查找栏，Enter 或 `F3` 查找下一个，`Shift+F3` 查找上一个。查找范围始终是当前筛选结果和当前显示列。
 - Go to Row：`Ctrl+G` 输入当前结果中的 1-based 行号。虚拟表格会直接请求对应页面。
-- Filter History：双击或 Use Condition 只会回填 WHERE，需 Apply 后执行。
+- Filter History：双击或 Use Condition 只会回填 WHERE，需 Apply 后执行。历史保存完整的手写 WHERE 与列头筛选条件；从历史恢复时不重建列头复选状态，而是将等价 WHERE 作为手写条件执行。
 - Export CSV：弹出 Windows Save As，导出时界面仍可使用。
 - Reload：源文件不存在或新内容读取失败时保留旧 Tab 数据。
 
@@ -142,12 +143,13 @@ python -m clinical_data_viewer
 
 6. 分别验证 `IN`、`NOT IN`、`CONTAINS`/`?`、`AND`/`&`、`OR`/`|`、`BETWEEN`、`LIKE`、`IS NULL/MISSING`、比较助记符和括号。
 7. 验证列对列条件，例如 `AESTDTC <= AEENDTC`，并确认字符列与数值列比较会给出明确类型错误。
-8. 点击不同列的筛选箭头，分别验证 Values、Missing、数值 Between 和字符 Contains；确认状态行数、CSV 和手写 WHERE 都使用组合后的最终结果。
+8. 点击不同列的筛选箭头，分别验证 Values、Missing、数值 Between 和字符 Contains；确认 WHERE 框同步出现如 `FOLDERSEQ IN (3, 4)` 的完整条件，状态行数、CSV、PROC MEANS 和 Filter History 都使用同一最终结果。手工修改生成条件再 Apply，确认旧蓝色筛选标签清除且条件不重复。
 9. 在数值列右键运行 PROC MEANS，核对当前筛选结果的受试者 n、观测 N、均值、分位数和 CI；在非数值列确认 PROC MEANS 禁用，并测试 Settings 的小数位和统计量选择能在重启后恢复。
-10. 在行号上用 Ctrl 非连续选择 2–20 行，运行 Compare Selected Rows；确认不同变量在主表和 Analysis 面板中高亮/列出，隐藏变量的差异仍出现在面板中。
+10. 在行号上用 Ctrl 非连续选择 2–20 行，运行 Compare Selected Rows；确认黄色只出现在所选行与差异列的交叉单元格，未选行不变；隐藏变量的差异仍出现在 Analysis 面板中。
 11. 按 `Ctrl+F` 查找当前显示文本，并用 `F3`/`Shift+F3` 前后查找；按 `Ctrl+G` 跳到第 1 行、末行和一个远端中间行。
 12. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。
 13. 关闭程序再启动，确认成功执行过的 WHERE 能从当前数据集历史和全局历史恢复。
+14. 直接运行 `SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"`，确认程序自动打开该文件；再把 `.sas7bdat` 关联到 EXE 后双击验证。文件名包含空格和中文时也应成功。
 
 完整人工检查表也保存在 [docs/windows-acceptance.md](docs/windows-acceptance.md)。
 
@@ -241,6 +243,14 @@ Get-Item .\dist\SASDataViewer.exe | Select-Object FullName, Length, LastWriteTim
 Get-FileHash .\dist\SASDataViewer.exe -Algorithm SHA256
 Start-Process .\dist\SASDataViewer.exe
 ```
+
+验证 EXE 能接收 Windows 文件关联传入的路径：
+
+```powershell
+& .\dist\SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"
+```
+
+程序本身不会静默修改注册表。请通过 Windows“打开方式 > 选择其他应用 > 始终使用此应用”关联 `.sas7bdat`，或由组织的安装包注册文件关联；关联命令必须包含带引号的 `%1`，典型形式为 `"C:\path\SASDataViewer.exe" "%1"`。当前版本采用多实例行为：双击文件会新开一个 Viewer 窗口，不会转交给已经运行的窗口。
 
 然后使用 `dist\SASDataViewer.exe` 重复上面的真实数据、源文件占用、历史恢复、筛选导出、Reload 和临时目录清理检查。至少还应在一台没有 Python/项目源码的干净 Windows 机器上启动一次，确认 EXE 确实独立运行。
 
