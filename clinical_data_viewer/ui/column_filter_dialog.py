@@ -219,8 +219,11 @@ class ColumnFilterDialog(QDialog):
             else:
                 checked: list[object] = []
                 unchecked: list[object] = []
+                # Missing participates only when its visible list item is checked.
+                # If the current candidate query has no missing item, do not silently
+                # add missing values to the generated WHERE for a concrete selection.
                 include_missing = (
-                    self.existing.include_missing if self.existing else True
+                    self.existing.include_missing if self.existing else False
                 )
                 for index in range(self.value_list.count()):
                     item = self.value_list.item(index)

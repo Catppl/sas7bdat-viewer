@@ -14,22 +14,27 @@ class UiSmokeTests(unittest.TestCase):
     def test_main_window_constructs_with_reference_layout(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtGui import QPalette
         from PySide6.QtTest import QTest
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 
         from clinical_data_viewer.column_filters import ColumnFilterSpec
         from clinical_data_viewer.domain import (
             DatasetHandle,
             DatasetMetadata,
+            DistinctValuesResult,
             VariableMetadata,
         )
         from clinical_data_viewer.filter_engine import FilterEngine
         from clinical_data_viewer.filter_history import FilterHistory
         from clinical_data_viewer.resources import resource_path
         from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.statistics import StatisticsResult
         from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.column_filter_dialog import ColumnFilterDialog
         from clinical_data_viewer.ui.dataset_tab import DatasetTab
         from clinical_data_viewer.ui.main_window import MainWindow
+        from clinical_data_viewer.ui.settings_dialog import SettingsDialog
 
         class TestSettings(AppSettings):
             def save(self, path=None):
@@ -133,9 +138,19 @@ class UiSmokeTests(unittest.TestCase):
             )
             self.assertIn('"PARAMCD" IN (?)', numeric_tab.compiled_filter.sql)
             self.assertEqual(
-                numeric_tab.where_editor.toPlainText(), 'PARAMCD IN ("ALT")'
+                numeric_tab.where_editor.toPlainText(), 'PARAMCD in ("ALT")'
             )
-            self.assertEqual(numeric_tab.pending_history_text, 'PARAMCD IN ("ALT")')
+            self.assertEqual(numeric_tab.pending_history_text, 'PARAMCD in ("ALT")')
+            filter_dialog = ColumnFilterDialog(
+                VariableMetadata("PARAMCD"),
+                DistinctValuesResult(("ALB",), False, 1, False),
+                None,
+            )
+            filter_dialog._initial_all = False
+            filter_dialog.value_list.item(0).setCheckState(Qt.Checked)
+            filter_dialog._accept_filter()
+            self.assertFalse(filter_dialog.result_spec.include_missing)
+            self.assertEqual(filter_dialog.result_spec.values, ("ALB",))
             numeric_tab.resize(650, 420)
             numeric_tab.show()
             application.processEvents()
@@ -198,6 +213,48 @@ class UiSmokeTests(unittest.TestCase):
             )
             self.assertIsNotNone(
                 numeric_tab.model.data(numeric_tab.model.index(2, 2), Qt.BackgroundRole)
+            )
+            selected_option = QStyleOptionViewItem()
+            numeric_tab.table.itemDelegate().initStyleOption(
+                selected_option, numeric_tab.model.index(0, 2)
+            )
+            self.assertEqual(
+                selected_option.palette.color(QPalette.Highlight).name(), "#fff2b2"
+            )
+            ordinary_option = QStyleOptionViewItem()
+            numeric_tab.table.itemDelegate().initStyleOption(
+                ordinary_option, numeric_tab.model.index(1, 2)
+            )
+            self.assertNotEqual(
+                ordinary_option.palette.color(QPalette.Highlight).name(), "#fff2b2"
+            )
+            window.analysis_panel.show_statistics(
+                StatisticsResult(
+                    "AVAL",
+                    "Analysis Value",
+                    2,
+                    {"subjects": 2, "mean": 1.235, "std": 0.12345},
+                    3,
+                    0.95,
+                ),
+                ["subjects", "mean", "std"],
+                {"mean": 2, "std": 3},
+                "All rows",
+            )
+            self.assertEqual(
+                window.analysis_panel.statistics_table.item(0, 1).text(), "2"
+            )
+            self.assertEqual(
+                window.analysis_panel.statistics_table.item(1, 1).text(), "1.24"
+            )
+            self.assertEqual(
+                window.analysis_panel.statistics_table.item(2, 1).text(), "0.123"
+            )
+            settings_dialog = SettingsDialog(TestSettings())
+            settings_dialog.statistic_decimals["mean"].setValue(4)
+            settings_dialog._save()
+            self.assertEqual(
+                settings_dialog.settings.proc_means_decimal_places["mean"], 4
             )
             numeric_tab.where_editor.setPlainText("AVAL > 1")
             self.assertTrue(numeric_tab.where_editor_is_dirty())

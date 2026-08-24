@@ -33,34 +33,34 @@ def _literal_text(value: object, variable: VariableMetadata) -> str:
 def render_column_filter(spec: ColumnFilterSpec, variable: VariableMetadata) -> str:
     """Render an interactive filter as canonical SAS-like WHERE text."""
     name = variable.name
-    missing = f"MISSING({name})"
-    not_missing = f"NOT MISSING({name})"
+    missing = f"missing({name})"
+    not_missing = f"not missing({name})"
     if spec.mode in {"include", "exclude"}:
         values = ", ".join(_literal_text(value, variable) for value in spec.values)
         if spec.mode == "include":
-            value_filter = f"{name} IN ({values})" if values else ""
+            value_filter = f"{name} in ({values})" if values else ""
             if value_filter and spec.include_missing:
-                return f"({value_filter} OR {missing})"
+                return f"({value_filter} or {missing})"
             if value_filter:
                 return value_filter
             if spec.include_missing:
                 return missing
             return f"({name} != {name})"
-        value_filter = f"{name} NOT IN ({values})" if values else ""
+        value_filter = f"{name} not in ({values})" if values else ""
         if value_filter and spec.include_missing:
-            return f"({value_filter} OR {missing})"
+            return f"({value_filter} or {missing})"
         if value_filter:
-            return f"({value_filter} AND {not_missing})"
+            return f"({value_filter} and {not_missing})"
         return "" if spec.include_missing else not_missing
     if spec.mode == "between":
         return (
-            f"{name} BETWEEN {_literal_text(spec.lower, variable)} "
-            f"AND {_literal_text(spec.upper, variable)}"
+            f"{name} between {_literal_text(spec.lower, variable)} "
+            f"and {_literal_text(spec.upper, variable)}"
         )
     if spec.mode == "condition":
         return f"{name} {spec.operator} {_literal_text(spec.lower, variable)}"
     if spec.mode == "contains":
-        return f"{name} CONTAINS {_literal_text(spec.lower, variable)}"
+        return f"{name} contains {_literal_text(spec.lower, variable)}"
     raise ValueError(f"Unsupported column filter mode: {spec.mode}")
 
 
@@ -71,8 +71,9 @@ def compose_where_text(
 ) -> str:
     metadata = {variable.name.upper(): variable for variable in variables}
     parts: list[str] = []
-    if manual_where.strip():
-        parts.append(manual_where.strip())
+    manual = manual_where.strip()
+    if manual:
+        parts.append(manual)
     for variable_name, spec in column_filters.items():
         variable = metadata.get(variable_name.upper())
         if variable is None:
@@ -82,7 +83,9 @@ def compose_where_text(
             parts.append(rendered)
     if len(parts) == 1:
         return parts[0]
-    return " AND ".join(f"({part})" for part in parts)
+    if manual:
+        parts[0] = f"({parts[0]})"
+    return " and ".join(parts)
 
 
 def _missing_sql(variable: VariableMetadata) -> str:

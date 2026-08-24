@@ -25,6 +25,13 @@ PROC_MEANS_STATISTICS = (
     ("uclm", "CI Upper"),
 )
 DEFAULT_PROC_MEANS_STATISTICS = [key for key, _label in PROC_MEANS_STATISTICS]
+PROC_MEANS_COUNT_STATISTICS = {"subjects", "n", "nmiss"}
+PROC_MEANS_DECIMAL_STATISTICS = tuple(
+    key
+    for key, _label in PROC_MEANS_STATISTICS
+    if key not in PROC_MEANS_COUNT_STATISTICS
+)
+DEFAULT_PROC_MEANS_DECIMAL_PLACES = {key: 2 for key in PROC_MEANS_DECIMAL_STATISTICS}
 
 
 def application_data_directory() -> Path:
@@ -58,6 +65,9 @@ class AppSettings:
     last_open_directory: str = ""
     last_export_directory: str = ""
     proc_means_decimals: int = 2
+    proc_means_decimal_places: dict[str, int] = field(
+        default_factory=lambda: dict(DEFAULT_PROC_MEANS_DECIMAL_PLACES)
+    )
     proc_means_confidence: float = 0.95
     proc_means_statistics: list[str] = field(
         default_factory=lambda: list(DEFAULT_PROC_MEANS_STATISTICS)
@@ -76,6 +86,17 @@ class AppSettings:
         value.history_limit = min(10_000, max(10, int(value.history_limit)))
         value.temp_max_age_hours = min(720, max(1, int(value.temp_max_age_hours)))
         value.proc_means_decimals = min(10, max(0, int(value.proc_means_decimals)))
+        raw_decimal_places = raw.get("proc_means_decimal_places", {})
+        if not isinstance(raw_decimal_places, dict):
+            raw_decimal_places = {}
+        decimal_places: dict[str, int] = {}
+        for key in PROC_MEANS_DECIMAL_STATISTICS:
+            try:
+                decimals = int(raw_decimal_places.get(key, value.proc_means_decimals))
+            except (TypeError, ValueError):
+                decimals = value.proc_means_decimals
+            decimal_places[key] = min(10, max(0, decimals))
+        value.proc_means_decimal_places = decimal_places
         value.proc_means_confidence = min(
             0.999, max(0.5, float(value.proc_means_confidence))
         )

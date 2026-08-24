@@ -1,8 +1,55 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QMenu, QTableView
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette, QShortcut
+from PySide6.QtWidgets import (
+    QApplication,
+    QMenu,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTableView,
+)
+
+COMPARISON_HIGHLIGHT = QColor("#fff2b2")
+
+
+class ComparisonHighlightDelegate(QStyledItemDelegate):
+    """Keep comparison cells yellow even while their rows are selected."""
+
+    @staticmethod
+    def is_comparison_cell(index) -> bool:
+        model = index.model()
+        columns = getattr(model, "columns", ())
+        rows = getattr(model, "highlighted_rows", set())
+        highlighted_columns = getattr(model, "highlighted_columns", set())
+        return (
+            index.isValid()
+            and index.row() in rows
+            and 0 <= index.column() < len(columns)
+            and columns[index.column()] in highlighted_columns
+        )
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        if not self.is_comparison_cell(index):
+            return
+        option.backgroundBrush = COMPARISON_HIGHLIGHT
+        option.palette.setColor(QPalette.Highlight, COMPARISON_HIGHLIGHT)
+        option.palette.setColor(
+            QPalette.HighlightedText, option.palette.color(QPalette.Text)
+        )
+
+    def paint(self, painter, option, index) -> None:
+        if not self.is_comparison_cell(index):
+            super().paint(painter, option, index)
+            return
+        # The application stylesheet supplies a blue selection background that
+        # overrides BackgroundRole. Paint just these cells without Selected state;
+        # their model background remains yellow while equal cells stay blue.
+        comparison_option = QStyleOptionViewItem(option)
+        comparison_option.state &= ~QStyle.State_Selected
+        super().paint(painter, comparison_option, index)
 
 
 class CopyTableView(QTableView):
@@ -13,6 +60,7 @@ class CopyTableView(QTableView):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setItemDelegate(ComparisonHighlightDelegate(self))
         self.setAlternatingRowColors(True)
         self.setSelectionMode(QTableView.ExtendedSelection)
         self.setSelectionBehavior(QTableView.SelectItems)

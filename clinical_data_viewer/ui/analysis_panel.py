@@ -96,7 +96,7 @@ class AnalysisPanel(QWidget):
         self,
         result: StatisticsResult,
         statistic_keys: list[str],
-        decimals: int,
+        decimal_places: dict[str, int],
         filter_description: str,
     ) -> None:
         labels = dict(PROC_MEANS_STATISTICS)
@@ -111,7 +111,9 @@ class AnalysisPanel(QWidget):
             self.statistics_table.setItem(
                 row,
                 1,
-                QTableWidgetItem(self._format(result.values.get(key), decimals)),
+                QTableWidgetItem(
+                    self._format(result.values.get(key), decimal_places.get(key, 2))
+                ),
             )
         self.tabs.setCurrentIndex(0)
 

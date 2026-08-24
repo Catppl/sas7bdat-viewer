@@ -115,8 +115,8 @@ class AnalysisAndColumnFilterTests(unittest.TestCase):
         text = compose_where_text(manual_text, filters, self.metadata.variables)
         self.assertEqual(
             text,
-            '(FLAG = "Y") AND (AVAL IN (1, 4)) AND '
-            '((ARMCD NOT IN ("B") OR MISSING(ARMCD)))',
+            '(FLAG = "Y") and AVAL in (1, 4) and '
+            '(ARMCD not in ("B") or missing(ARMCD))',
         )
         rendered = FilterEngine(self.metadata.variables).compile(text)
         combined = combine_filters(
@@ -158,14 +158,34 @@ class AnalysisAndColumnFilterTests(unittest.TestCase):
             render_column_filter(
                 ColumnFilterSpec("ARMCD", "include", ('A"B',), False), variable
             ),
-            'ARMCD IN ("A""B")',
+            'ARMCD in ("A""B")',
         )
         self.assertEqual(
             render_column_filter(
                 ColumnFilterSpec("ARMCD", "contains", lower="PKO"), variable
             ),
-            'ARMCD CONTAINS "PKO"',
+            'ARMCD contains "PKO"',
         )
+
+    def test_single_generated_filter_has_no_redundant_outer_parentheses(self) -> None:
+        variable = VariableMetadata("AVISIT", kind="character")
+        text = compose_where_text(
+            "",
+            {"AVISIT": ColumnFilterSpec("AVISIT", "include", ("Baseline",), False)},
+            (variable,),
+        )
+        self.assertEqual(text, 'AVISIT in ("Baseline")')
+
+    def test_missing_clause_is_rendered_only_when_selected(self) -> None:
+        variable = VariableMetadata("PARAMCD", kind="character")
+        without_missing = render_column_filter(
+            ColumnFilterSpec("PARAMCD", "include", ("ALB",), False), variable
+        )
+        with_missing = render_column_filter(
+            ColumnFilterSpec("PARAMCD", "include", ("ALB",), True), variable
+        )
+        self.assertEqual(without_missing, 'PARAMCD in ("ALB")')
+        self.assertEqual(with_missing, '(PARAMCD in ("ALB") or missing(PARAMCD))')
 
     def test_export_uses_combined_filter_visible_columns_and_sort(self) -> None:
         combined = combine_filters(

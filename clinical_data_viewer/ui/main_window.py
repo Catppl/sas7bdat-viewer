@@ -606,7 +606,8 @@ class MainWindow(QMainWindow):
 
     def show_settings(self) -> None:
         dialog = SettingsDialog(self.settings, self)
-        dialog.exec()
+        if dialog.exec() and self._last_statistics_request is not None:
+            self._recalculate_statistics()
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if self.tabs.indexOf(tab) < 0 or not tab.cache_complete:
@@ -642,7 +643,7 @@ class MainWindow(QMainWindow):
             self.analysis_panel.show_statistics(
                 result,
                 self.settings.proc_means_statistics,
-                self.settings.proc_means_decimals,
+                self.settings.proc_means_decimal_places,
                 tab.filter_description(),
             )
 
