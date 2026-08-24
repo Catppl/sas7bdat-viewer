@@ -53,3 +53,23 @@ class CacheProgress:
 class FindResult:
     row_index: int
     column_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class DistinctValuesResult:
+    values: tuple[object, ...]
+    has_missing: bool
+    total_distinct: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ComparedRow:
+    view_row: int
+    values: tuple[object, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RowComparisonResult:
+    rows: tuple[ComparedRow, ...]
+    differing_variables: tuple[str, ...]

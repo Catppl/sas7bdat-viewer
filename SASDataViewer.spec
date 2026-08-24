@@ -8,8 +8,8 @@ a = Analysis(
     ["run.py"],
     pathex=[],
     binaries=pyreadstat_binaries,
-    datas=pyreadstat_datas,
-    hiddenimports=pyreadstat_hiddenimports,
+    datas=pyreadstat_datas + [("assets/SASDataViewer.ico", "assets")],
+    hiddenimports=pyreadstat_hiddenimports + ["scipy.stats"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -36,5 +36,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=["assets/SASDataViewer.ico"],
 )
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 
 from .domain import DatasetMetadata, SortSpec
 
@@ -35,6 +36,7 @@ class DatasetTableModel(QAbstractTableModel):
         self._variable_by_name = {
             variable.name: variable for variable in metadata.variables
         }
+        self.highlighted_columns: set[str] = set()
 
     def rowCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
         return 0 if parent.isValid() else self.filtered_count
@@ -66,6 +68,11 @@ class DatasetTableModel(QAbstractTableModel):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ToolTipRole:
             return "Missing" if value is None else str(value)
+        if (
+            role == Qt.BackgroundRole
+            and self.columns[index.column()] in self.highlighted_columns
+        ):
+            return QColor("#fff2b2")
         return None
 
     def headerData(
@@ -85,6 +92,8 @@ class DatasetTableModel(QAbstractTableModel):
                 if variable.format:
                     details.append(f"Format: {variable.format}")
                 return "\n".join(details)
+            if role == Qt.BackgroundRole and variable.name in self.highlighted_columns:
+                return QColor("#ffe699")
         if orientation == Qt.Vertical and role == Qt.DisplayRole:
             return section + 1
         return None
@@ -174,6 +183,18 @@ class DatasetTableModel(QAbstractTableModel):
 
     def load_failed(self, offset: int) -> None:
         self._loading_pages.discard(offset)
+
+    def set_highlighted_columns(self, columns: set[str]) -> None:
+        if columns == self.highlighted_columns:
+            return
+        self.highlighted_columns = set(columns)
+        if self.filtered_count and self.columns:
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(self.filtered_count - 1, len(self.columns) - 1),
+                [Qt.BackgroundRole],
+            )
+        self.headerDataChanged.emit(Qt.Horizontal, 0, max(0, len(self.columns) - 1))
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
         if not 0 <= column < len(self.columns):

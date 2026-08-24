@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, Signal
 from PySide6.QtGui import (
+    QAction,
     QColor,
     QFont,
     QKeyEvent,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QTableView,
@@ -26,10 +28,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..column_filters import ColumnFilterSpec, combine_filters
 from ..domain import DatasetHandle, FindResult, SortSpec
 from ..filter_engine import CompiledFilter
 from ..table_model import DatasetTableModel
 from .copy_table import CopyTableView
+from .filter_header import FilterHeaderView
 
 
 class WhereEditor(QPlainTextEdit):
@@ -156,11 +160,20 @@ class DatasetTab(QWidget):
     history_requested = Signal()
     sort_changed = Signal(object)
     find_requested = Signal(str, bool, int, int)
+    column_filter_requested = Signal(str)
+    proc_means_requested = Signal(str)
+    settings_requested = Signal()
+    compare_rows_requested = Signal(object)
+    clear_comparison_requested = Signal()
+    analysis_invalidated = Signal()
+    comparison_invalidated = Signal()
 
     def __init__(self, handle: DatasetHandle, page_size: int, parent=None) -> None:
         super().__init__(parent)
         self.handle = handle
         self.visible_columns = [variable.name for variable in handle.metadata.variables]
+        self.where_compiled_filter = CompiledFilter("", ())
+        self.column_filters: dict[str, ColumnFilterSpec] = {}
         self.compiled_filter = CompiledFilter("", ())
         self.applied_where = ""
         self.pending_history_text = ""
@@ -170,6 +183,7 @@ class DatasetTab(QWidget):
         self.cache_failed = False
         self.reload_in_progress = False
         self._pending_selection: tuple[int, int] | None = None
+        self._compared_rows: tuple[int, ...] | None = None
         self._page_size = page_size
 
         layout = QVBoxLayout(self)
@@ -204,13 +218,38 @@ class DatasetTab(QWidget):
         self.find_frame.hide()
         layout.addWidget(self.find_frame)
 
+        self.filter_frame = QFrame()
+        self.filter_frame.setObjectName("columnFilterBar")
+        self.filter_layout = QHBoxLayout(self.filter_frame)
+        self.filter_layout.setContentsMargins(6, 3, 6, 3)
+        self.filter_layout.setSpacing(4)
+        self.filter_layout.addWidget(QLabel("Column filters:"))
+        self.filter_layout.addStretch(1)
+        clear_columns = QPushButton("Clear All")
+        clear_columns.clicked.connect(self.clear_column_filters)
+        self.filter_layout.addWidget(clear_columns)
+        self.filter_frame.hide()
+        layout.addWidget(self.filter_frame)
+
         self.table = CopyTableView()
-        self.table.horizontalHeader().setSectionsMovable(False)
-        self.table.horizontalHeader().setDefaultSectionSize(120)
-        self.table.horizontalHeader().setMinimumSectionSize(40)
-        self.table.horizontalHeader().setSortIndicatorShown(False)
-        self.table.horizontalHeader().sectionClicked.connect(self._header_clicked)
+        self.filter_header = FilterHeaderView(self.table)
+        self.table.setHorizontalHeader(self.filter_header)
+        self.filter_header.setSectionsMovable(False)
+        self.filter_header.setDefaultSectionSize(120)
+        self.filter_header.setMinimumSectionSize(40)
+        self.filter_header.setSortIndicatorShown(False)
+        self.filter_header.sectionClicked.connect(self._header_clicked)
+        self.filter_header.filter_requested.connect(self._request_column_filter)
+        self.filter_header.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.filter_header.customContextMenuRequested.connect(
+            self._show_header_context_menu
+        )
         self.table.verticalHeader().setDefaultSectionSize(22)
+        self.table.verticalHeader().setSectionsClickable(True)
+        self.table.proc_means_requested.connect(self.proc_means_requested)
+        self.table.settings_requested.connect(self.settings_requested)
+        self.table.compare_rows_requested.connect(self.compare_rows_requested)
+        self.table.clear_comparison_requested.connect(self.clear_comparison_requested)
         layout.addWidget(self.table, 1)
 
         where_frame = QFrame()
@@ -270,6 +309,7 @@ class DatasetTab(QWidget):
         self.model.sort_requested.connect(self._sort_requested)
         self.model.page_loaded.connect(self._finish_pending_selection)
         self.table.setModel(self.model)
+        self.table.selectionModel().selectionChanged.connect(self._selection_changed)
         if old_model:
             old_model.deleteLater()
 
@@ -287,6 +327,7 @@ class DatasetTab(QWidget):
         self.apply_requested.emit(self.where_editor.toPlainText())
 
     def _sort_requested(self, sort: SortSpec) -> None:
+        self.comparison_invalidated.emit()
         self.generation += 1
         self.recount_next = False
         self.sort_changed.emit(sort)
@@ -319,11 +360,13 @@ class DatasetTab(QWidget):
             columns=self.visible_columns, filtered_count=self.model.filtered_count
         )
         self.apply_button.setEnabled(self.cache_complete and bool(self.visible_columns))
+        self._sync_filtered_headers()
 
     def apply_filter(
         self, compiled: CompiledFilter, where_text: str, *, add_history: bool
     ) -> None:
-        self.compiled_filter = compiled
+        self.where_compiled_filter = compiled
+        self._rebuild_combined_filter()
         self.applied_where = where_text.strip()
         self.pending_history_text = (
             self.applied_where if add_history and self.applied_where else ""
@@ -331,15 +374,20 @@ class DatasetTab(QWidget):
         self.generation += 1
         self.recount_next = True
         self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+        self.analysis_invalidated.emit()
 
     def clear_filter(self) -> None:
         self.where_editor.clear()
-        self.compiled_filter = CompiledFilter("", ())
+        self.where_compiled_filter = CompiledFilter("", ())
+        self.column_filters.clear()
+        self._rebuild_combined_filter()
         self.applied_where = ""
         self.pending_history_text = ""
         self.generation += 1
         self.recount_next = False
         self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+        self._rebuild_filter_chips()
+        self.analysis_invalidated.emit()
 
     def replace_handle(
         self,
@@ -351,7 +399,12 @@ class DatasetTab(QWidget):
         self.handle = handle
         self.cache_failed = False
         self.visible_columns = visible_columns
-        self.compiled_filter = compiled
+        self.where_compiled_filter = compiled
+        known = {variable.name for variable in handle.metadata.variables}
+        self.column_filters = {
+            name: spec for name, spec in self.column_filters.items() if name in known
+        }
+        self._rebuild_combined_filter()
         self.generation += 1
         self.recount_next = bool(compiled.sql)
         self._install_model()
@@ -376,6 +429,8 @@ class DatasetTab(QWidget):
             else handle.cached_row_count
         )
         self.model.reset_query(filtered_count=initial_count)
+        self._rebuild_filter_chips()
+        self.analysis_invalidated.emit()
 
     def set_cache_state(
         self, cached_rows: int, total_rows: int, complete: bool
@@ -394,6 +449,7 @@ class DatasetTab(QWidget):
         self.where_editor.setReadOnly(False)
         if not self.compiled_filter.sql and self.model.sort_spec is None:
             self.model.set_available_count(cached_rows)
+        self.table.setProperty("cacheComplete", complete)
 
     def show_find(self) -> None:
         self.find_frame.show()
@@ -477,3 +533,146 @@ class DatasetTab(QWidget):
             return
         self.table.scrollTo(self.model.index(0, column), QTableView.PositionAtCenter)
         self.table.selectColumn(column)
+
+    def _request_column_filter(self, column: int) -> None:
+        if self.cache_complete and 0 <= column < len(self.visible_columns):
+            self.column_filter_requested.emit(self.visible_columns[column])
+
+    def _show_header_context_menu(self, position) -> None:
+        column = self.filter_header.logicalIndexAt(position)
+        if not 0 <= column < len(self.visible_columns):
+            return
+        variable_name = self.visible_columns[column]
+        variable = next(
+            item
+            for item in self.handle.metadata.variables
+            if item.name == variable_name
+        )
+        menu = QMenu(self)
+        filter_action = QAction("Filter…", self)
+        filter_action.setEnabled(self.cache_complete)
+        filter_action.triggered.connect(
+            lambda: self.column_filter_requested.emit(variable_name)
+        )
+        menu.addAction(filter_action)
+        menu.addSeparator()
+        means_action = QAction("PROC MEANS", self)
+        means_action.setEnabled(self.cache_complete and variable.kind == "numeric")
+        means_action.triggered.connect(
+            lambda: self.proc_means_requested.emit(variable_name)
+        )
+        menu.addAction(means_action)
+        settings_action = QAction("Settings…", self)
+        settings_action.triggered.connect(self.settings_requested)
+        menu.addAction(settings_action)
+        menu.exec(self.filter_header.viewport().mapToGlobal(position))
+
+    def filter_context_without(self, variable: str) -> CompiledFilter:
+        filters = {
+            name: spec for name, spec in self.column_filters.items() if name != variable
+        }
+        return combine_filters(
+            self.where_compiled_filter, filters, self.handle.metadata.variables
+        )
+
+    def set_column_filter(self, variable: str, spec: ColumnFilterSpec | None) -> None:
+        if spec is None or (
+            spec.mode == "exclude" and not spec.values and spec.include_missing
+        ):
+            self.column_filters.pop(variable, None)
+        else:
+            self.column_filters[variable] = spec
+        self._rebuild_combined_filter()
+        self.generation += 1
+        self.recount_next = True
+        self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+        self._rebuild_filter_chips()
+        self.analysis_invalidated.emit()
+
+    def clear_column_filter(self, variable: str) -> None:
+        if variable in self.column_filters:
+            self.set_column_filter(variable, None)
+
+    def clear_column_filters(self) -> None:
+        if not self.column_filters:
+            return
+        self.column_filters.clear()
+        self._rebuild_combined_filter()
+        self.generation += 1
+        self.recount_next = True
+        self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+        self._rebuild_filter_chips()
+        self.analysis_invalidated.emit()
+
+    def restore_column_filters(
+        self, filters: dict[str, ColumnFilterSpec], *, reset_query: bool = True
+    ) -> None:
+        known = {variable.name for variable in self.handle.metadata.variables}
+        self.column_filters = {
+            name: spec for name, spec in filters.items() if name in known
+        }
+        self._rebuild_combined_filter()
+        self._rebuild_filter_chips()
+        if reset_query:
+            self.generation += 1
+            self.recount_next = True
+            self.model.reset_query(filtered_count=self.handle.metadata.row_count)
+            self.analysis_invalidated.emit()
+
+    def _rebuild_combined_filter(self) -> None:
+        self.compiled_filter = combine_filters(
+            self.where_compiled_filter,
+            self.column_filters,
+            self.handle.metadata.variables,
+        )
+
+    def _rebuild_filter_chips(self) -> None:
+        while self.filter_layout.count() > 3:
+            item = self.filter_layout.takeAt(1)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        for variable in self.column_filters:
+            chip = QPushButton(f"{variable}  ×")
+            chip.setObjectName("filterChip")
+            chip.setToolTip(f"Clear filter for {variable}")
+            chip.clicked.connect(
+                lambda _checked=False, name=variable: self.clear_column_filter(name)
+            )
+            self.filter_layout.insertWidget(self.filter_layout.count() - 2, chip)
+        self.filter_frame.setVisible(bool(self.column_filters))
+        self._sync_filtered_headers()
+
+    def _sync_filtered_headers(self) -> None:
+        sections = {
+            index
+            for index, name in enumerate(self.visible_columns)
+            if name in self.column_filters
+        }
+        self.filter_header.set_filtered_sections(sections)
+
+    def filter_description(self) -> str:
+        parts = []
+        if self.applied_where:
+            parts.append(f"WHERE {self.applied_where}")
+        if self.column_filters:
+            parts.append("Column filters: " + ", ".join(self.column_filters))
+        return "; ".join(parts) if parts else "All rows"
+
+    def show_comparison_highlights(
+        self, variables: tuple[str, ...], rows: tuple[int, ...] = ()
+    ) -> None:
+        self._compared_rows = rows
+        self.model.set_highlighted_columns(set(variables))
+
+    def clear_comparison_highlights(self) -> None:
+        self._compared_rows = None
+        self.model.set_highlighted_columns(set())
+
+    def _selection_changed(self) -> None:
+        if self._compared_rows is None:
+            return
+        current = tuple(self.table.selected_row_numbers())
+        if current != self._compared_rows:
+            self.clear_comparison_highlights()
+            self.comparison_invalidated.emit()

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .filter_history import FilterHistory
+from .resources import resource_path
 from .settings import AppSettings, application_data_directory, temporary_root_directory
 from .temp_manager import TempManager
 from .ui.main_window import MainWindow
@@ -109,6 +111,24 @@ QFrame#findBar {
     background: #eef7ff;
     border: 1px solid #b7d6ef;
 }
+QFrame#columnFilterBar {
+    background: #eef7ff;
+    border: 1px solid #b7d6ef;
+}
+QPushButton#filterChip {
+    background: #dceeff;
+    color: #0f5f9f;
+    border: 1px solid #9dc9eb;
+    border-radius: 10px;
+    min-width: 0;
+    padding: 2px 8px;
+}
+QLabel#filterNotice {
+    background: #fff8df;
+    border: 1px solid #ead491;
+    color: #6b5600;
+    padding: 5px;
+}
 QLabel#cacheNotice {
     background: #e6f3ff;
     border: 1px solid #a9d2f2;
@@ -133,6 +153,7 @@ def main() -> int:
     application = QApplication(sys.argv)
     application.setApplicationName("SASDataViewer")
     application.setOrganizationName("ClinicalDataViewer")
+    application.setWindowIcon(QIcon(str(resource_path("assets/SASDataViewer.ico"))))
     application.setStyle("Fusion")
     application.setStyleSheet(STYLE)
     settings = AppSettings.load()

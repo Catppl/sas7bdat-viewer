@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QMenu, QTableView
 
 
 class CopyTableView(QTableView):
+    proc_means_requested = Signal(str)
+    settings_requested = Signal()
+    compare_rows_requested = Signal(object)
+    clear_comparison_requested = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setAlternatingRowColors(True)
@@ -45,6 +50,11 @@ class CopyTableView(QTableView):
         QApplication.clipboard().setText("\n".join(lines))
 
     def _show_context_menu(self, position) -> None:
+        self._context_index = self.indexAt(position)
+        if self._context_index.isValid():
+            selected_rows = self.selected_row_numbers()
+            if self._context_index.row() not in selected_rows:
+                self.setCurrentIndex(self._context_index)
         menu = QMenu(self)
         copy_action = QAction("Copy", self)
         copy_action.triggered.connect(self.copy_selection)
@@ -56,9 +66,59 @@ class CopyTableView(QTableView):
         row_action = QAction("Select Row", self)
         row_action.triggered.connect(self._select_context_row)
         menu.addAction(row_action)
-        self._context_index = self.indexAt(position)
+        menu.addSeparator()
+        variable = self._context_variable()
+        proc_means = QAction("PROC MEANS", self)
+        proc_means.setEnabled(self._context_variable_is_numeric())
+        proc_means.triggered.connect(
+            lambda: self.proc_means_requested.emit(variable) if variable else None
+        )
+        menu.addAction(proc_means)
+        settings = QAction("Settings…", self)
+        settings.triggered.connect(self.settings_requested)
+        menu.addAction(settings)
+        menu.addSeparator()
+        selected_rows = self.selected_row_numbers()
+        compare = QAction("Compare Selected Rows", self)
+        compare.setEnabled(2 <= len(selected_rows) <= 20)
+        compare.triggered.connect(
+            lambda: self.compare_rows_requested.emit(self.selected_row_numbers())
+        )
+        menu.addAction(compare)
+        clear_compare = QAction("Clear Row Comparison", self)
+        clear_compare.triggered.connect(self.clear_comparison_requested)
+        menu.addAction(clear_compare)
         menu.exec(self.viewport().mapToGlobal(position))
 
     def _select_context_row(self) -> None:
         if getattr(self, "_context_index", None) and self._context_index.isValid():
             self.selectRow(self._context_index.row())
+
+    def selected_row_numbers(self) -> list[int]:
+        if not self.selectionModel():
+            return []
+        return sorted(index.row() for index in self.selectionModel().selectedRows())
+
+    def _context_variable(self) -> str:
+        if (
+            not getattr(self, "_context_index", None)
+            or not self._context_index.isValid()
+        ):
+            return ""
+        model = self.model()
+        columns = getattr(model, "columns", [])
+        column = self._context_index.column()
+        return columns[column] if 0 <= column < len(columns) else ""
+
+    def _context_variable_is_numeric(self) -> bool:
+        if not bool(self.property("cacheComplete")):
+            return False
+        variable_name = self._context_variable()
+        model = self.model()
+        metadata = getattr(model, "metadata", None)
+        if not variable_name or metadata is None:
+            return False
+        return any(
+            variable.name == variable_name and variable.kind == "numeric"
+            for variable in metadata.variables
+        )

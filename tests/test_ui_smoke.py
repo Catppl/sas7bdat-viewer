@@ -13,15 +13,18 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 class UiSmokeTests(unittest.TestCase):
     def test_main_window_constructs_with_reference_layout(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
         from PySide6.QtWidgets import QApplication
 
+        from clinical_data_viewer.column_filters import ColumnFilterSpec
         from clinical_data_viewer.domain import (
             DatasetHandle,
             DatasetMetadata,
             VariableMetadata,
         )
         from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.resources import resource_path
         from clinical_data_viewer.settings import AppSettings
         from clinical_data_viewer.temp_manager import TempManager
         from clinical_data_viewer.ui.dataset_tab import DatasetTab
@@ -32,6 +35,7 @@ class UiSmokeTests(unittest.TestCase):
                 return None
 
         application = QApplication.instance() or QApplication([])
+        self.assertTrue(resource_path("assets/SASDataViewer.ico").is_file())
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manager = TempManager(root / "temp")
@@ -45,6 +49,11 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(
                 window.variables_panel.search.placeholderText(), "Filter variables"
             )
+            tools_actions = [
+                action.text()
+                for action in window.menuBar().actions()[3].menu().actions()
+            ]
+            self.assertIn("Analysis", tools_actions)
             self.assertTrue(window.variables_dock.isVisible() or not window.isVisible())
             metadata = DatasetMetadata(
                 "adae",
@@ -95,6 +104,78 @@ class UiSmokeTests(unittest.TestCase):
 
             dataset_tab.show_find()
             self.assertFalse(dataset_tab.find_frame.isHidden())
+
+            numeric_metadata = DatasetMetadata(
+                "adlb",
+                3,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("PARAMCD"),
+                    VariableMetadata("AVAL", kind="numeric"),
+                ),
+            )
+            numeric_handle = DatasetHandle(
+                root / "adlb.sas7bdat",
+                root / "temp-adlb.sas7bdat",
+                root / "adlb.sqlite",
+                numeric_metadata,
+                3,
+                True,
+            )
+            numeric_tab = DatasetTab(numeric_handle, 500)
+            numeric_tab.set_column_filter(
+                "PARAMCD",
+                ColumnFilterSpec("PARAMCD", "include", ("ALT",), False),
+            )
+            self.assertTrue(
+                numeric_tab.filter_frame.isVisible() or not numeric_tab.isVisible()
+            )
+            self.assertIn('"PARAMCD" IN (?)', numeric_tab.compiled_filter.sql)
+            numeric_tab.resize(650, 420)
+            numeric_tab.show()
+            application.processEvents()
+            requested_filters: list[str] = []
+            numeric_tab.column_filter_requested.connect(requested_filters.append)
+            filter_x = (
+                numeric_tab.filter_header.sectionViewportPosition(2)
+                + numeric_tab.filter_header.sectionSize(2)
+                - 10
+            )
+            QTest.mouseClick(
+                numeric_tab.filter_header.viewport(),
+                Qt.LeftButton,
+                Qt.NoModifier,
+                QPoint(filter_x, 5),
+            )
+            self.assertEqual(requested_filters, ["AVAL"])
+            self.assertIsNone(numeric_tab.model.sort_spec)
+            vertical_header = numeric_tab.table.verticalHeader()
+            first_y = (
+                vertical_header.sectionViewportPosition(0)
+                + vertical_header.sectionSize(0) // 2
+            )
+            third_y = (
+                vertical_header.sectionViewportPosition(2)
+                + vertical_header.sectionSize(2) // 2
+            )
+            QTest.mouseClick(
+                vertical_header.viewport(),
+                Qt.LeftButton,
+                Qt.NoModifier,
+                QPoint(5, first_y),
+            )
+            QTest.mouseClick(
+                vertical_header.viewport(),
+                Qt.LeftButton,
+                Qt.ControlModifier,
+                QPoint(5, third_y),
+            )
+            self.assertEqual(numeric_tab.table.selected_row_numbers(), [0, 2])
+            numeric_tab.table._context_index = numeric_tab.model.index(0, 2)
+            self.assertTrue(numeric_tab.table._context_variable_is_numeric())
+            numeric_tab.show_comparison_highlights(("AVAL",))
+            self.assertEqual(numeric_tab.model.highlighted_columns, {"AVAL"})
+            numeric_tab.close()
             window.close()
             application.processEvents()
             self.assertFalse(manager.session_directory.exists())

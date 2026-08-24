@@ -29,10 +29,14 @@ from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
 from ..sas_reader import SasDatasetReader
 from ..settings import AppSettings
+from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
+from .analysis_panel import AnalysisPanel
+from .column_filter_dialog import ColumnFilterDialog
 from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
+from .settings_dialog import SettingsDialog
 from .variables_panel import VariablesPanel
 
 
@@ -70,6 +74,9 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self._workers: dict[QWidget, set[Worker]] = {}
         self._pending_removals: dict[QWidget, list[Path]] = {}
+        self._last_statistics_request: tuple[DatasetTab, str] | None = None
+        self._statistics_owner: DatasetTab | None = None
+        self._comparison_owner: DatasetTab | None = None
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
         self.setMinimumSize(850, 560)
@@ -78,6 +85,7 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_center()
         self._create_variables_panel()
+        self._create_analysis_panel()
         self._create_status_bar()
         self._sync_active_tab()
 
@@ -117,6 +125,11 @@ class MainWindow(QMainWindow):
         self.variables_action = QAction("Variables Panel", self)
         self.variables_action.setCheckable(True)
         self.variables_action.setChecked(True)
+        self.analysis_action = QAction("Analysis", self)
+        self.analysis_action.setCheckable(True)
+        self.analysis_action.setChecked(False)
+        self.settings_action = QAction("Settings…", self)
+        self.settings_action.triggered.connect(self.show_settings)
 
     def _create_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -131,7 +144,10 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.history_action)
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.variables_action)
-        self.menuBar().addMenu("&Tools")
+        tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu.addAction(self.analysis_action)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.settings_action)
         help_menu = self.menuBar().addMenu("&Help")
         about = QAction("About SASDataViewer", self)
         about.triggered.connect(
@@ -203,6 +219,24 @@ class MainWindow(QMainWindow):
         self.variables_panel.variable_activated.connect(self._locate_variable)
         self.variable_search.textChanged.connect(self.variables_panel.set_search)
         self.variables_panel.search.textChanged.connect(self._sync_top_search)
+
+    def _create_analysis_panel(self) -> None:
+        self.analysis_panel = AnalysisPanel()
+        self.analysis_dock = QDockWidget("Analysis", self)
+        self.analysis_dock.setObjectName("analysisDock")
+        self.analysis_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        self.analysis_dock.setWidget(self.analysis_panel)
+        self.analysis_dock.setMinimumWidth(310)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.analysis_dock)
+        self.analysis_dock.hide()
+        self.analysis_action.toggled.connect(self.analysis_dock.setVisible)
+        self.analysis_dock.visibilityChanged.connect(self.analysis_action.setChecked)
+        self.analysis_panel.locate_variable_requested.connect(self._locate_variable)
+        self.analysis_panel.settings_requested.connect(self.show_settings)
+        self.analysis_panel.recalculate_requested.connect(self._recalculate_statistics)
+        self.analysis_panel.clear_comparison_requested.connect(
+            self._clear_row_comparison
+        )
 
     def _sync_top_search(self, text: str) -> None:
         if self.variable_search.text() == text:
@@ -294,6 +328,23 @@ class MainWindow(QMainWindow):
             lambda text, forward, start, generation, owner=tab: self._find_text(
                 owner, text, forward, start, generation
             )
+        )
+        tab.column_filter_requested.connect(
+            lambda variable, owner=tab: self._show_column_filter(owner, variable)
+        )
+        tab.proc_means_requested.connect(
+            lambda variable, owner=tab: self._run_proc_means(owner, variable)
+        )
+        tab.settings_requested.connect(self.show_settings)
+        tab.compare_rows_requested.connect(
+            lambda rows, owner=tab: self._compare_rows(owner, rows)
+        )
+        tab.clear_comparison_requested.connect(self._clear_row_comparison)
+        tab.analysis_invalidated.connect(
+            lambda owner=tab: self._analysis_invalidated(owner)
+        )
+        tab.comparison_invalidated.connect(
+            lambda owner=tab: self._comparison_invalidated(owner)
         )
         return tab
 
@@ -475,6 +526,188 @@ class MainWindow(QMainWindow):
         if tab:
             tab.locate_variable(variable)
 
+    def _show_column_filter(self, tab: DatasetTab, variable_name: str) -> None:
+        if self.tabs.indexOf(tab) < 0 or not tab.cache_complete:
+            return
+        variable = next(
+            (
+                item
+                for item in tab.handle.metadata.variables
+                if item.name == variable_name
+            ),
+            None,
+        )
+        if variable is None:
+            return
+        generation = tab.generation
+        context_filter = tab.filter_context_without(variable_name)
+        self.task_status.setText(f"Loading values for {variable_name}…")
+
+        def completed(values) -> None:
+            if (
+                self.tabs.indexOf(tab) < 0
+                or generation != tab.generation
+                or tab is not self.current_dataset_tab()
+            ):
+                return
+            dialog = ColumnFilterDialog(
+                variable,
+                values,
+                tab.column_filters.get(variable_name),
+                self,
+            )
+            if dialog.exec():
+                tab.set_column_filter(variable_name, dialog.result_spec)
+                self._refresh_status(tab)
+
+        self._submit(
+            tab,
+            lambda _worker: self.store.distinct_values(
+                tab.handle.database_path,
+                tab.handle.metadata,
+                variable_name,
+                context_filter,
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "Column Filter Failed", message, details
+            ),
+        )
+
+    def show_settings(self) -> None:
+        dialog = SettingsDialog(self.settings, self)
+        dialog.exec()
+
+    def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
+        if self.tabs.indexOf(tab) < 0 or not tab.cache_complete:
+            return
+        variable = next(
+            (
+                item
+                for item in tab.handle.metadata.variables
+                if item.name == variable_name
+            ),
+            None,
+        )
+        if variable is None or variable.kind != "numeric":
+            return
+        generation = tab.generation
+        compiled = tab.compiled_filter
+        confidence = self.settings.proc_means_confidence
+        self._last_statistics_request = (tab, variable_name)
+        self.analysis_dock.show()
+        self.analysis_panel.tabs.setCurrentIndex(0)
+        self.analysis_panel.statistics_scope.setText(
+            f"Calculating {variable_name} on the current filtered result…"
+        )
+
+        def completed(result) -> None:
+            if (
+                self.tabs.indexOf(tab) < 0
+                or generation != tab.generation
+                or tab is not self.current_dataset_tab()
+            ):
+                return
+            self._statistics_owner = tab
+            self.analysis_panel.show_statistics(
+                result,
+                self.settings.proc_means_statistics,
+                self.settings.proc_means_decimals,
+                tab.filter_description(),
+            )
+
+        self._submit(
+            tab,
+            lambda _worker: calculate_statistics(
+                tab.handle.database_path,
+                tab.handle.metadata,
+                variable_name,
+                compiled,
+                confidence,
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "PROC MEANS Failed", message, details
+            ),
+        )
+
+    def _recalculate_statistics(self) -> None:
+        if self._last_statistics_request is None:
+            return
+        tab, variable = self._last_statistics_request
+        if self.tabs.indexOf(tab) >= 0:
+            self._run_proc_means(tab, variable)
+
+    def _compare_rows(self, tab: DatasetTab, rows: list[int]) -> None:
+        if self.tabs.indexOf(tab) < 0 or not tab.cache_complete:
+            return
+        if len(rows) < 2 or len(rows) > 20:
+            QMessageBox.information(
+                self,
+                "Compare Rows",
+                "Select between 2 and 20 rows. Use Ctrl+click on row headers "
+                "to select non-adjacent rows.",
+            )
+            return
+        generation = tab.generation
+        compiled = tab.compiled_filter
+        sort = tab.model.sort_spec
+        self.analysis_dock.show()
+        self.analysis_panel.tabs.setCurrentIndex(1)
+        self.analysis_panel.comparison_scope.setText("Comparing selected rows…")
+
+        def completed(result) -> None:
+            if (
+                self.tabs.indexOf(tab) < 0
+                or generation != tab.generation
+                or tab is not self.current_dataset_tab()
+            ):
+                return
+            if self._comparison_owner and self._comparison_owner is not tab:
+                self._comparison_owner.clear_comparison_highlights()
+            self._comparison_owner = tab
+            tab.show_comparison_highlights(
+                result.differing_variables,
+                tuple(row.view_row for row in result.rows),
+            )
+            self.analysis_panel.show_comparison(result, tab.handle.metadata)
+
+        self._submit(
+            tab,
+            lambda _worker: self.store.compare_view_rows(
+                tab.handle.database_path,
+                tab.handle.metadata,
+                compiled,
+                sort,
+                rows,
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "Row Comparison Failed", message, details
+            ),
+        )
+
+    def _clear_row_comparison(self) -> None:
+        if self._comparison_owner:
+            self._comparison_owner.clear_comparison_highlights()
+        self._comparison_owner = None
+        self.analysis_panel.clear_comparison()
+
+    def _analysis_invalidated(self, tab: DatasetTab) -> None:
+        tab.clear_comparison_highlights()
+        if self._comparison_owner is tab:
+            self._comparison_owner = None
+        if tab is self.current_dataset_tab():
+            self.analysis_panel.clear_comparison()
+            if self._statistics_owner is tab:
+                self.analysis_panel.mark_statistics_stale()
+
+    def _comparison_invalidated(self, tab: DatasetTab) -> None:
+        tab.clear_comparison_highlights()
+        if self._comparison_owner is tab:
+            self._comparison_owner = None
+            self.analysis_panel.clear_comparison()
+
     def reload_current(self) -> None:
         tab = self.current_dataset_tab()
         if not tab or tab.reload_in_progress:
@@ -484,6 +717,7 @@ class MainWindow(QMainWindow):
         preserved_visible = list(tab.visible_columns)
         editor_text = tab.where_editor.toPlainText()
         applied_where = tab.applied_where
+        preserved_column_filters = dict(tab.column_filters)
         tab.reload_in_progress = True
         tab.setEnabled(False)
         self._sync_active_tab()
@@ -496,6 +730,7 @@ class MainWindow(QMainWindow):
             known = {variable.name for variable in handle.metadata.variables}
             visible = [name for name in preserved_visible if name in known]
             empty_filter = FilterEngine(handle.metadata.variables).compile("")
+            tab.column_filters = {}
             tab.replace_handle(handle, visible, empty_filter)
             tab.where_editor.setPlainText(editor_text)
             tab.applied_where = ""
@@ -508,8 +743,6 @@ class MainWindow(QMainWindow):
             self._sync_active_tab()
 
             def reapply(final_handle: DatasetHandle) -> None:
-                if not applied_where:
-                    return
                 try:
                     compiled = FilterEngine(final_handle.metadata.variables).compile(
                         applied_where
@@ -524,6 +757,7 @@ class MainWindow(QMainWindow):
                     return
                 tab.apply_filter(compiled, applied_where, add_history=False)
                 tab.applied_where = applied_where
+                tab.restore_column_filters(preserved_column_filters)
                 self._refresh_status(tab)
 
             if handle.cache_complete:
@@ -601,6 +835,12 @@ class MainWindow(QMainWindow):
         for worker in self._workers.get(widget, set()):
             worker.cancel()
         if isinstance(widget, DatasetTab):
+            if self._comparison_owner is widget:
+                self._clear_row_comparison()
+            if self._statistics_owner is widget:
+                self._statistics_owner = None
+                self._last_statistics_request = None
+                self.analysis_panel.clear_statistics()
             self._pending_removals.setdefault(widget, []).append(
                 widget.handle.temporary_path.parent
             )
@@ -610,6 +850,17 @@ class MainWindow(QMainWindow):
 
     def _sync_active_tab(self, _index: int | None = None) -> None:
         tab = self.current_dataset_tab()
+        if self._comparison_owner is not None and self._comparison_owner is not tab:
+            self._clear_row_comparison()
+        if self._statistics_owner is not None and self._statistics_owner is not tab:
+            self._statistics_owner = None
+            self._last_statistics_request = None
+            self.analysis_panel.clear_statistics()
+        if (
+            self._last_statistics_request
+            and self._last_statistics_request[0] is not tab
+        ):
+            self._last_statistics_request = None
         self._sync_dataset_actions(tab)
         self.variables_panel.set_dataset(
             tab.handle.metadata, tab.visible_columns
