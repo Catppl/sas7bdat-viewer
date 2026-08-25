@@ -35,6 +35,7 @@ class DatasetTableModel(QAbstractTableModel):
         self._page_highlights: OrderedDict[int, tuple[frozenset[str], ...]] = (
             OrderedDict()
         )
+        self._page_row_warnings: OrderedDict[int, tuple[bool, ...]] = OrderedDict()
         self._loading_pages: set[int] = set()
         self._variable_by_name = {
             variable.name: variable for variable in metadata.variables
@@ -71,7 +72,16 @@ class DatasetTableModel(QAbstractTableModel):
         if role == Qt.TextAlignmentRole and isinstance(value, (int, float)):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ToolTipRole:
-            return "Missing" if value is None else str(value)
+            tooltip = "Missing" if value is None else str(value)
+            warning = dict(self.metadata.warning_column_messages).get(
+                self.columns[index.column()]
+            )
+            return f"{tooltip}\n\nWarning: {warning}" if warning else tooltip
+        if role == Qt.BackgroundRole and (
+            self.columns[index.column()] in self.metadata.warning_columns
+            or self.is_warning_row(index.row())
+        ):
+            return QColor("#ffd9d9")
         if (
             role == Qt.BackgroundRole
             and self.columns[index.column()]
@@ -102,7 +112,15 @@ class DatasetTableModel(QAbstractTableModel):
                     details.append(f"Length: {variable.length}")
                 if variable.format:
                     details.append(f"Format: {variable.format}")
+                warning = dict(self.metadata.warning_column_messages).get(variable.name)
+                if warning:
+                    details.extend(("", f"Warning: {warning}"))
                 return "\n".join(details)
+            if (
+                role == Qt.BackgroundRole
+                and variable.name in self.metadata.warning_columns
+            ):
+                return QColor("#ffd9d9")
         if orientation == Qt.Vertical and role == Qt.DisplayRole:
             return section + 1
         return None
@@ -141,6 +159,7 @@ class DatasetTableModel(QAbstractTableModel):
             self.columns = list(columns)
         self._pages.clear()
         self._page_highlights.clear()
+        self._page_row_warnings.clear()
         self._loading_pages.clear()
         self.filtered_count = (
             self.metadata.row_count if filtered_count is None else filtered_count
@@ -155,6 +174,7 @@ class DatasetTableModel(QAbstractTableModel):
         rows: tuple[tuple[object, ...], ...],
         filtered_count: int,
         cell_highlights: tuple[frozenset[str], ...] = (),
+        row_warnings: tuple[bool, ...] = (),
     ) -> None:
         self._loading_pages.discard(offset)
         if filtered_count != self.filtered_count:
@@ -162,6 +182,7 @@ class DatasetTableModel(QAbstractTableModel):
             self.filtered_count = filtered_count
             self._pages.clear()
             self._page_highlights.clear()
+            self._page_row_warnings.clear()
             self._loading_pages.clear()
             self.endResetModel()
         if not rows:
@@ -170,10 +191,12 @@ class DatasetTableModel(QAbstractTableModel):
         self._page_highlights[offset] = cell_highlights or tuple(
             frozenset() for _row in rows
         )
+        self._page_row_warnings[offset] = row_warnings or tuple(False for _row in rows)
         self._pages.move_to_end(offset)
         while len(self._pages) > self.max_cached_pages:
             expired, _rows = self._pages.popitem(last=False)
             self._page_highlights.pop(expired, None)
+            self._page_row_warnings.pop(expired, None)
         bottom = min(offset + len(rows), self.filtered_count) - 1
         if bottom >= offset and self.columns:
             self.dataChanged.emit(
@@ -195,11 +218,24 @@ class DatasetTableModel(QAbstractTableModel):
             self.filtered_count = row_count
             self._pages.clear()
             self._page_highlights.clear()
+            self._page_row_warnings.clear()
             self._loading_pages.clear()
             self.endResetModel()
 
     def load_failed(self, offset: int) -> None:
         self._loading_pages.discard(offset)
+
+    def is_generated_highlight(self, row: int, column_name: str) -> bool:
+        offset = self._page_offset(row)
+        values = self._page_highlights.get(offset, ())
+        local = row - offset
+        return local < len(values) and column_name in values[local]
+
+    def is_warning_row(self, row: int) -> bool:
+        offset = self._page_offset(row)
+        values = self._page_row_warnings.get(offset, ())
+        local = row - offset
+        return local < len(values) and values[local]
 
     def set_highlighted_cells(self, rows: set[int], columns: set[str]) -> None:
         rows = {row for row in rows if 0 <= row < self.filtered_count}

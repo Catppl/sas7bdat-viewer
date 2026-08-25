@@ -102,19 +102,82 @@ class DataStore:
             include_highlights = bool(metadata.diff_columns_column)
             if include_highlights:
                 select += ", " + quote_identifier(metadata.diff_columns_column or "")
+            include_row_warnings = bool(metadata.row_warning_column)
+            if include_row_warnings:
+                select += ", " + quote_identifier(metadata.row_warning_column or "")
             sql = f"SELECT {select} FROM dataset{where}{order_clause(sort, metadata)} LIMIT ? OFFSET ?"
             raw_rows = connection.execute(
                 sql, (*compiled_filter.parameters, int(limit), int(offset))
             ).fetchall()
         highlights: tuple[frozenset[str], ...] = ()
-        if include_highlights:
-            rows = tuple(tuple(row[:-1]) for row in raw_rows)
-            highlights = tuple(
-                frozenset(json.loads(row[-1] or "[]")) for row in raw_rows
-            )
+        hidden_count = int(include_highlights) + int(include_row_warnings)
+        if hidden_count:
+            rows = tuple(tuple(row[:-hidden_count]) for row in raw_rows)
         else:
             rows = tuple(tuple(row) for row in raw_rows)
-        return PageResult(rows, filtered_count, highlights)
+        if include_highlights:
+            highlight_index = -2 if include_row_warnings else -1
+            highlights = tuple(
+                frozenset(json.loads(row[highlight_index] or "[]")) for row in raw_rows
+            )
+        row_warnings = (
+            tuple(bool(row[-1]) for row in raw_rows) if include_row_warnings else ()
+        )
+        return PageResult(rows, filtered_count, highlights, row_warnings)
+
+    def source_row_view_index(
+        self,
+        database_path: Path,
+        metadata: DatasetMetadata,
+        compiled_filter: CompiledFilter,
+        sort: SortSpec | None,
+        source_row: int,
+    ) -> int | None:
+        where = self._where_clause(metadata, compiled_filter)
+        sql = (
+            "WITH current_view AS ("
+            f"SELECT _source_row, ROW_NUMBER() OVER (ORDER BY "
+            f"{order_expression(sort, metadata)}) - 1 AS _view_row "
+            f"FROM dataset{where}) "
+            "SELECT _view_row FROM current_view WHERE _source_row = ?"
+        )
+        with closing(
+            sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            row = connection.execute(
+                sql, (*compiled_filter.parameters, int(source_row))
+            ).fetchone()
+        return None if row is None else int(row[0])
+
+    def compare_navigation_target(
+        self,
+        database_path: Path,
+        metadata: DatasetMetadata,
+        compiled_filter: CompiledFilter,
+        sort: SortSpec | None,
+        view_row: int,
+    ) -> tuple[str, int] | None:
+        side = metadata.compare_side_column
+        source_obs = metadata.source_obs_column
+        if side is None or source_obs is None:
+            return None
+        where = self._where_clause(metadata, compiled_filter)
+        sql = (
+            "WITH current_view AS ("
+            f"SELECT ROW_NUMBER() OVER (ORDER BY {order_expression(sort, metadata)}) - 1 "
+            f"AS _view_row, {quote_identifier(side)}, {quote_identifier(source_obs)} "
+            f"FROM dataset{where}) "
+            "SELECT * FROM current_view WHERE _view_row = ?"
+        )
+        with closing(
+            sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            row = connection.execute(
+                sql, (*compiled_filter.parameters, int(view_row))
+            ).fetchone()
+        if row is None or row[2] is None:
+            return None
+        return str(row[1]), int(row[2])
 
     def find_text(
         self,

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..compare_engine import DatasetComparer
+from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
 from ..domain import CacheProgress, DatasetHandle
@@ -82,6 +82,8 @@ class MainWindow(QMainWindow):
         self._statistics_owner: DatasetTab | None = None
         self._comparison_owner: DatasetTab | None = None
         self._compare_input_tabs: set[DatasetTab] = set()
+        self._compare_sources: dict[DatasetTab, dict[str, tuple[DatasetTab, Path]]] = {}
+        self._recommendation_generation = 0
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
         self.setMinimumSize(850, 560)
@@ -263,6 +265,10 @@ class MainWindow(QMainWindow):
         )
         self.compare_panel.browse_requested.connect(self._browse_compare_dataset)
         self.compare_panel.compare_requested.connect(self._run_dataset_compare)
+        self.compare_panel.recommendation_requested.connect(
+            self._recommend_compare_groups
+        )
+        self.compare_panel.advanced_toggled.connect(self._set_compare_advanced)
 
     def _sync_top_search(self, text: str) -> None:
         if self.variable_search.text() == text:
@@ -407,6 +413,11 @@ class MainWindow(QMainWindow):
                 False, f"Created {handle.metadata.row_count:,} result rows."
             )
             tab = self._make_dataset_tab(handle)
+            tab.set_advanced_visible(self.compare_panel.advanced.isChecked())
+            self._compare_sources[tab] = {
+                "Main": (main_tab, main_handle.database_path),
+                "QC": (qc_tab, qc_handle.database_path),
+            }
             title = (
                 f"Compare Result: {main_handle.metadata.name} "
                 f"vs {qc_handle.metadata.name}"
@@ -428,6 +439,46 @@ class MainWindow(QMainWindow):
             completed,
             failed,
         )
+
+    def _recommend_compare_groups(
+        self, main_tab: DatasetTab, qc_tab: DatasetTab
+    ) -> None:
+        if (
+            self.tabs.indexOf(main_tab) < 0
+            or self.tabs.indexOf(qc_tab) < 0
+            or not main_tab.cache_complete
+            or not qc_tab.cache_complete
+        ):
+            return
+        self._recommendation_generation += 1
+        generation = self._recommendation_generation
+        main_handle = main_tab.handle
+        qc_handle = qc_tab.handle
+
+        def completed(variables: tuple[str, ...]) -> None:
+            if generation != self._recommendation_generation:
+                return
+            self.compare_panel.apply_group_recommendation(main_tab, qc_tab, variables)
+
+        self._submit(
+            self.compare_panel,
+            lambda _worker: recommend_group_variables(main_handle, qc_handle, limit=3),
+            completed,
+            lambda message, details: self._show_error(
+                "Group Recommendation Failed", message, details
+            ),
+        )
+
+    def _set_compare_advanced(self, checked: bool) -> None:
+        tab = self.current_dataset_tab()
+        if tab is None or tab.handle.kind != "compare":
+            return
+        tab.set_advanced_visible(checked)
+        self.variables_panel.set_dataset(
+            tab.handle.metadata, tab.visible_columns, tab.available_columns()
+        )
+        self._refresh_status(tab)
+        self._sync_dataset_actions(tab)
 
     def _make_dataset_tab(self, handle: DatasetHandle) -> DatasetTab:
         tab = DatasetTab(handle, self.settings.page_size)
@@ -463,6 +514,11 @@ class MainWindow(QMainWindow):
         )
         tab.comparison_invalidated.connect(
             lambda owner=tab: self._comparison_invalidated(owner)
+        )
+        tab.source_navigation_requested.connect(
+            lambda row, variable, owner=tab: self._navigate_compare_source(
+                owner, row, variable
+            )
         )
         return tab
 
@@ -558,7 +614,13 @@ class MainWindow(QMainWindow):
                     if tab.cache_complete
                     else tab.handle.cached_row_count,
                 )
-            tab.model.set_page(offset, page.rows, displayed_count, page.cell_highlights)
+            tab.model.set_page(
+                offset,
+                page.rows,
+                displayed_count,
+                page.cell_highlights,
+                page.row_warnings,
+            )
             if offset == 0 and tab.pending_history_text:
                 self.history.add(tab.handle.source_path, tab.pending_history_text)
                 tab.pending_history_text = ""
@@ -609,6 +671,142 @@ class MainWindow(QMainWindow):
             ),
             completed,
             lambda message, details: self._show_error("Find Failed", message, details),
+        )
+
+    def _navigate_compare_source(
+        self, compare_tab: DatasetTab, view_row: int, variable_name: str
+    ) -> None:
+        sources = self._compare_sources.get(compare_tab)
+        if sources is None or self.tabs.indexOf(compare_tab) < 0:
+            QMessageBox.information(
+                self,
+                "Source Navigation",
+                "The source dataset link is no longer available for this result.",
+            )
+            return
+        generation = compare_tab.generation
+
+        def completed(target) -> None:
+            if (
+                target is None
+                or generation != compare_tab.generation
+                or self.tabs.indexOf(compare_tab) < 0
+            ):
+                return
+            side, source_row = target
+            source = sources.get(side)
+            if source is None:
+                return
+            source_tab, original_database = source
+            if (
+                self.tabs.indexOf(source_tab) < 0
+                or source_tab.handle.database_path != original_database
+                or source_tab.reload_in_progress
+            ):
+                QMessageBox.information(
+                    self,
+                    "Source Navigation",
+                    f"The {side} source tab was closed or reloaded after this "
+                    "comparison. The viewer will not jump to potentially changed data.",
+                )
+                return
+            source_variable = next(
+                (
+                    variable.name
+                    for variable in source_tab.handle.metadata.variables
+                    if variable.name.casefold() == variable_name.casefold()
+                ),
+                None,
+            )
+            if source_variable is None:
+                QMessageBox.information(
+                    self,
+                    "Source Navigation",
+                    f"{variable_name} does not exist on the {side} side.",
+                )
+                return
+            self._locate_source_observation(
+                source_tab, source_row, source_variable, allow_clear_prompt=True
+            )
+
+        self._submit(
+            compare_tab,
+            lambda _worker: self.store.compare_navigation_target(
+                compare_tab.handle.database_path,
+                compare_tab.handle.metadata,
+                compare_tab.compiled_filter,
+                compare_tab.model.sort_spec,
+                view_row,
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "Source Navigation Failed", message, details
+            ),
+        )
+
+    def _locate_source_observation(
+        self,
+        source_tab: DatasetTab,
+        source_row: int,
+        variable_name: str,
+        *,
+        allow_clear_prompt: bool,
+    ) -> None:
+        if self.tabs.indexOf(source_tab) < 0:
+            return
+        generation = source_tab.generation
+        compiled = source_tab.compiled_filter
+        sort = source_tab.model.sort_spec
+
+        def completed(view_row: int | None) -> None:
+            if self.tabs.indexOf(source_tab) < 0 or generation != source_tab.generation:
+                return
+            if view_row is None:
+                if allow_clear_prompt and compiled.sql:
+                    answer = QMessageBox.question(
+                        self,
+                        "Source Row Is Filtered Out",
+                        "The source observation is hidden by the source tab's current "
+                        "filter. Clear that filter and locate the observation?",
+                    )
+                    if answer == QMessageBox.Yes:
+                        source_tab.clear_filter()
+                        self._refresh_status(source_tab)
+                        self._locate_source_observation(
+                            source_tab,
+                            source_row,
+                            variable_name,
+                            allow_clear_prompt=False,
+                        )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Source Navigation",
+                        "The source observation could not be found in the current "
+                        "source dataset.",
+                    )
+                return
+            if variable_name not in source_tab.visible_columns:
+                source_tab.set_visible_columns(
+                    [*source_tab.visible_columns, variable_name]
+                )
+            self.tabs.setCurrentWidget(source_tab)
+            column = source_tab.visible_columns.index(variable_name)
+            source_tab.select_position(view_row, column)
+
+        self._submit(
+            source_tab,
+            lambda _worker: self.store.source_row_view_index(
+                source_tab.handle.database_path,
+                source_tab.handle.metadata,
+                compiled,
+                sort,
+                source_row,
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "Source Navigation Failed", message, details
+            ),
         )
 
     def _apply_filter(self, tab: DatasetTab, where_text: str) -> None:
@@ -933,7 +1131,7 @@ class MainWindow(QMainWindow):
 
     def export_current(self) -> None:
         tab = self.current_dataset_tab()
-        if not tab or not tab.cache_complete or not tab.visible_columns:
+        if not tab or not tab.cache_complete or not self._exportable_columns(tab):
             return
         initial_directory = Path(
             self.settings.last_export_directory or str(tab.handle.source_path.parent)
@@ -996,6 +1194,7 @@ class MainWindow(QMainWindow):
         for worker in self._workers.get(widget, set()):
             worker.cancel()
         if isinstance(widget, DatasetTab):
+            self._compare_sources.pop(widget, None)
             if self._comparison_owner is widget:
                 self._clear_row_comparison()
             if self._statistics_owner is widget:
@@ -1025,8 +1224,10 @@ class MainWindow(QMainWindow):
             self._last_statistics_request = None
         self._sync_dataset_actions(tab)
         self.variables_panel.set_dataset(
-            tab.handle.metadata, tab.visible_columns
+            tab.handle.metadata, tab.visible_columns, tab.available_columns()
         ) if tab else self.variables_panel.set_dataset(None)
+        if tab and tab.handle.kind == "compare":
+            self.compare_panel.set_advanced_checked(tab.advanced_visible)
         self._refresh_compare_datasets()
         self._refresh_status(tab)
 
@@ -1039,10 +1240,17 @@ class MainWindow(QMainWindow):
             and (tab.cache_complete or tab.cache_failed)
         )
         self.export_action.setEnabled(
-            enabled and tab.cache_complete and bool(tab.visible_columns)
+            enabled and tab.cache_complete and bool(self._exportable_columns(tab))
         )
         self.clear_action.setEnabled(enabled and tab.cache_complete)
         self.close_tab_action.setEnabled(self.tabs.count() > 0)
+
+    @staticmethod
+    def _exportable_columns(tab: DatasetTab | None) -> list[str]:
+        if tab is None:
+            return []
+        excluded = set(tab.handle.metadata.export_excluded_columns)
+        return [column for column in tab.visible_columns if column not in excluded]
 
     def _refresh_status(self, tab: DatasetTab | None) -> None:
         if not tab:

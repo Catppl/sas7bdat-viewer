@@ -3,17 +3,28 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import closing
+from dataclasses import dataclass
 
 from ..domain import DatasetHandle, VariableMetadata
 from ..filter_engine import quote_identifier
 from ..temp_manager import TempManager
 from .comparator import differing_variables
-from .matcher import match_group
+from .matcher import match_group, pair_cost
 from .models import CompareConfig, SourceRecord
 from .normalize import group_sort_key, normalize_missing
 from .result_store import CompareResultWriter, build_result_schema
 
 ProgressCallback = Callable[[str], None]
+
+
+@dataclass(frozen=True, slots=True)
+class _VariableLayout:
+    comparable: tuple[VariableMetadata, ...]
+    result: tuple[VariableMetadata, ...]
+    main_names: dict[str, str | None]
+    qc_names: dict[str, str | None]
+    warning_columns: tuple[str, ...]
+    warning_messages: tuple[tuple[str, str], ...]
 
 
 class DatasetComparer:
@@ -31,8 +42,8 @@ class DatasetComparer:
         if not main.cache_complete or not qc.cache_complete:
             raise ValueError("Both Main and QC datasets must finish loading first.")
         notify = progress or (lambda _message: None)
-        common, qc_names = self._common_variables(main, qc)
-        common_by_name = {variable.name: variable for variable in common}
+        layout = self._variable_layout(main, qc)
+        common_by_name = {variable.name: variable for variable in layout.comparable}
         requested = {
             *config.group_variables,
             *config.key_variables,
@@ -48,18 +59,21 @@ class DatasetComparer:
             qc_kind = next(
                 variable.kind
                 for variable in qc.metadata.variables
-                if variable.name == qc_names[name]
+                if variable.name == layout.qc_names[name]
             )
             if main_kind != qc_kind:
                 raise ValueError(f"Variable {name} has different types in Main and QC.")
 
         result_directory = self.temp_manager.create_dataset_directory()
         writer = CompareResultWriter(
-            result_directory / "dataset.sqlite", build_result_schema(common)
+            result_directory / "dataset.sqlite",
+            build_result_schema(
+                layout.result, layout.warning_columns, layout.warning_messages
+            ),
         )
         try:
             notify("Preparing grouped Main and QC observations…")
-            self._run_groups(main, qc, common, qc_names, config, writer, notify)
+            self._run_groups(main, qc, layout, config, writer, notify)
             notify(f"Finalizing Compare Result… {writer.row_count:,} rows")
             return writer.finish(result_directory, main, qc)
         except BaseException:
@@ -68,51 +82,82 @@ class DatasetComparer:
             raise
 
     @staticmethod
-    def _common_variables(
-        main: DatasetHandle, qc: DatasetHandle
-    ) -> tuple[tuple[VariableMetadata, ...], dict[str, str]]:
+    def _variable_layout(main: DatasetHandle, qc: DatasetHandle) -> _VariableLayout:
         qc_by_fold = {
             variable.name.casefold(): variable for variable in qc.metadata.variables
         }
-        common: list[VariableMetadata] = []
-        qc_names: dict[str, str] = {}
+        comparable: list[VariableMetadata] = []
+        result: list[VariableMetadata] = []
+        main_names: dict[str, str | None] = {}
+        qc_names: dict[str, str | None] = {}
+        warning_columns: list[str] = []
+        warning_messages: list[tuple[str, str]] = []
         for variable in main.metadata.variables:
             qc_variable = qc_by_fold.get(variable.name.casefold())
             if qc_variable is None:
+                result.append(variable)
+                main_names[variable.name] = variable.name
+                qc_names[variable.name] = None
+                warning_columns.append(variable.name)
+                warning_messages.append(
+                    (variable.name, "Variable exists only in Main.")
+                )
                 continue
             result_kind = (
                 variable.kind if variable.kind == qc_variable.kind else "character"
             )
-            common.append(
-                VariableMetadata(
-                    variable.name,
-                    variable.label or qc_variable.label,
-                    result_kind,
-                    variable.length,
-                    variable.format,
-                )
+            output = VariableMetadata(
+                variable.name,
+                variable.label or qc_variable.label,
+                result_kind,
+                variable.length,
+                variable.format,
             )
+            result.append(output)
+            main_names[variable.name] = variable.name
             qc_names[variable.name] = qc_variable.name
-        if not common:
-            raise ValueError("Main and QC do not have any common variables.")
-        return tuple(common), qc_names
+            if variable.kind == qc_variable.kind:
+                comparable.append(output)
+            else:
+                warning_columns.append(variable.name)
+                warning_messages.append(
+                    (variable.name, "Variable type differs between Main and QC.")
+                )
+        main_folds = {variable.name.casefold() for variable in main.metadata.variables}
+        for variable in qc.metadata.variables:
+            if variable.name.casefold() in main_folds:
+                continue
+            result.append(variable)
+            main_names[variable.name] = None
+            qc_names[variable.name] = variable.name
+            warning_columns.append(variable.name)
+            warning_messages.append((variable.name, "Variable exists only in QC."))
+        if not comparable:
+            raise ValueError(
+                "Main and QC do not have any common variables with compatible types."
+            )
+        return _VariableLayout(
+            tuple(comparable),
+            tuple(result),
+            main_names,
+            qc_names,
+            tuple(warning_columns),
+            tuple(warning_messages),
+        )
 
     def _run_groups(
         self,
         main: DatasetHandle,
         qc: DatasetHandle,
-        common: tuple[VariableMetadata, ...],
-        qc_names: dict[str, str],
+        layout: _VariableLayout,
         config: CompareConfig,
         writer: CompareResultWriter,
         notify: ProgressCallback,
     ) -> None:
-        output_names = tuple(variable.name for variable in common)
-        kinds = {variable.name: variable.kind for variable in common}
-        main_groups = self._groups(
-            main, output_names, {name: name for name in output_names}, config, kinds
-        )
-        qc_groups = self._groups(qc, output_names, qc_names, config, kinds)
+        output_names = tuple(variable.name for variable in layout.result)
+        kinds = {variable.name: variable.kind for variable in layout.comparable}
+        main_groups = self._groups(main, output_names, layout.main_names, config, kinds)
+        qc_groups = self._groups(qc, output_names, layout.qc_names, config, kinds)
         main_group = next(main_groups, None)
         qc_group = next(qc_groups, None)
         pair_id = 0
@@ -207,7 +252,42 @@ class DatasetComparer:
                             differences,
                             record.values,
                         )
-                for index in matches.unmatched_main:
+                main_only, qc_only, unmatched_main, unmatched_qc = (
+                    self._classify_residuals(
+                        main_records,
+                        qc_records,
+                        matches.unmatched_main,
+                        matches.unmatched_qc,
+                        config,
+                    )
+                )
+                for index in main_only:
+                    pair_id += 1
+                    record = main_records[index]
+                    writer.add_row(
+                        pair_id,
+                        "Main",
+                        "Main only",
+                        record.source_row,
+                        None,
+                        None,
+                        (),
+                        record.values,
+                    )
+                for index in qc_only:
+                    pair_id += 1
+                    record = qc_records[index]
+                    writer.add_row(
+                        pair_id,
+                        "QC",
+                        "QC only",
+                        record.source_row,
+                        None,
+                        None,
+                        (),
+                        record.values,
+                    )
+                for index in unmatched_main:
                     pair_id += 1
                     record = main_records[index]
                     writer.add_row(
@@ -220,7 +300,7 @@ class DatasetComparer:
                         (),
                         record.values,
                     )
-                for index in matches.unmatched_qc:
+                for index in unmatched_qc:
                     pair_id += 1
                     record = qc_records[index]
                     writer.add_row(
@@ -243,16 +323,66 @@ class DatasetComparer:
                 )
 
     @staticmethod
+    def _classify_residuals(
+        main_records: list[SourceRecord],
+        qc_records: list[SourceRecord],
+        unmatched_main: tuple[int, ...],
+        unmatched_qc: tuple[int, ...],
+        config: CompareConfig,
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+        """Classify count-imbalance extras as side-only; retain peers as unmatched."""
+        main_extra = max(0, len(unmatched_main) - len(unmatched_qc))
+        qc_extra = max(0, len(unmatched_qc) - len(unmatched_main))
+
+        def main_best(index: int) -> float:
+            if not unmatched_qc:
+                return float("inf")
+            return min(
+                pair_cost(
+                    main_records[index], qc_records[other], config.match_variables
+                )
+                for other in unmatched_qc
+            )
+
+        def qc_best(index: int) -> float:
+            if not unmatched_main:
+                return float("inf")
+            return min(
+                pair_cost(
+                    main_records[other], qc_records[index], config.match_variables
+                )
+                for other in unmatched_main
+            )
+
+        main_ranked = sorted(
+            unmatched_main, key=lambda index: (-main_best(index), index)
+        )
+        qc_ranked = sorted(unmatched_qc, key=lambda index: (-qc_best(index), index))
+        main_only = tuple(sorted(main_ranked[:main_extra]))
+        qc_only = tuple(sorted(qc_ranked[:qc_extra]))
+        main_only_set = set(main_only)
+        qc_only_set = set(qc_only)
+        return (
+            main_only,
+            qc_only,
+            tuple(index for index in unmatched_main if index not in main_only_set),
+            tuple(index for index in unmatched_qc if index not in qc_only_set),
+        )
+
+    @staticmethod
     def _groups(
         handle: DatasetHandle,
         output_names: tuple[str, ...],
-        source_names: dict[str, str],
+        source_names: dict[str, str | None],
         config: CompareConfig,
         kinds: dict[str, str],
     ) -> Iterator[
         tuple[tuple[tuple[int, object], ...], list[SourceRecord], tuple[object, ...]]
     ]:
-        selected_source = [source_names[name] for name in output_names]
+        selected_outputs = [
+            name for name in output_names if source_names[name] is not None
+        ]
+        selected_source = [source_names[name] for name in selected_outputs]
         select = ", ".join(quote_identifier(name) for name in selected_source)
         order = ", ".join(
             quote_identifier(source_names[name]) for name in config.group_variables
@@ -267,7 +397,8 @@ class DatasetComparer:
             current_raw = None
             records: list[SourceRecord] = []
             for row in cursor:
-                values = dict(zip(output_names, row[1:], strict=True))
+                values = {name: None for name in output_names}
+                values.update(dict(zip(selected_outputs, row[1:], strict=True)))
                 raw_key = tuple(
                     normalize_missing(values[name], kinds[name])
                     for name in config.group_variables

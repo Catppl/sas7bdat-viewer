@@ -85,6 +85,8 @@ PROC MEANS 用于快速查看当前数据子集中的数值型变量统计结果
 
 Dataset Compare 用于比较 Main 和 QC 两个 SAS 数据集，寻找对应 observation，并把存在差异或匹配异常的记录生成一个临时 Compare Result Tab。比较过程不会生成实体 SAS 文件，也不会修改 Main/QC 数据。
 
+![Dataset Compare 自动 Group 推荐、差异高亮和警告行](docs/screenshots/SASDataViewer-compare-update.png)
+
 ### 打开和选择数据集
 
 从 `Tools > Compare Datasets` 打开右侧面板，然后选择：
@@ -125,6 +127,8 @@ Compare 始终读取 Main/QC 的完整原始缓存，忽略两个输入 Tab 当�
 8. 成本超过 `Match threshold` 的 observation 标记为 Unmatched。
 9. 最佳与第二候选的成本差不超过 `Ambiguity margin` 时标记为 Ambiguous。
 
+选择 Main/QC 且两侧完整缓存就绪后，程序会在后台自动推荐最多 3 个 Group Variables。候选变量必须同名（不区分变量名大小写）、类型兼容，并且两侧标准化后的每个 `value + frequency` 完全一致；字符值区分大小写，missing 的频数也必须一致，常量变量同样可以成为候选。最终推荐组合的联合频数也必须完全一致。Match Variables 默认全选全部可比较共同变量，Key Variables 默认不选。
+
 `AVISITN`、`ASEQ` 等变量可以作为 Match Variables，但不会被直接当作唯一 key；匹配完成后，这些变量仍会和其他共同变量一起执行真正的逐变量比较。
 
 ### Key Variables 规则
@@ -152,7 +156,11 @@ Main
 QC
 ```
 
-结果还包含 `SIDE`、`MATCH_STATUS`、`SOURCE_OBS`、`MATCH_COST`、`MATCH_MARGIN` 和 `DIFF_VARIABLES`。正式差异变量在 Main/QC 两行的对应单元格中同时使用浅黄色高亮；完全一致的匹配 observation 不进入结果。
+结果还包含 `SIDE`、`MATCH_STATUS`、`SOURCE_OBS` 和 `DIFF_VARIABLES`。正式差异变量在 Main/QC 两行的对应单元格中同时使用浅黄色高亮；`Main only`、`QC only` 和 `Unmatched` 整行使用淡红色警告；完全一致的匹配 observation 不进入结果。
+
+只存在于 Main 或 QC 的变量仍保留为结果列：存在的一侧显示原值，另一侧留空，整列和表头使用淡红色，并在 tooltip 中说明所属侧。仅有 schema 差异不会让原本完全一致的 observation 强制进入结果；即使结果为 0 行，警告列和 schema 提示仍会保留。
+
+面板底部的 `Advanced details` 可按 Compare Result 单独显示 `COMPARE_PAIR`、`MATCH_COST` 和 `MATCH_MARGIN`。关闭时这些字段不会出现在表格和 Variables 面板；无论是否显示，CSV 始终排除这三个内部诊断字段。
 
 ### Compare Result 浏览和导出
 
@@ -164,6 +172,7 @@ Compare Result 复用普通 Dataset Tab 的以下能力：
 - 排序、Ctrl+F、Ctrl+G。
 - 单元格、整行和区域复制。
 - CSV 导出当前筛选结果、当前显示列和当前排序。
+- 双击黄色差异单元格或淡红色警告行的数据单元格，可跳转到对应 Main/QC 源 Tab 的原 observation 和变量；隐藏列会自动恢复。若源 WHERE 隐藏了该 observation，程序会先询问是否清除源筛选。源 Tab 已关闭或在比较后 Reload 时不会跳转到可能已经变化的数据。
 
 筛选和排序按 `COMPARE_PAIR` 处理：Main 或 QC 任意一行满足 WHERE/表头筛选时保留整个匹配对；排序只改变匹配对之间的顺序，每组内部始终保持 Main 在前、QC 在后。Main only/QC only 等单边结果保持一行。
 
@@ -198,7 +207,7 @@ python -m clinical_data_viewer
 - Copy：选择单元格、整行或矩形区域后按 `Ctrl+C`；右键可复制列名。
 - PROC MEANS：在数值列单元格上右键选择 PROC MEANS；结果显示在右侧 Analysis。小写 `n (Subjects)` 是当前过滤结果中该分析变量非缺失且 `USUBJID` 非缺失的唯一受试者数；`N (Values)` 才是分析变量非缺失观测数。若没有 `USUBJID`，受试者数显示为不可用，不会用其他列替代。
 - Row Comparison：点击左侧行号选择整行，按住 `Ctrl` 点击其他行号进行非连续多选，右键 Compare Selected Rows。黄色背景仅应用到选中比较行中有差异的列，并会覆盖这些单元格原有的蓝色选中背景；相同行的其他列仍保持蓝色，未选行不变。字符空值和 NULL 都视为 missing；数值按未格式化原值比较。筛选、排序或 Reload 后旧比较自动清除。
-- Dataset Compare：从 `Tools > Compare Datasets` 打开右侧面板。分别选择 Main/QC；Browse 会按普通 Open 流程把文件复制到临时目录、载入普通 Tab，完整缓存后可参与比较。默认把共同的 `USUBJID`/`PARAMCD` 设为 Group，其余共同变量设为 Match，可逐变量调整 Match、Key、权重和数值 tolerance。Compare 永远使用完整原始缓存，忽略两个输入 Tab 当前的 WHERE、显示列和排序。结果只保留 Different、Main only、QC only、Unmatched 和 Ambiguous observation；匹配对永远按 Main 后 QC 相邻显示。结果 Tab 支持 Variables、WHERE、表头筛选、查找、跳行、复制、配对排序和 CSV；任一侧命中筛选时保留整对。Compare Result 禁用 Reload、PROC MEANS 和再次作为 Compare 输入，关闭后自动清理。
+- Dataset Compare：从 `Tools > Compare Datasets` 打开右侧面板。分别选择 Main/QC；Browse 会按普通 Open 流程把文件复制到临时目录、载入普通 Tab，完整缓存后可参与比较。程序按两侧实际 `value + frequency` 自动推荐最多 3 个 Group，全部可比较共同变量默认选为 Match，Key 默认不选；用户仍可逐变量调整 Group、Match、Key、权重和数值 tolerance。Compare 永远使用完整原始缓存，忽略两个输入 Tab 当前的 WHERE、显示列和排序。结果只保留 Different、Main only、QC only、Unmatched 和 Ambiguous observation；匹配对永远按 Main 后 QC 相邻显示。结果 Tab 支持 Variables、WHERE、表头筛选、查找、跳行、复制、配对排序、源数据跳转和 CSV；任一侧命中筛选时保留整对。`Advanced details` 控制内部匹配字段的显示，但 CSV 始终排除它们。Compare Result 禁用 Reload、PROC MEANS 和再次作为 Compare 输入，关闭后自动清理。
 - Variables：顶部列表是当前显示列；展开 All Variables 可查看完整 metadata 并勾选隐藏列。Select All 在“全选”和“全部取消”之间切换；部分选择或全部取消后再次点击会恢复全部变量。允许暂时隐藏全部列，此时 Apply、Find、Go to Row 和 Export 不可用。
 - WHERE：`Ctrl+Enter`、Apply 执行；Clear 不修改数据，只恢复完整显示。列头筛选生成的条件可以继续手工编辑；手工改写后 Apply 会把编辑框整体作为唯一条件来源，并清除旧筛选标签，避免同一条件重复执行。
 - Find：`Ctrl+F` 打开查找栏，Enter 或 `F3` 查找下一个，`Shift+F3` 查找上一个。查找范围始终是当前筛选结果和当前显示列。
@@ -265,7 +274,7 @@ python -m unittest discover -s tests -v
 - Ruff 显示 `All checks passed!`。
 - `compileall` 没有错误输出，并返回成功。
 - 所有单元测试显示 `OK`；安装 PySide6 后 UI smoke test 不应被跳过。
-- 测试覆盖 WHERE 解析和类型校验、参数化 SQL、分页筛选排序、当前视图 CSV 和 UTF-8 BOM、Filter History 恢复/去重、设置持久化、临时副本及遗留目录清理，以及 Dataset Compare 的全局匹配、阈值拒绝、ambiguity、Key 规则、配对筛选/排序与导出。
+- 测试覆盖 WHERE 解析和类型校验、参数化 SQL、分页筛选排序、当前视图 CSV 和 UTF-8 BOM、Filter History 恢复/去重、设置持久化、临时副本及遗留目录清理，以及 Dataset Compare 的全局匹配、精确 Group 推荐、阈值拒绝、ambiguity、Key 规则、Main/QC only 分类、schema 警告、配对筛选/排序、源行定位与高级字段导出排除。
 
 ### 3. 启动并查看界面
 
@@ -298,7 +307,7 @@ python -m clinical_data_viewer
 12. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。
 13. 关闭程序再启动，确认成功执行过的 WHERE 能从当前数据集历史和全局历史恢复。
 14. 直接运行 `SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"`，确认程序自动打开该文件；再把 `.sas7bdat` 关联到 EXE 后双击验证。文件名包含空格和中文时也应成功。
-15. 从 `Tools > Compare Datasets` 选择或 Browse Main/QC；用重复 group、交换顺序、错误 `AVISITN/ASEQ`、数值微小差异、Main/QC 独有记录测试。确认 Main/QC 相邻、差异单元格高亮、完全相同 observation 不输出；在结果 Tab 使用 WHERE、表头筛选、显示列、排序和 CSV，并确认任一侧命中筛选都会保留整对。
+15. 从 `Tools > Compare Datasets` 选择或 Browse Main/QC；确认后台最多推荐 3 个 value+frequency 完全一致的 Group、Match 默认全选、Key 默认不选。用重复 group、交换顺序、错误 `AVISITN/ASEQ`、数值微小差异、Main/QC 独有记录和单侧变量测试。确认 Main/QC 相邻、差异单元格为黄色、Main/QC only 与 Unmatched 整行为淡红色、单侧变量整列为淡红色、完全相同 observation 不输出。双击黄色/红色数据单元格验证跳回正确源 observation；勾选 Advanced details 验证三个诊断字段出现，但 CSV 始终不导出它们。在结果 Tab 使用 WHERE、表头筛选、显示列、排序和 CSV，并确认任一侧命中筛选都会保留整对。
 
 完整人工检查表也保存在 [docs/windows-acceptance.md](docs/windows-acceptance.md)。
 

@@ -11,6 +11,7 @@ from clinical_data_viewer.compare_engine import (
     CompareConfig,
     DatasetComparer,
     MatchVariable,
+    recommend_group_variables,
 )
 from clinical_data_viewer.compare_engine.comparator import differing_variables
 from clinical_data_viewer.compare_engine.matcher import match_group
@@ -168,6 +169,24 @@ class DatasetCompareTests(unittest.TestCase):
             self.assertIn("QC only", {row[2] for row in page.rows})
             self.assertIn("ASEQ", page.cell_highlights[0])
             self.assertIn("ASEQ", page.cell_highlights[1])
+            side, source_row = store.compare_navigation_target(
+                result.database_path,
+                result.metadata,
+                empty,
+                None,
+                0,
+            )
+            self.assertEqual(side, "Main")
+            self.assertEqual(
+                store.source_row_view_index(
+                    main.database_path,
+                    main.metadata,
+                    FilterEngine(main.metadata.variables).compile(""),
+                    None,
+                    source_row,
+                ),
+                source_row - 1,
+            )
 
             filtered = FilterEngine(result.metadata.variables).compile('SIDE = "QC"')
             pair_page = store.query_page(
@@ -197,8 +216,107 @@ class DatasetCompareTests(unittest.TestCase):
             self.assertEqual(exported, len(pair_page.rows))
             self.assertEqual(
                 csv_rows[1:],
-                [[str(value) for value in row] for row in pair_page.rows],
+                [[str(value) for value in row[1:]] for row in pair_page.rows],
             )
+            self.assertEqual(csv_rows[0], ["SIDE", "AVAL"])
+            manager.cleanup()
+
+    def test_group_recommendation_is_exact_joint_and_limited_to_three(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            main = make_handle(
+                root,
+                "main",
+                [
+                    ("STUDY", "A", 1, 10, 1),
+                    ("STUDY", "B", 2, 20, 2),
+                    ("STUDY", "C", 3, 30, 3),
+                ],
+            )
+            qc = make_handle(
+                root,
+                "qc",
+                [
+                    ("STUDY", "C", 3, 30, 3),
+                    ("STUDY", "A", 1, 10, 1),
+                    ("STUDY", "B", 2, 20, 2),
+                ],
+            )
+            recommended = recommend_group_variables(main, qc, limit=3)
+            self.assertLessEqual(len(recommended), 3)
+            self.assertEqual(
+                recommend_group_variables(main, qc, limit=10)[-1], "USUBJID"
+            )
+
+            with closing(sqlite3.connect(qc.database_path)) as connection:
+                connection.execute(
+                    'UPDATE dataset SET "AVAL" = 999 WHERE _source_row = 1'
+                )
+                connection.commit()
+            self.assertNotIn("AVAL", recommend_group_variables(main, qc, limit=10))
+
+    def test_schema_warnings_side_only_rows_and_advanced_export_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = TempManager(root / "temp")
+            main = make_handle(
+                root,
+                "main",
+                [("01", "ALT", 1, 10, 1), ("01", "ALT", 2, 20, 2)],
+            )
+            qc = make_handle(root, "qc", [("01", "ALT", 1, 10, 1)])
+            with closing(sqlite3.connect(main.database_path)) as connection:
+                connection.execute('ALTER TABLE dataset ADD COLUMN "MAIN_NOTE" TEXT')
+                connection.execute('UPDATE dataset SET "MAIN_NOTE" = "main"')
+                connection.commit()
+            main = DatasetHandle(
+                main.source_path,
+                main.temporary_path,
+                main.database_path,
+                DatasetMetadata(
+                    main.metadata.name,
+                    main.metadata.row_count,
+                    (*main.metadata.variables, VariableMetadata("MAIN_NOTE")),
+                ),
+                main.cached_row_count,
+                True,
+            )
+            config = CompareConfig(
+                ("USUBJID", "PARAMCD"),
+                (MatchVariable("AVISITN", "numeric"),),
+                threshold=0,
+            )
+            result = DatasetComparer(manager).compare(main, qc, config)
+            self.assertIn("MAIN_NOTE", result.metadata.warning_columns)
+            self.assertEqual(
+                set(result.metadata.advanced_columns),
+                {"COMPARE_PAIR", "MATCH_COST", "MATCH_MARGIN"},
+            )
+            page = DataStore().query_page(
+                result.database_path,
+                result.metadata,
+                ["SIDE", "MATCH_STATUS", "MAIN_NOTE"],
+                FilterEngine(result.metadata.variables).compile(""),
+                None,
+                0,
+                100,
+            )
+            self.assertIn("Main only", {row[1] for row in page.rows})
+            warning_index = next(
+                index for index, row in enumerate(page.rows) if row[1] == "Main only"
+            )
+            self.assertTrue(page.row_warnings[warning_index])
+            destination = root / "advanced.csv"
+            CsvExporter().export(
+                result,
+                destination,
+                ["COMPARE_PAIR", "SIDE", "MATCH_COST", "MAIN_NOTE"],
+                FilterEngine(result.metadata.variables).compile(""),
+                None,
+            )
+            with destination.open(encoding="utf-8-sig", newline="") as stream:
+                header = next(csv.reader(stream))
+            self.assertEqual(header, ["SIDE", "MAIN_NOTE"])
             manager.cleanup()
 
 

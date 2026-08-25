@@ -167,11 +167,17 @@ class DatasetTab(QWidget):
     clear_comparison_requested = Signal()
     analysis_invalidated = Signal()
     comparison_invalidated = Signal()
+    source_navigation_requested = Signal(int, str)
 
     def __init__(self, handle: DatasetHandle, page_size: int, parent=None) -> None:
         super().__init__(parent)
         self.handle = handle
-        self.visible_columns = [variable.name for variable in handle.metadata.variables]
+        self.advanced_visible = False
+        self.visible_columns = [
+            variable.name
+            for variable in handle.metadata.variables
+            if variable.name not in handle.metadata.advanced_columns
+        ]
         self.where_compiled_filter = CompiledFilter("", ())
         self.column_filters: dict[str, ColumnFilterSpec] = {}
         self.compiled_filter = CompiledFilter("", ())
@@ -194,6 +200,18 @@ class DatasetTab(QWidget):
         self.cache_notice.setObjectName("cacheNotice")
         self.cache_notice.setVisible(not self.cache_complete)
         layout.addWidget(self.cache_notice)
+
+        self.schema_notice = QLabel()
+        self.schema_notice.setObjectName("cacheNotice")
+        self.schema_notice.setWordWrap(True)
+        messages = [
+            message for _name, message in handle.metadata.warning_column_messages
+        ]
+        self.schema_notice.setText(
+            "Schema warning: " + " ".join(messages) if messages else ""
+        )
+        self.schema_notice.setVisible(bool(messages))
+        layout.addWidget(self.schema_notice)
 
         self.find_frame = QFrame()
         self.find_frame.setObjectName("findBar")
@@ -252,6 +270,7 @@ class DatasetTab(QWidget):
         self.table.settings_requested.connect(self.settings_requested)
         self.table.compare_rows_requested.connect(self.compare_rows_requested)
         self.table.clear_comparison_requested.connect(self.clear_comparison_requested)
+        self.table.doubleClicked.connect(self._navigate_from_compare_cell)
         layout.addWidget(self.table, 1)
 
         where_frame = QFrame()
@@ -353,6 +372,8 @@ class DatasetTab(QWidget):
         self.model.sort(column, Qt.AscendingOrder if ascending else Qt.DescendingOrder)
 
     def set_visible_columns(self, columns: list[str]) -> None:
+        allowed = set(self.available_columns())
+        columns = [column for column in columns if column in allowed]
         if columns == self.visible_columns:
             return
         self.visible_columns = list(columns)
@@ -363,6 +384,47 @@ class DatasetTab(QWidget):
         )
         self.apply_button.setEnabled(self.cache_complete and bool(self.visible_columns))
         self._sync_filtered_headers()
+
+    def available_columns(self) -> list[str]:
+        advanced = set(self.handle.metadata.advanced_columns)
+        return [
+            variable.name
+            for variable in self.handle.metadata.variables
+            if self.advanced_visible or variable.name not in advanced
+        ]
+
+    def set_advanced_visible(self, visible: bool) -> None:
+        if self.handle.kind != "compare" or visible == self.advanced_visible:
+            return
+        advanced = set(self.handle.metadata.advanced_columns)
+        self.advanced_visible = visible
+        if visible:
+            ordered = [variable.name for variable in self.handle.metadata.variables]
+            selected = set(self.visible_columns) | advanced
+            columns = [name for name in ordered if name in selected]
+        else:
+            columns = [name for name in self.visible_columns if name not in advanced]
+        self.set_visible_columns(columns)
+
+    def _navigate_from_compare_cell(self, index) -> None:
+        if self.handle.kind != "compare" or not index.isValid():
+            return
+        column_name = self.visible_columns[index.column()]
+        metadata = self.handle.metadata
+        auxiliary = {
+            metadata.pair_id_column,
+            metadata.compare_side_column,
+            metadata.source_obs_column,
+            *metadata.advanced_columns,
+        }
+        if column_name in auxiliary:
+            return
+        if (
+            self.model.is_generated_highlight(index.row(), column_name)
+            or self.model.is_warning_row(index.row())
+            or column_name in metadata.warning_columns
+        ):
+            self.source_navigation_requested.emit(index.row(), column_name)
 
     def apply_filter(
         self, compiled: CompiledFilter, where_text: str, *, add_history: bool

@@ -21,6 +21,13 @@ class DatasetMetadata:
     pair_id_column: str | None = None
     side_order_column: str | None = None
     diff_columns_column: str | None = None
+    row_warning_column: str | None = None
+    advanced_columns: tuple[str, ...] = ()
+    export_excluded_columns: tuple[str, ...] = ()
+    warning_columns: tuple[str, ...] = ()
+    warning_column_messages: tuple[tuple[str, str], ...] = ()
+    compare_side_column: str | None = None
+    source_obs_column: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +53,7 @@ class PageResult:
     rows: tuple[tuple[object, ...], ...]
     filtered_count: int
     cell_highlights: tuple[frozenset[str], ...] = ()
+    row_warnings: tuple[bool, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

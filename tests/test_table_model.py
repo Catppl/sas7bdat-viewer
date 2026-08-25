@@ -37,6 +37,67 @@ class TableModelTests(unittest.TestCase):
         self.assertIsNotNone(model.data(model.index(0, 1), Qt.BackgroundRole))
         self.assertIsNotNone(model.data(model.index(1, 1), Qt.BackgroundRole))
 
+    def test_compare_warning_colors_and_advanced_columns(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from pathlib import Path
+
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+
+        _application = QApplication.instance() or QApplication([])
+        variables = (
+            VariableMetadata("COMPARE_PAIR", kind="numeric"),
+            VariableMetadata("SIDE"),
+            VariableMetadata("MATCH_COST", kind="numeric"),
+            VariableMetadata("MATCH_MARGIN", kind="numeric"),
+            VariableMetadata("MAIN_ONLY"),
+        )
+        metadata = DatasetMetadata(
+            "compare",
+            1,
+            variables,
+            pair_id_column="COMPARE_PAIR",
+            row_warning_column="__WARNING",
+            advanced_columns=("COMPARE_PAIR", "MATCH_COST", "MATCH_MARGIN"),
+            export_excluded_columns=("COMPARE_PAIR", "MATCH_COST", "MATCH_MARGIN"),
+            warning_columns=("MAIN_ONLY",),
+            warning_column_messages=(("MAIN_ONLY", "Variable exists only in Main."),),
+        )
+        handle = DatasetHandle(
+            Path("compare"),
+            Path("compare.tmp"),
+            Path("compare.sqlite"),
+            metadata,
+            1,
+            True,
+            kind="compare",
+        )
+        tab = DatasetTab(handle, 10)
+        self.assertEqual(tab.visible_columns, ["SIDE", "MAIN_ONLY"])
+        self.assertEqual(tab.available_columns(), ["SIDE", "MAIN_ONLY"])
+        tab.set_advanced_visible(True)
+        self.assertEqual(tab.available_columns(), [item.name for item in variables])
+        tab.model.set_page(
+            0,
+            ((1.0, "Main", None, None, "value"),),
+            1,
+            (frozenset(),),
+            (True,),
+        )
+        warning = tab.model.data(tab.model.index(0, 4), Qt.BackgroundRole)
+        self.assertEqual(warning.name(), "#ffd9d9")
+        self.assertEqual(
+            tab.model.headerData(4, Qt.Horizontal, Qt.BackgroundRole).name(),
+            "#ffd9d9",
+        )
+
     def test_virtual_model_requests_an_offscreen_page_without_loading_prior_rows(
         self,
     ) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -22,11 +23,14 @@ from ..compare_engine import CompareConfig, MatchVariable
 class DatasetComparePanel(QWidget):
     browse_requested = Signal(str)
     compare_requested = Signal(object, object, object)
+    recommendation_requested = Signal(object, object)
+    advanced_toggled = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("datasetComparePanel")
-        self._last_pair: tuple[object | None, object | None] = (None, None)
+        self._last_pair_signature: tuple[object, ...] = ()
+        self._last_recommendation_signature: tuple[object, ...] = ()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         title = QLabel("Dataset Compare")
@@ -98,6 +102,13 @@ class DatasetComparePanel(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         button_row = QHBoxLayout()
+        self.advanced = QCheckBox("Advanced details")
+        self.advanced.setToolTip(
+            "Show COMPARE_PAIR, MATCH_COST, and MATCH_MARGIN in Compare Results. "
+            "These fields are never exported to CSV."
+        )
+        self.advanced.toggled.connect(self.advanced_toggled)
+        button_row.addWidget(self.advanced)
         button_row.addStretch(1)
         self.compare_button = QPushButton("Compare")
         self.compare_button.setDefault(True)
@@ -132,10 +143,21 @@ class DatasetComparePanel(QWidget):
 
     def _datasets_changed(self) -> None:
         pair = (self.main_dataset.currentData(), self.qc_dataset.currentData())
-        if pair != self._last_pair:
-            self._last_pair = pair
+        signature = self._pair_signature(*pair)
+        if signature != self._last_pair_signature:
+            self._last_pair_signature = signature
+            self._last_recommendation_signature = ()
             self._rebuild_variables()
         self._update_enabled()
+
+    @staticmethod
+    def _pair_signature(main: object | None, qc: object | None) -> tuple[object, ...]:
+        return (
+            main,
+            getattr(getattr(main, "handle", None), "database_path", None),
+            qc,
+            getattr(getattr(qc, "handle", None), "database_path", None),
+        )
 
     def _rebuild_variables(self) -> None:
         main = self.main_dataset.currentData()
@@ -153,12 +175,8 @@ class DatasetComparePanel(QWidget):
             variable
             for variable in main.handle.metadata.variables
             if variable.name.casefold() in qc_by_name
+            and variable.kind == qc_by_name[variable.name.casefold()].kind
         ]
-        group_defaults = {
-            variable.name
-            for variable in common
-            if variable.name.casefold() in {"usubjid", "paramcd"}
-        }
         for row, variable in enumerate(common):
             self.variables.insertRow(row)
             name = QTableWidgetItem(variable.name)
@@ -167,8 +185,8 @@ class DatasetComparePanel(QWidget):
             for column in (1, 2, 3):
                 item = QTableWidgetItem()
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                default_group = column == 1 and variable.name in group_defaults
-                default_match = column == 2 and variable.name not in group_defaults
+                default_group = False
+                default_match = column == 2
                 item.setCheckState(
                     Qt.Checked if default_group or default_match else Qt.Unchecked
                 )
@@ -256,6 +274,12 @@ class DatasetComparePanel(QWidget):
             self.status.setText(
                 f"{self.variables.rowCount()} common variables. Current WHERE is ignored."
             )
+            pair = (main, qc)
+            signature = self._pair_signature(*pair)
+            if signature != self._last_recommendation_signature:
+                self._last_recommendation_signature = signature
+                self.status.setText("Analyzing exact Group Variable recommendations…")
+                self.recommendation_requested.emit(main, qc)
 
     def _start_compare(self) -> None:
         try:
@@ -274,3 +298,32 @@ class DatasetComparePanel(QWidget):
         self.variables.setEnabled(not busy)
         if message:
             self.status.setText(message)
+
+    def apply_group_recommendation(
+        self, main: object, qc: object, variables: tuple[str, ...]
+    ) -> None:
+        if (self.main_dataset.currentData(), self.qc_dataset.currentData()) != (
+            main,
+            qc,
+        ):
+            return
+        selected = set(variables)
+        self.variables.blockSignals(True)
+        for row in range(self.variables.rowCount()):
+            name = self.variables.item(row, 0).text()
+            self.variables.item(row, 1).setCheckState(
+                Qt.Checked if name in selected else Qt.Unchecked
+            )
+        self.variables.blockSignals(False)
+        if variables:
+            self.status.setText("Recommended Group Variables: " + ", ".join(variables))
+        else:
+            self.status.setText(
+                "No exact value-frequency Group recommendation was found; "
+                "select Group Variables manually."
+            )
+
+    def set_advanced_checked(self, checked: bool) -> None:
+        self.advanced.blockSignals(True)
+        self.advanced.setChecked(checked)
+        self.advanced.blockSignals(False)

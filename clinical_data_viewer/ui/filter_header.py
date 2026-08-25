@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import QHeaderView, QStyle, QStyleOptionHeader
 
 
@@ -48,7 +48,27 @@ class FilterHeaderView(QHeaderView):
             self.model().headerData(logical_index, Qt.Horizontal, Qt.DisplayRole) or ""
         )
         option.textAlignment = Qt.AlignLeft | Qt.AlignVCenter
-        self.style().drawControl(QStyle.CE_Header, option, painter, self)
+        background = self.model().headerData(
+            logical_index, Qt.Horizontal, Qt.BackgroundRole
+        )
+        if isinstance(background, QColor):
+            option.palette.setColor(QPalette.Button, background)
+            option.palette.setColor(QPalette.Window, background)
+            painter.fillRect(rect, background)
+            painter.setPen(QColor("#ceddea"))
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+            painter.setPen(QColor("#243b53"))
+            font = painter.font()
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(
+                rect.adjusted(6, 0, -22, 0),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                option.text,
+            )
+        else:
+            self.style().drawControl(QStyle.CE_Header, option, painter, self)
         button = QRect(rect.right() - 21, rect.top(), 21, rect.height())
         active = logical_index in self._filtered_sections
         painter.save()

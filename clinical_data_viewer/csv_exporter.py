@@ -22,7 +22,14 @@ class CsvExporter:
         progress: Callable[[str], None] | None = None,
     ) -> int:
         notify = progress or (lambda _message: None)
-        selected = _validated_columns(columns, handle.metadata)
+        requested = _validated_columns(columns, handle.metadata)
+        excluded = set(handle.metadata.export_excluded_columns)
+        selected = [column for column in requested if column not in excluded]
+        if not selected:
+            raise ValueError(
+                "No exportable columns are selected. Advanced comparison fields "
+                "are never exported."
+            )
         where = DataStore._where_clause(handle.metadata, compiled_filter)
         select = ", ".join(quote_identifier(column) for column in selected)
         sql = (

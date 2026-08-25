@@ -20,7 +20,10 @@ class ResultSchema:
     diff_variables: str
     side_order: str
     diff_columns: str
-    common_variables: tuple[VariableMetadata, ...]
+    row_warning: str
+    result_variables: tuple[VariableMetadata, ...]
+    warning_columns: tuple[str, ...] = ()
+    warning_column_messages: tuple[tuple[str, str], ...] = ()
 
     @property
     def visible_variables(self) -> tuple[VariableMetadata, ...]:
@@ -36,8 +39,12 @@ class ResultSchema:
             VariableMetadata(
                 self.diff_variables, "Variables formally identified as different"
             ),
-            *self.common_variables,
+            *self.result_variables,
         )
+
+    @property
+    def advanced_columns(self) -> tuple[str, ...]:
+        return (self.pair, self.match_cost, self.match_margin)
 
 
 def _unique_name(base: str, used: set[str]) -> str:
@@ -51,9 +58,11 @@ def _unique_name(base: str, used: set[str]) -> str:
 
 
 def build_result_schema(
-    common_variables: tuple[VariableMetadata, ...],
+    result_variables: tuple[VariableMetadata, ...],
+    warning_columns: tuple[str, ...] = (),
+    warning_column_messages: tuple[tuple[str, str], ...] = (),
 ) -> ResultSchema:
-    used = {variable.name.casefold() for variable in common_variables}
+    used = {variable.name.casefold() for variable in result_variables}
     return ResultSchema(
         _unique_name("COMPARE_PAIR", used),
         _unique_name("SIDE", used),
@@ -64,7 +73,10 @@ def build_result_schema(
         _unique_name("DIFF_VARIABLES", used),
         _unique_name("__CDE_SIDE_ORDER", used),
         _unique_name("__CDE_DIFF_COLUMNS", used),
-        common_variables,
+        _unique_name("__CDE_ROW_WARNING", used),
+        result_variables,
+        warning_columns,
+        warning_column_messages,
     )
 
 
@@ -87,6 +99,7 @@ class CompareResultWriter:
             (
                 f"{quote_identifier(self.schema.side_order)} INTEGER NOT NULL",
                 f"{quote_identifier(self.schema.diff_columns)} TEXT NOT NULL",
+                f"{quote_identifier(self.schema.row_warning)} INTEGER NOT NULL",
             )
         )
         self.connection.execute("PRAGMA journal_mode=WAL")
@@ -110,6 +123,7 @@ class CompareResultWriter:
     ) -> None:
         columns = [variable.name for variable in self.schema.visible_variables]
         columns.extend((self.schema.side_order, self.schema.diff_columns))
+        columns.append(self.schema.row_warning)
         row = [
             pair_id,
             side,
@@ -120,9 +134,15 @@ class CompareResultWriter:
             ", ".join(differences),
         ]
         row.extend(
-            values.get(variable.name) for variable in self.schema.common_variables
+            values.get(variable.name) for variable in self.schema.result_variables
         )
-        row.extend((0 if side == "Main" else 1, json.dumps(differences)))
+        row.extend(
+            (
+                0 if side == "Main" else 1,
+                json.dumps(differences),
+                int(status in {"Main only", "QC only", "Unmatched"}),
+            )
+        )
         placeholders = ", ".join("?" for _column in columns)
         self.connection.execute(
             "INSERT INTO dataset ("
@@ -162,6 +182,13 @@ class CompareResultWriter:
             pair_id_column=self.schema.pair,
             side_order_column=self.schema.side_order,
             diff_columns_column=self.schema.diff_columns,
+            row_warning_column=self.schema.row_warning,
+            advanced_columns=self.schema.advanced_columns,
+            export_excluded_columns=self.schema.advanced_columns,
+            warning_columns=self.schema.warning_columns,
+            warning_column_messages=self.schema.warning_column_messages,
+            compare_side_column=self.schema.side,
+            source_obs_column=self.schema.source_obs,
         )
         marker = result_directory / "compare-result.tmp"
         marker.touch()

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 COMPARISON_HIGHLIGHT = QColor("#fff2b2")
+WARNING_HIGHLIGHT = QColor("#ffd9d9")
 
 
 class ComparisonHighlightDelegate(QStyledItemDelegate):
@@ -39,18 +40,38 @@ class ComparisonHighlightDelegate(QStyledItemDelegate):
             and columns[index.column()] in highlighted_columns
         )
 
+    @staticmethod
+    def highlight_color(index):
+        model = index.model()
+        columns = getattr(model, "columns", ())
+        column_name = (
+            columns[index.column()]
+            if index.isValid() and 0 <= index.column() < len(columns)
+            else ""
+        )
+        metadata = getattr(model, "metadata", None)
+        if (
+            metadata is not None
+            and column_name in getattr(metadata, "warning_columns", ())
+        ) or getattr(model, "is_warning_row", lambda _row: False)(index.row()):
+            return WARNING_HIGHLIGHT
+        if ComparisonHighlightDelegate.is_comparison_cell(index):
+            return COMPARISON_HIGHLIGHT
+        return None
+
     def initStyleOption(self, option, index) -> None:
         super().initStyleOption(option, index)
-        if not self.is_comparison_cell(index):
+        color = self.highlight_color(index)
+        if color is None:
             return
-        option.backgroundBrush = COMPARISON_HIGHLIGHT
-        option.palette.setColor(QPalette.Highlight, COMPARISON_HIGHLIGHT)
+        option.backgroundBrush = color
+        option.palette.setColor(QPalette.Highlight, color)
         option.palette.setColor(
             QPalette.HighlightedText, option.palette.color(QPalette.Text)
         )
 
     def paint(self, painter, option, index) -> None:
-        if not self.is_comparison_cell(index):
+        if self.highlight_color(index) is None:
             super().paint(painter, option, index)
             return
         # The application stylesheet supplies a blue selection background that

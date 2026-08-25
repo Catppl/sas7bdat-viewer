@@ -30,6 +30,7 @@ class VariablesPanel(QWidget):
         self._rebuild_pending = False
         self._metadata: DatasetMetadata | None = None
         self._visible: list[str] = []
+        self._available: list[str] = []
         self._search_text = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 6, 7, 6)
@@ -97,12 +98,22 @@ class VariablesPanel(QWidget):
         self._update_labels()
 
     def set_dataset(
-        self, metadata: DatasetMetadata | None, visible: list[str] | None = None
+        self,
+        metadata: DatasetMetadata | None,
+        visible: list[str] | None = None,
+        available: list[str] | None = None,
     ) -> None:
         self._metadata = metadata
+        self._available = (
+            list(available)
+            if metadata and available is not None
+            else [variable.name for variable in metadata.variables]
+            if metadata
+            else []
+        )
         self._visible = list(visible or ()) if metadata else []
         if metadata and visible is None:
-            self._visible = [variable.name for variable in metadata.variables]
+            self._visible = list(self._available)
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -124,7 +135,10 @@ class VariablesPanel(QWidget):
                 item.setCheckState(0, Qt.Checked)
                 item.setToolTip(0, self._metadata_tooltip(variable))
                 self.displayed_tree.addTopLevelItem(item)
+            available_set = set(self._available)
             for variable in self._metadata.variables:
+                if variable.name not in available_set:
+                    continue
                 item = QTreeWidgetItem(
                     [
                         variable.name,
@@ -177,11 +191,9 @@ class VariablesPanel(QWidget):
     def _toggle_all_selection(self, _checked: bool) -> None:
         if self._updating or not self._metadata:
             return
-        total = len(self._metadata.variables)
+        total = len(self._available)
         self._visible = (
-            []
-            if total and len(self._visible) == total
-            else [variable.name for variable in self._metadata.variables]
+            [] if total and len(self._visible) == total else list(self._available)
         )
         self._rebuild()
         self.visibility_changed.emit(self.visible_variables())
@@ -217,7 +229,7 @@ class VariablesPanel(QWidget):
 
     def _sync_select_all(self) -> None:
         self.select_all.blockSignals(True)
-        total = len(self._metadata.variables) if self._metadata else 0
+        total = len(self._available)
         if total and len(self._visible) == total:
             self.select_all.setCheckState(Qt.Checked)
         elif self._visible:
@@ -227,7 +239,7 @@ class VariablesPanel(QWidget):
         self.select_all.blockSignals(False)
 
     def _update_labels(self) -> None:
-        total = len(self._metadata.variables) if self._metadata else 0
+        total = len(self._available)
         self.displayed_label.setText(
             f"Displayed Columns ({len(self._visible)} of {total})"
         )
