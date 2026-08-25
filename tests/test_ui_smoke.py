@@ -68,6 +68,14 @@ class UiSmokeTests(unittest.TestCase):
             ]
             self.assertIn("Analysis", tools_actions)
             self.assertIn("PROC MEANS Builder", tools_actions)
+            self.assertEqual(
+                window.analysis_panel.builder.sas_code_button.text(),
+                "SAS Code Generator…",
+            )
+            self.assertEqual(
+                window.analysis_panel.builder.r_code_button.text(),
+                "R Code Generator…",
+            )
             self.assertIn("Compare Datasets", tools_actions)
             self.assertFalse(window.compare_dock.isVisible())
             self.assertTrue(window.variables_dock.isVisible() or not window.isVisible())

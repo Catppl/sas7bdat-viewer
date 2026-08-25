@@ -147,17 +147,53 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 result.configuration_path.read_text(encoding="utf-8")
             )
             self.assertEqual(configuration["type"], "proc_means")
-            self.assertEqual(configuration["version"], 1)
-            self.assertEqual(configuration["dataset"], "ADLB")
+            self.assertEqual(configuration["version"], 3)
+            self.assertEqual(configuration["input"]["dataset"], "ADLB")
+            self.assertEqual(configuration["input"]["format"], "sas7bdat")
+            self.assertEqual(
+                configuration["input"]["source_path"], str(source.source_path)
+            )
+            self.assertNotEqual(
+                configuration["input"]["source_path"], str(source.temporary_path)
+            )
             self.assertEqual(configuration["analysis_variables"], ["AVAL", "CHG"])
             self.assertEqual(configuration["statistics"][3:5], ["MEAN", "SD"])
-            self.assertTrue(configuration["options"]["nway"])
-            self.assertTrue(configuration["options"]["include_missing_class"])
+            self.assertEqual(
+                configuration["calculation"]["reference_engine"],
+                "python_proc_means_v1",
+            )
+            self.assertTrue(configuration["calculation"]["include_missing_class"])
+            self.assertEqual(
+                configuration["calculation"]["subject_count"]["variable"],
+                "USUBJID",
+            )
+            self.assertEqual(configuration["filter"]["language"], "sas_like")
+            self.assertEqual(configuration["filter"]["text"], 'ANL01FL = "Y"')
+            self.assertEqual(configuration["filter"]["ast"]["type"], "comparison")
+            self.assertEqual(configuration["variables"]["AVAL"]["type"], "numeric")
             self.assertEqual(
                 configuration["display"]["decimal_group_variables"],
                 ["PARAMCD", "AVISITN"],
             )
-            self.assertEqual(configuration["display"]["maximum_decimals"], 4)
+            self.assertEqual(
+                configuration["display"]["decimal_inference"]["maximum_decimals"],
+                4,
+            )
+            self.assertEqual(
+                configuration["display"]["decimal_inference"]["mode"],
+                "runtime_from_filtered_input",
+            )
+            self.assertEqual(configuration["output"]["layout"], "long")
+            self.assertEqual(configuration["display"]["rounding"]["mode"], "half_up")
+            self.assertNotIn("resolved_decimals", configuration["display"])
+            self.assertEqual(
+                configuration["targets"]["sas"]["source_library"], "analysis"
+            )
+            self.assertEqual(configuration["targets"]["sas"]["source_member"], "adlb")
+            self.assertEqual(
+                configuration["targets"]["r"]["output_object"],
+                "proc_means_result",
+            )
             manager.cleanup()
 
     def test_decimal_group_must_be_a_by_or_class_variable(self) -> None:

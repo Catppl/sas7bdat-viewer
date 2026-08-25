@@ -17,7 +17,7 @@
 - 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。列头互动筛选会同步生成可编辑的 SAS-like WHERE，并与手写条件作为一条完整条件保存。
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。
 - 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
-- 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab 和配置 JSON。两种模式均使用当前完整筛选结果。
+- 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
@@ -28,6 +28,15 @@
 界面采用紧凑的传统 Windows 桌面布局：菜单栏、图标工具栏、数据集 Tab、左侧 Variables、右侧数据表、底部 WHERE、最底部状态栏。左侧 Filter variables 与右上角 Search Variable 同步。
 
 ![SASDataViewer 浅蓝主题、列筛选和统计面板](docs/screenshots/SASDataViewer-analysis.png)
+
+## 文档导航
+
+| 目的 | 章节 |
+| --- | --- |
+| 日常打开、浏览、筛选和导出数据 | [用户使用说明](#用户使用说明) |
+| 运行自动化测试、真实数据验收和检查文件锁定 | [系统测试与打包](#系统测试与打包) |
+| 构建 Windows EXE 和 ZIP | [Windows ZIP 打包](#windows-zip-打包) |
+| 查看模块设计和项目文件 | [项目结构](#项目结构) |
 
 ## PROC MEANS 模块
 
@@ -86,30 +95,134 @@ Builder 使用启动 Run 时已经成功应用的完整筛选快照。BY 和 CLA
 
 ### Builder 配置 JSON
 
-Builder 在生成结果 SQLite 的同一后台任务中写入 `proc_means_config.json`。它与结果位于同一会话临时目录，关闭结果 Tab 后一起清理。JSON 使用稳定的 `type/version/dataset/filter/analysis_variables/by_variables/class_variables/statistics/options` 结构，并保存 display 小数位规则，供以后使用 Jinja2 生成 SAS/Python/R 程序；本版本不执行代码生成。
+Builder 在生成结果 SQLite 的同一后台任务中写入 `proc_means_config.json`。它与结果位于同一会话临时目录，关闭结果 Tab 后一起清理。JSON v3 是 SAS 与未来 R/Python Generator 共用的唯一业务配置，不为每种语言复制一份 JSON。
+
+计算契约以已经通过测试的 Python 引擎 `python_proc_means_v1` 为基准，不以尚未完成真实运行验收的 SAS code 为基准。JSON 保存原始路径、变量 metadata、Python WHERE parser 的 AST、Analysis/BY/CLASS、Statistics、Python 统计语义、动态小数位规则以及轻量的 target 配置；不保存 Viewer temp 路径或某个 parameter 已经解析好的固定小数位。
 
 核心配置示例：
 
 ```json
 {
   "type": "proc_means",
-  "version": 1,
-  "dataset": "ADLB",
-  "filter": "ANL01FL = \"Y\"",
-  "analysis_variables": ["AVAL", "CHG"],
-  "by_variables": ["PARAMCD", "AVISITN"],
-  "class_variables": ["TRT01AN"],
+  "version": 3,
+  "input": {
+    "format": "sas7bdat",
+    "dataset": "ADLB",
+    "source_path": "C:\\project\\data\\ADLB.sas7bdat",
+    "source_directory": "C:\\project\\data"
+  },
+  "variables": {
+    "USUBJID": {
+      "type": "character",
+      "label": "Unique Subject Identifier",
+      "length": 20,
+      "format": ""
+    },
+    "PARAMCD": {
+      "type": "character",
+      "label": "Parameter Code",
+      "length": 8,
+      "format": ""
+    },
+    "AVAL": {
+      "type": "numeric",
+      "label": "Analysis Value",
+      "length": 8,
+      "format": "8.2"
+    },
+    "ANL01FL": {
+      "type": "character",
+      "label": "Analysis Record Flag 01",
+      "length": 1,
+      "format": ""
+    }
+  },
+  "filter": {
+    "language": "sas_like",
+    "text": "ANL01FL = \"Y\"",
+    "ast": {
+      "type": "comparison",
+      "variable": "ANL01FL",
+      "operator": "=",
+      "operand": {
+        "type": "literal",
+        "value_type": "character",
+        "value": "Y"
+      },
+      "prefix": false
+    }
+  },
+  "analysis_variables": ["AVAL"],
+  "by_variables": ["PARAMCD"],
+  "class_variables": [],
   "statistics": ["N", "MEAN", "SD", "MEDIAN", "MIN", "MAX"],
-  "options": {
-    "nway": true,
+  "calculation": {
+    "reference_engine": "python_proc_means_v1",
+    "mean_method": "python_math_fsum",
+    "sd_method": "sample_n_minus_1",
+    "quantile_method": "python_qntldef5_v1",
+    "confidence_interval_method": "student_t_two_sided",
+    "confidence": 0.95,
     "include_missing_class": true,
-    "include_missing_by": true,
-    "confidence": 0.95
+    "subject_count": {
+      "variable": "USUBJID",
+      "distinct": true,
+      "requires_nonmissing_analysis": true,
+      "requires_nonmissing_subject": true
+    }
+  },
+  "output": {
+    "layout": "long",
+    "numeric_values": "full_precision",
+    "display_values": "formatted"
+  },
+  "display": {
+    "decimal_group_variables": ["PARAMCD"],
+    "decimal_inference": {
+      "mode": "runtime_from_filtered_input",
+      "reference_engine": "python",
+      "method": "observed_decimal_places_v1",
+      "aggregate": "maximum",
+      "maximum_decimals": 4
+    },
+    "decimal_offsets": {"MEAN": 1, "SD": 2},
+    "rounding": {
+      "mode": "half_up",
+      "preserve_trailing_zeros": true
+    }
+  },
+  "targets": {
+    "sas": {
+      "source_library": "analysis",
+      "source_member": "adlb",
+      "output_dataset": "work.proc_means_result"
+    },
+    "r": {
+      "output_object": "proc_means_result"
+    }
   }
 }
 ```
 
-实际文件还包含 `display`，用于保存 long-format、`decimal_group_variables` 数组、各统计量 `+0～+4` 增量及最多 4 位小数的显示规则。统计配置与显示配置分开，后续 Jinja2 模板可以只读取生成 SAS 程序所需的核心字段。
+### SAS / R Code Generator
+
+在 Builder 中完成变量、Statistics 和 Decimal Group Variables 配置后，可直接点击 `SAS Code Generator…` 或 `R Code Generator…`，无需先 Run。两个 Generator 都使用与结果 JSON 完全相同的 v3 serializer，通过 Jinja2 生成只读预览；预览窗口支持 Copy 和 Save As `.sas` / `.R`。WHERE 均由保存的 Python Filter AST 渲染，而不是重新猜测原始文本。
+
+生成的程序会：
+
+- 从原始 SAS7BDAT 所在目录建立小写 `analysis` library，不引用 Viewer temp copy。
+- 应用 Builder 当前 Filter，并分别保留 BY 与 CLASS 配置；CLASS 使用 NWAY/missing。
+- 源成员名从当前数据集动态取得并以小写渲染，例如 `analysis.adlb` 或 `analysis.adae`，不写死 ADLB；非标准名称使用 SAS name literal。
+- 生成 long-format `work.proc_means_result`，`SUBJECT_N` 固定按非 missing `USUBJID` 去重。
+- 临时 Work 表使用来源数据集前缀和小写可读名称，例如 ADLB 会生成 `work.adlb_source`、`work.adlb_aval_stats`、`work.adlb_aval_subjects`、`work.adlb_aval_long` 和 `work.adlb_decimal_rules`；长变量名会安全截短并去重。变量名仍保留源数据集的真实大小写。
+- 使用 `VARDEF=DF`、`QNTLDEF=5` 和设置中的 confidence/alpha。
+- 在 SAS 每次实际运行时，按 `Analysis Variable + 完整 Decimal Group combination` 从最新数据重新推断基础小数位，再应用各统计量 `+0～+4`、最多 4 位的显示规则。
+
+R Generator 只依赖 `haven`，用 `haven::read_sas()` 读取原始 `.sas7bdat`，输出 R 环境中的 `proc_means_result` long-format data frame。它复用 Python 的筛选 AST、BY/CLASS 完整分组、missing 处理、`QNTLDEF=5` 分位数、样本 SD、Student-t CI、固定 `USUBJID` subject n，以及按最新筛选数据动态推断的小数位和 half-up 显示列。它不会引用 Viewer temp copy，也不会执行或写入任何外部文件。首次在 R 环境运行前执行一次 `install.packages("haven")` 即可。
+
+预览只生成和保存代码，SASDataViewer 不执行 SAS 或 R 程序。SAS 专用 Jinja2 模板位于 `clinical_data_viewer/codegen/sas/templates/`；R 专用模板位于 `clinical_data_viewer/codegen/r/templates/`，两者读取同一份 JSON v3，不单独维护另一份业务 JSON。
+
+![SAS Code Generator 只读预览与 Copy/Save As](docs/screenshots/SASDataViewer-sas-code-generator.png)
 
 ![PROC MEANS long-format 临时结果 Tab](docs/screenshots/SASDataViewer-proc-means-result.png)
 
@@ -130,8 +243,8 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 ### PROC MEANS 限制
 
 - Compare Result 和 PROC MEANS Result Tab 中禁用 PROC MEANS，避免对派生结果重复分析。
-- 不生成 SAS PROC MEANS 输出文件。
-- 不执行 SAS 程序。
+- SAS / R Code Generator 只生成程序文本；Viewer 本身不生成实体 SAS 或 R 结果文件。
+- 不执行 SAS 或 R 程序。
 - pyreadstat 读取的原始数值和 SAS format 后的显示值可能不同，正式统计输出仍应由经过验证的 SAS 程序生成。
 
 ## Dataset Compare 模块
@@ -237,9 +350,11 @@ Compare Result 复用普通 Dataset Tab 的以下能力：
 - 单个相同 group 默认最多允许 2,000 条 Main+QC 记录和 1,000,000 个候选组合；超过限制会指出具体 group 并停止，而不会让界面因超大 cost matrix 长时间无响应。
 - Dataset Compare 在 Qt 后台线程运行，不阻塞主界面。
 
-## 开发运行
+## 用户使用说明
 
-要求 64 位 Python 3.11 或更新版本；目标电脑的 Python 3.11.5 可直接使用。项目只声明下限 `>=3.11`，没有把 3.11.5、3.12 或某个最高版本写死。实际能否安装仍取决于 PySide6 和 pyreadstat 是否为该 Python 版本提供 wheel，内部发布建议固定使用已经验收过的 Python 3.11.5 构建 EXE。
+### 启动程序
+
+源码运行需要 64 位 Python 3.11 或更新版本。项目只声明下限 `>=3.11`，没有把 3.11.5、3.12 或某个最高版本写死。普通用户直接运行打包后的 `SASDataViewer.exe`，不需要安装 Python 或 SAS。
 
 ```powershell
 cd C:\path\to\sas7bdat-viewer
@@ -251,27 +366,46 @@ python -m clinical_data_viewer
 
 运行不依赖 SAS，也不会执行 SAS 程序。pyreadstat 对自定义 format catalog、特殊 missing、编码和某些日期显示方式可能与 SAS 本身不同；本工具定位为只读日常浏览器，不用于监管输出计算。
 
-## 操作
+### 常用操作
 
-- Open：可一次选择一个或多个文件。
-- 命令行/文件关联：程序接受一个或多个 `.sas7bdat` 路径，例如 `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`。Windows 将扩展名关联到该 EXE 后，双击数据集会启动一个 Viewer 窗口并自动打开传入文件；当前版本不把新文件转交给已经运行的窗口。
-- 表头：首次点击升序，再次点击降序；相同行值按源行顺序稳定显示。
-- 列头筛选：点击列名主体仍然排序；点击表头最右侧 `▼` 打开当前列筛选。当前列候选值会遵循手写 WHERE 和其他列筛选。在 Search loaded values 粘贴完整候选值时优先显示精确匹配；搜索有效时 Apply 只使用当前可见且勾选的匹配值，因此输入 `ALB` 会生成 `PARAMCD in ("ALB")`，不会退化为 `not missing(PARAMCD)`。Select All 会显示为 Select All Matching，并只作用于搜索结果。高基数列最多载入前 2,000 个候选值，列表中找不到的任意值应改用 Condition。自动生成的关键词使用小写，单个条件不增加多余外层括号，只有明确勾选 Missing 才会生成 `or missing(FOLDERSEQ)`。
-- Copy：选择单元格、整行或矩形区域后按 `Ctrl+C`；右键可复制列名。
-- PROC MEANS：在数值列单元格上右键选择 `PROC MEANS (Simple)` 可立即查看单变量结果；从 Tools 打开 Builder 可配置多个 Analysis/BY/CLASS 和多个 Decimal Group Variables，并生成可筛选、排序、复制及导出 CSV 的临时结果 Tab。双击结果统计值可生成独立 `Query: <Statistic>: <Value>` Drill-down Tab。小写 `n (Subjects)` 是当前过滤结果中该分析变量非缺失且 `USUBJID` 非缺失的唯一受试者数；`N (Values)` 才是分析变量非缺失观测数。
-- Row Comparison：点击左侧行号选择整行，按住 `Ctrl` 点击其他行号进行非连续多选，右键 Compare Selected Rows。黄色背景仅应用到选中比较行中有差异的列，并会覆盖这些单元格原有的蓝色选中背景；相同行的其他列仍保持蓝色，未选行不变。字符空值和 NULL 都视为 missing；数值按未格式化原值比较。筛选、排序或 Reload 后旧比较自动清除。
-- Dataset Compare：从 `Tools > Compare Datasets` 打开右侧面板。分别选择 Main/QC；Browse 会按普通 Open 流程把文件复制到临时目录、载入普通 Tab，完整缓存后可参与比较。程序按两侧实际 `value + frequency` 自动推荐最多 3 个 Group，全部可比较共同变量默认选为 Match，Key 默认不选；用户仍可逐变量调整 Group、Match、Key、权重和数值 tolerance。Compare 永远使用完整原始缓存，忽略两个输入 Tab 当前的 WHERE、显示列和排序。结果只保留 Different、Main only、QC only、Unmatched 和 Ambiguous observation；匹配对永远按 Main 后 QC 相邻显示。结果 Tab 支持 Variables、WHERE、表头筛选、查找、跳行、复制、配对排序、源数据跳转和 CSV；任一侧命中筛选时保留整对。`Advanced details` 控制内部匹配字段的显示，但 CSV 始终排除它们。Compare Result 禁用 Reload、PROC MEANS 和再次作为 Compare 输入，关闭后自动清理。
-- Variables：顶部列表是当前显示列；展开 All Variables 可查看完整 metadata 并勾选隐藏列。Select All 在“全选”和“全部取消”之间切换；部分选择或全部取消后再次点击会恢复全部变量。允许暂时隐藏全部列，此时 Apply、Find、Go to Row 和 Export 不可用。
-- WHERE：`Ctrl+Enter`、Apply 执行；Clear 不修改数据，只恢复完整显示。列头筛选生成的条件可以继续手工编辑；手工改写后 Apply 会把编辑框整体作为唯一条件来源，并清除旧筛选标签，避免同一条件重复执行。
-- Find：`Ctrl+F` 打开查找栏，Enter 或 `F3` 查找下一个，`Shift+F3` 查找上一个。查找范围始终是当前筛选结果和当前显示列。
-- Go to Row：`Ctrl+G` 输入当前结果中的 1-based 行号。虚拟表格会直接请求对应页面。
-- Filter History：双击或 Use Condition 只会回填 WHERE，需 Apply 后执行。历史保存完整的手写 WHERE 与列头筛选条件；从历史恢复时不重建列头复选状态，而是将等价 WHERE 作为手写条件执行。
-- Export CSV：弹出 Windows Save As，导出时界面仍可使用。
-- Reload：源文件不存在或新内容读取失败时保留旧 Tab 数据。
+#### 打开、浏览和列管理
+
+| 功能 | 操作 | 说明 |
+| --- | --- | --- |
+| 打开数据集 | `Open`；可一次选择多个 `.sas7bdat` | 每个数据集进入一个独立 Tab。 |
+| 直接打开 | 命令行运行 `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`，或双击已关联的文件 | 支持空格、中文路径；当前版本采用多实例方式。 |
+| 排序 | 点击列名；再次点击切换升序/降序 | 相同值按源行顺序稳定显示。 |
+| 选择显示列 | Variables 面板勾选变量 | `Select All` 可在全选/全不选之间切换；再次点击可恢复全部变量。 |
+| 查看 metadata | 展开 `All Variables` | 可查看 Variable、Label、Type、Length、Format。 |
+| 复制 | 选择单元格、整行或区域后按 `Ctrl+C` | 右键也可复制列名。 |
+
+#### 筛选、查找和定位
+
+| 功能 | 快捷键/入口 | 说明 |
+| --- | --- | --- |
+| 手写 WHERE | 底部 WHERE 编辑框、`Apply`、`Ctrl+Enter` | 支持 SAS-like 比较、列对列比较、`IN`、`BETWEEN`、`CONTAINS`、`LIKE`、missing 和逻辑运算。错误会保留原输入。 |
+| 表头互动筛选 | 点击表头最右侧 `▼` | 支持 Values、Missing、数值 Between 和字符 Contains；条件会同步写入 WHERE。 |
+| 精确值筛选 | 在列筛选搜索框输入完整值，例如 `ALB` | 生成 `PARAMCD in ("ALB")`，不会自动变成 `not missing(PARAMCD)`。 |
+| 文本查找 | `Ctrl+F`、`F3`、`Shift+F3` | 只查当前筛选结果和当前显示列。 |
+| 跳转行号 | `Ctrl+G` | 输入当前结果中的 1-based 行号。 |
+| 历史条件 | `Filter History` | 可恢复、删除和清空已成功执行的 WHERE；回填后需要 Apply。 |
+| 清除筛选 | `Clear Filter` 或 `Clear` | 只恢复显示，不修改原始数据。 |
+
+#### 分析、比较和导出
+
+| 功能 | 操作 | 说明 |
+| --- | --- | --- |
+| PROC MEANS Simple | 数值列右键 → `PROC MEANS (Simple)` | 查看当前筛选结果的 n、N、均值、分位数和 CI。 |
+| PROC MEANS Builder | `Tools > PROC MEANS Builder` | 配置多个 Analysis/BY/CLASS、Decimal Group Variables，生成临时结果 Tab。 |
+| SAS/R 代码 | Builder 中点击 `SAS Code Generator…` 或 `R Code Generator…` | 生成代码预览，不执行 SAS/R。 |
+| 行比较 | 按住 `Ctrl` 选择多个行号 → 右键 Compare | 只高亮选中行中有差异的列。 |
+| 数据集比较 | `Tools > Compare Datasets` | 选择 Main/QC，生成临时 Compare Result Tab；支持筛选、排序、源行跳转和 CSV。 |
+| 导出 CSV | `Export CSV` | 导出当前筛选结果、当前显示列和当前排序；使用 UTF-8 BOM。 |
+| 重新加载 | `Reload` | 从原始路径重新生成临时副本，并尽量保留 WHERE 和显示列。 |
 
 大文件的完整缓存尚未完成时，表格会显示蓝色提示和 `Rows cached` 状态。此阶段允许浏览、复制和调整显示变量；筛选、排序、全文查找、行跳转和 CSV 导出会暂时禁用，因为这些操作必须基于完整数据才不会产生误导结果。缓存完成后自动启用，无需重新打开文件。
 
-## 源文件与临时文件
+### 数据与临时文件
 
 Windows 默认目录：
 
@@ -290,11 +424,11 @@ Windows 默认目录：
 
 历史仅保存原始路径、文件名、WHERE 和 UTC 时间，不保存任何数据行。
 
-## 如何验证
+## 系统测试与打包
 
-验证分为自动化检查、界面运行检查和真实数据验收。最终发布前应在 Windows 10/11 64 位机器上完成全部三部分。
+系统测试分为自动化检查、界面运行检查、真实数据验收和发布包验证。最终发布前应在 Windows 10/11 64 位机器上完成全部部分。
 
-### 1. 准备验证环境
+### 1. 测试环境
 
 打开 PowerShell，进入项目目录：
 
@@ -310,10 +444,10 @@ python -m pip install -r requirements-build.txt
 
 ```powershell
 python --version
-python -c "import PySide6, pyreadstat; print('PySide6 OK'); print('pyreadstat', pyreadstat.__version__)"
+python -c "import PySide6, pyreadstat, jinja2; print('PySide6 OK'); print('pyreadstat', pyreadstat.__version__); print('Jinja2', jinja2.__version__)"
 ```
 
-### 2. 运行自动化检查
+### 2. 自动化检查
 
 ```powershell
 ruff check clinical_data_viewer tests run.py
@@ -327,9 +461,9 @@ python -m unittest discover -s tests -v
 - Ruff 显示 `All checks passed!`。
 - `compileall` 没有错误输出，并返回成功。
 - 所有单元测试显示 `OK`；安装 PySide6 后 UI smoke test 不应被跳过。
-- 测试覆盖 WHERE 解析和类型校验、参数化 SQL、分页筛选排序、当前视图 CSV 和 UTF-8 BOM、Filter History 恢复/去重、设置持久化、临时副本及遗留目录清理，以及 Dataset Compare 的全局匹配、精确 Group 推荐、阈值拒绝、ambiguity、Key 规则、Main/QC only 分类、schema 警告、配对筛选/排序、源行定位与高级字段导出排除。
+- 测试覆盖 WHERE 解析和类型校验、参数化 SQL、分页筛选排序、当前视图 CSV 和 UTF-8 BOM、Filter History 恢复/去重、设置持久化、临时副本及遗留目录清理、PROC MEANS JSON v3/Filter AST/SAS 代码生成/运行时小数位，以及 Dataset Compare 的全局匹配、精确 Group 推荐、阈值拒绝、ambiguity、Key 规则、Main/QC only 分类、schema 警告、配对筛选/排序、源行定位与高级字段导出排除。
 
-### 3. 启动并查看界面
+### 3. 启动检查
 
 ```powershell
 python -m clinical_data_viewer
@@ -337,7 +471,7 @@ python -m clinical_data_viewer
 
 应看到浅蓝色 Windows 11 / SAS Studio 风格主界面。检查 Open、Reload、Export CSV、Clear Filter、Filter History、Variables 面板、WHERE 编辑器和最底部状态栏都可见。
 
-### 4. 使用真实 SAS 数据验收
+### 4. 真实数据验收
 
 请使用测试副本，不要直接拿唯一一份生产数据做删除测试。
 
@@ -354,7 +488,7 @@ python -m clinical_data_viewer
 6. 分别验证 `IN`、`NOT IN`、`CONTAINS`/`?`、`AND`/`&`、`OR`/`|`、`BETWEEN`、`LIKE`、`IS NULL/MISSING`、比较助记符和括号。
 7. 验证列对列条件，例如 `AESTDTC <= AEENDTC`，并确认字符列与数值列比较会给出明确类型错误。
 8. 点击不同列的筛选箭头，分别验证 Values、Missing、数值 Between 和字符 Contains；只选 `PARAMCD=ALB` 时 WHERE 应为 `PARAMCD in ("ALB")`，不得自动追加 missing 或多余外层括号；明确勾选 Missing 后才出现小写的 `or missing(PARAMCD)`。确认状态行数、CSV、PROC MEANS 和 Filter History 都使用同一最终结果。手工修改生成条件再 Apply，确认旧蓝色筛选标签清除且条件不重复。
-9. 在数值列右键运行 `PROC MEANS (Simple)`，核对当前筛选结果的受试者 n、观测 N、均值、分位数和 CI；在非数值列确认菜单禁用。确认 Analysis 只按需出现使用过的模块 Tab，每个模块可独立关闭且不会重复打开。设置 Mean=+1、SD=+2、Median=+1、Min/Max=+0，确认先按实际值推断基础精度、最终封顶 4 位且重启后恢复。再用 Builder 配置多个 Analysis/BY/CLASS、missing group 和多个 Decimal Group Variables，确认按完整 combination 推断精度、long-format 结果、CSV 尾随零以及临时 `proc_means_config.json` 的字段与选择一致。双击 Mean/NMISS 等统计值，确认新建 Query Tab 只包含对应参与记录、自动定位分析列且不改变源 Tab。
+9. 在数值列右键运行 `PROC MEANS (Simple)`，核对当前筛选结果的受试者 n、观测 N、均值、分位数和 CI；在非数值列确认菜单禁用。确认 Analysis 只按需出现使用过的模块 Tab，每个模块可独立关闭且不会重复打开。设置 Mean=+1、SD=+2、Median=+1、Min/Max=+0，确认先按实际值推断基础精度、最终封顶 4 位且重启后恢复。再用 Builder 配置多个 Analysis/BY/CLASS、missing group 和多个 Decimal Group Variables，确认按完整 combination 推断精度、long-format 结果和 CSV 尾随零。检查临时 `proc_means_config.json` 为 v3、包含 Python Filter AST/`python_proc_means_v1`/动态小数位规则且不包含已解析的固定 parameter 小数位；生成的 SAS 使用动态小写 `analysis.<dataset>`、小写 Work 成员且不写死 ADLB。双击 Mean/NMISS 等统计值，确认新建 Query Tab 只包含对应参与记录、自动定位分析列且不改变源 Tab。
 10. 在行号上用 Ctrl 非连续选择 2–20 行，运行 Compare Selected Rows；确认黄色只出现在所选行与差异列的交叉单元格，未选行不变；隐藏变量的差异仍出现在 Analysis 面板中。
 11. 按 `Ctrl+F` 查找当前显示文本，并用 `F3`/`Shift+F3` 前后查找；按 `Ctrl+G` 跳到第 1 行、末行和一个远端中间行。
 12. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。
@@ -364,7 +498,7 @@ python -m clinical_data_viewer
 
 完整人工检查表也保存在 [docs/windows-acceptance.md](docs/windows-acceptance.md)。
 
-### 5. 验证源文件没有被长期占用
+### 5. 源文件锁定检查
 
 先创建专用测试副本和备份：
 
@@ -383,7 +517,7 @@ Copy-Item ".\manual-test\lock-test-backup.sas7bdat" ".\manual-test\lock-test.sas
 
 两条命令都应成功，已打开的 Tab 仍应能浏览旧快照。这证明加载完成后程序不再持有原文件。此处删除的只是明确创建的测试副本。
 
-### 6. 验证 Reload、CSV 和临时清理
+### 6. Reload、CSV 和临时清理
 
 - 修改或重新生成测试源文件，点击 Reload；确认显示新内容，并尽量保留 WHERE 和显示变量。大文件缓存完成后 WHERE 应自动重用。
 - 先筛选、隐藏若干变量并排序，然后 Export CSV；确认导出的行数、行顺序和列集合与当前视图完全一致，文件开头包含 UTF-8 BOM。
@@ -391,11 +525,11 @@ Copy-Item ".\manual-test\lock-test-backup.sas7bdat" ".\manual-test\lock-test.sas
 - 用行数超过 20,000 的数据集验证：首批行显示后 Tab 可立即浏览，底部缓存行数持续增加；缓存完成前筛选/排序/查找/跳转/导出不可用，完成后自动恢复。
 - 打开文件后检查 `%LOCALAPPDATA%\ClinicalDataViewer\temp`；关闭对应 Tab 后其 dataset 子目录应消失，正常退出后本次 `cde-*` 会话目录应消失。
 
-## 如何打包为 Windows ZIP
+### Windows ZIP 打包
 
 Windows 程序必须在 Windows 64 位环境构建；macOS 不能用 PyInstaller 直接交叉生成可用的 Windows EXE。项目使用 PyInstaller `onedir`，最终发布物是包含完整程序目录的 ZIP。目标环境建议使用已经验收的 Python 3.11.5 64 位，但构建配置没有限定到这个补丁版本。
 
-### 方法一：使用自动构建脚本（推荐）
+#### 方法一：自动构建脚本（推荐）
 
 在项目根目录打开 PowerShell：
 
@@ -439,7 +573,7 @@ dist\SASDataViewer-Windows-x64.zip
 
 发布时发送 `SASDataViewer-Windows-x64.zip`。用户必须先完整解压，然后从解压后的 `SASDataViewer\SASDataViewer.exe` 启动；不能只复制 EXE，也不要直接在 ZIP 预览窗口内运行。
 
-### 方法二：手动打包
+#### 方法二：手动打包
 
 ```powershell
 cd C:\path\to\sas7bdat-viewer
@@ -460,7 +594,7 @@ Compress-Archive -Path .\dist\SASDataViewer `
     -CompressionLevel Optimal
 ```
 
-### 打包后验证
+#### 打包后验证
 
 ```powershell
 Get-Item .\dist\SASDataViewer-Windows-x64.zip | Select-Object FullName, Length, LastWriteTime
@@ -487,6 +621,9 @@ Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 clinical_data_viewer/
   compare_engine/     分组流式读取、加权成本、Hungarian 匹配、逐变量比较和临时结果
   proc_means/         Builder 配置、分组统计、long-format SQLite 和配置 JSON
+  codegen/sas/        SAS Jinja2 生成器与 SAS 专用模板
+  codegen/r/          R Jinja2 生成器与 R 专用模板
+  filter_ast.py       Python WHERE parser AST 的跨语言 JSON 序列化
   ui/                 PySide6 主窗口、数据 Tab、Variables、历史与复制表格
   sas_reader.py       pyreadstat metadata/分块读取与 SQLite 缓存
   temp_manager.py     源文件临时复制、会话清理、遗留清理

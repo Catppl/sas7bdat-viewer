@@ -6,6 +6,23 @@ from ..domain import DatasetMetadata
 from ..filter_engine import CompiledFilter
 from ..settings import PROC_MEANS_STATISTICS
 
+STATISTIC_COLUMN_NAMES = {
+    "subjects": "SUBJECT_N",
+    "n": "N",
+    "nmiss": "NMISS",
+    "mean": "MEAN",
+    "std": "SD",
+    "stderr": "SE",
+    "median": "MEDIAN",
+    "q1": "Q1",
+    "q3": "Q3",
+    "min": "MIN",
+    "max": "MAX",
+    "lclm": "LCLM",
+    "uclm": "UCLM",
+}
+COUNT_STATISTICS = {"subjects", "n", "nmiss"}
+
 
 @dataclass(frozen=True, slots=True)
 class ProcMeansConfig:
@@ -79,8 +96,7 @@ class ProcMeansConfig:
         if invalid_decimal_groups:
             raise ValueError(
                 "Decimal Group Variables must also be selected as BY or CLASS "
-                "Variables: "
-                + ", ".join(invalid_decimal_groups)
+                "Variables: " + ", ".join(invalid_decimal_groups)
             )
         if not 0 < self.confidence < 1:
             raise ValueError("Confidence level must be between 0 and 1.")

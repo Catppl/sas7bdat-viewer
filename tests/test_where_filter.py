@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from clinical_data_viewer.domain import VariableMetadata
+from clinical_data_viewer.filter_ast import serialize_filter_ast
 from clinical_data_viewer.filter_engine import FilterEngine, WhereValidationError
 from clinical_data_viewer.where_parser import WhereSyntaxError, parse_where
 
@@ -95,6 +96,18 @@ class WhereFilterTests(unittest.TestCase):
     def test_column_comparison_rejects_incompatible_types(self) -> None:
         with self.assertRaisesRegex(WhereValidationError, "Cannot compare"):
             self.engine.compile("AGE = USUBJID")
+
+    def test_filter_ast_is_language_neutral_and_uses_canonical_variables(self) -> None:
+        ast = serialize_filter_ast('aeser = "Y" and AGE between 18 and AGE2', VARIABLES)
+        self.assertEqual(ast["type"], "boolean")
+        self.assertEqual(ast["operator"], "and")
+        self.assertEqual(ast["left"]["variable"], "AESER")
+        self.assertEqual(ast["left"]["operand"]["value_type"], "character")
+        self.assertEqual(ast["right"]["type"], "between")
+        self.assertEqual(ast["right"]["upper"], {"type": "variable", "name": "AGE2"})
+
+    def test_empty_filter_has_null_ast(self) -> None:
+        self.assertIsNone(serialize_filter_ast("  ", VARIABLES))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..codegen import build_proc_means_configuration
+from ..codegen.r import RProcMeansGenerator
+from ..codegen.sas import SasProcMeansGenerator
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
@@ -45,6 +48,7 @@ from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
 from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
+from .sas_code_dialog import RCodeDialog, SasCodeDialog
 from .settings_dialog import SettingsDialog
 from .variables_panel import VariablesPanel
 
@@ -87,6 +91,8 @@ class MainWindow(QMainWindow):
         self.comparer = DatasetComparer(temp_manager)
         self.proc_means_engine = ProcMeansEngine(temp_manager)
         self.proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
+        self.sas_proc_means_generator = SasProcMeansGenerator()
+        self.r_proc_means_generator = RProcMeansGenerator()
         self.store = DataStore()
         self.exporter = CsvExporter()
         self.pool = QThreadPool.globalInstance()
@@ -276,6 +282,12 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.all_tabs_closed.connect(self.analysis_dock.hide)
         self.analysis_panel.builder.run_requested.connect(self._run_proc_means_builder)
+        self.analysis_panel.builder.sas_code_requested.connect(
+            self._generate_proc_means_sas_code
+        )
+        self.analysis_panel.builder.r_code_requested.connect(
+            self._generate_proc_means_r_code
+        )
         self.analysis_panel.builder.validation_error.connect(
             lambda message: QMessageBox.warning(self, "PROC MEANS Builder", message)
         )
@@ -967,15 +979,15 @@ class MainWindow(QMainWindow):
         self.analysis_panel.show_builder_tab()
         self.analysis_dock.show()
 
-    def _run_proc_means_builder(self, selection) -> None:
+    def _proc_means_builder_context(self, selection, action_title: str):
         tab = self.current_dataset_tab()
         if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
             QMessageBox.warning(
                 self,
-                "PROC MEANS Builder",
-                "Select a fully loaded SAS source dataset before running the Builder.",
+                action_title,
+                "Select a fully loaded SAS source dataset before using the Builder.",
             )
-            return
+            return None
         config = ProcMeansConfig(
             selection.analysis_variables,
             selection.by_variables,
@@ -990,8 +1002,68 @@ class MainWindow(QMainWindow):
         try:
             config.validate(tab.handle.metadata)
         except ValueError as error:
-            QMessageBox.warning(self, "PROC MEANS Builder", str(error))
+            QMessageBox.warning(self, action_title, str(error))
+            return None
+        return tab, config
+
+    def _generate_proc_means_sas_code(self, selection) -> None:
+        context = self._proc_means_builder_context(selection, "SAS Code Generator")
+        if context is None:
             return
+        tab, config = context
+        try:
+            configuration = build_proc_means_configuration(tab.handle, config)
+            code = self.sas_proc_means_generator.generate(configuration)
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.critical(self, "SAS Code Generator Failed", str(error))
+            return
+        safe_name = (
+            "".join(
+                character if character.isalnum() or character in {"-", "_"} else "_"
+                for character in tab.handle.metadata.name
+            ).strip("_")
+            or "dataset"
+        )
+        safe_name = safe_name.lower()
+        dialog = SasCodeDialog(
+            code,
+            str(tab.handle.source_path),
+            f"{safe_name}_proc_means.sas",
+            self,
+        )
+        dialog.exec()
+
+    def _generate_proc_means_r_code(self, selection) -> None:
+        context = self._proc_means_builder_context(selection, "R Code Generator")
+        if context is None:
+            return
+        tab, config = context
+        try:
+            configuration = build_proc_means_configuration(tab.handle, config)
+            code = self.r_proc_means_generator.generate(configuration)
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.critical(self, "R Code Generator Failed", str(error))
+            return
+        safe_name = (
+            "".join(
+                character if character.isalnum() or character in {"-", "_"} else "_"
+                for character in tab.handle.metadata.name
+            ).strip("_")
+            or "dataset"
+        ).lower()
+        dialog = RCodeDialog(
+            code,
+            str(tab.handle.source_path),
+            f"{safe_name}_proc_means.R",
+            self,
+        )
+        dialog.exec()
+
+    def _run_proc_means_builder(self, selection) -> None:
+        context = self._proc_means_builder_context(selection, "PROC MEANS Builder")
+        if context is None:
+            return
+        tab, config = context
         source_handle = tab.handle
         self._proc_means_input_tabs = {tab}
         self.analysis_panel.builder.set_busy(

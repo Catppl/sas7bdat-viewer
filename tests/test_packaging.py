@@ -11,6 +11,8 @@ class PackagingConfigurationTests(unittest.TestCase):
         self.assertIn("exclude_binaries=True", spec)
         self.assertIn("bundle = COLLECT(", spec)
         self.assertIn('name="SASDataViewer"', spec)
+        self.assertIn("clinical_data_viewer/codegen/sas/templates", spec)
+        self.assertIn("clinical_data_viewer/codegen/r/templates", spec)
 
     def test_windows_build_script_creates_release_zip(self) -> None:
         root = Path(__file__).resolve().parents[1]

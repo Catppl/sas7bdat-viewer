@@ -8,7 +8,17 @@ a = Analysis(
     ["run.py"],
     pathex=[],
     binaries=pyreadstat_binaries,
-    datas=pyreadstat_datas + [("assets/SASDataViewer.ico", "assets")],
+    datas=pyreadstat_datas + [
+        ("assets/SASDataViewer.ico", "assets"),
+        (
+            "clinical_data_viewer/codegen/sas/templates",
+            "clinical_data_viewer/codegen/sas/templates",
+        ),
+        (
+            "clinical_data_viewer/codegen/r/templates",
+            "clinical_data_viewer/codegen/r/templates",
+        ),
+    ],
     hiddenimports=pyreadstat_hiddenimports + ["scipy.stats"],
     hookspath=[],
     hooksconfig={},

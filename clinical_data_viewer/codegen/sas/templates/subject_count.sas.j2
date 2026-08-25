@@ -1,0 +1,20 @@
+{% if include_subject_n and options.subject_id_variable %}
+proc sql;
+    create table work.{{ item.work_subjects }} as
+    select
+{% if group_variables %}
+{% for variable in group_variables %}        {{ variable | sas_name }},{% endfor %}
+{% endif %}
+        count(distinct {{ options.subject_id_variable | sas_name }}) as SUBJECT_N
+    from work.{{ work_source }}
+    where not missing({{ item.name | sas_name }})
+      and not missing({{ options.subject_id_variable | sas_name }})
+{% if group_variables %}    group by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}    ;
+quit;
+{% if group_variables %}
+proc sort data=work.{{ item.work_subjects }};
+    by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
+run;
+{% endif %}
+{% endif %}

@@ -1,30 +1,13 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import quote_identifier
-from .models import ProcMeansConfig
-
-STATISTIC_COLUMN_NAMES = {
-    "subjects": "SUBJECT_N",
-    "n": "N",
-    "nmiss": "NMISS",
-    "mean": "MEAN",
-    "std": "SD",
-    "stderr": "SE",
-    "median": "MEDIAN",
-    "q1": "Q1",
-    "q3": "Q3",
-    "min": "MIN",
-    "max": "MAX",
-    "lclm": "LCLM",
-    "uclm": "UCLM",
-}
-COUNT_STATISTICS = {"subjects", "n", "nmiss"}
+from .configuration import write_proc_means_configuration
+from .models import COUNT_STATISTICS, STATISTIC_COLUMN_NAMES, ProcMeansConfig
 
 
 def _unique_name(base: str, used: set[str]) -> str:
@@ -178,39 +161,7 @@ class ProcMeansResultWriter:
         marker = result_directory / "proc-means-result.tmp"
         marker.touch()
         configuration_path = result_directory / "proc_means_config.json"
-        configuration = {
-            "type": "proc_means",
-            "version": 1,
-            "dataset": source.metadata.name,
-            "filter": self.config.filter_text,
-            "analysis_variables": list(self.config.analysis_variables),
-            "by_variables": list(self.config.by_variables),
-            "class_variables": list(self.config.class_variables),
-            "statistics": [
-                STATISTIC_COLUMN_NAMES[key] for key in self.config.statistics
-            ],
-            "options": {
-                "nway": True,
-                "include_missing_class": True,
-                "include_missing_by": True,
-                "confidence": self.config.confidence,
-            },
-            "display": {
-                "result_layout": "long",
-                "decimal_group_variables": list(
-                    self.config.decimal_group_variables
-                ),
-                "decimal_offsets": {
-                    STATISTIC_COLUMN_NAMES.get(key, key.upper()): value
-                    for key, value in self.config.decimal_offsets
-                },
-                "maximum_decimals": 4,
-            },
-        }
-        configuration_path.write_text(
-            json.dumps(configuration, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        write_proc_means_configuration(configuration_path, source, self.config)
         filter_scope = self.config.filter_text or "All rows"
         return DatasetHandle(
             source.source_path.parent / f"PROC MEANS Result - {source.metadata.name}",

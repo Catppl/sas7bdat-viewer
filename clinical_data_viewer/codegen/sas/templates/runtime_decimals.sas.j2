@@ -1,0 +1,54 @@
+{% if decimal_statistics %}
+/* Infer the source precision again at SAS run time. */
+{% for item in analysis %}
+data work.{{ item.work_decimals }};
+    set work.{{ work_source }}(keep={% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}{{ item.name | sas_name }});
+    length ANALYSIS_VARIABLE $32;
+    ANALYSIS_VARIABLE={{ item.name | sas_string }};
+    if not missing({{ item.name | sas_name }});
+    __CDE_BASE_DECIMALS={{ display.decimal_inference.maximum_decimals }};
+    do __CDE_CANDIDATE=0 to {{ display.decimal_inference.maximum_decimals }};
+        __CDE_UNIT=10**(-__CDE_CANDIDATE);
+        if abs({{ item.name | sas_name }}-round({{ item.name | sas_name }}, __CDE_UNIT))
+           <= max({{ sas_decimal_tolerance }}, abs({{ item.name | sas_name }})*{{ sas_decimal_tolerance }}) then do;
+            __CDE_BASE_DECIMALS=__CDE_CANDIDATE;
+            leave;
+        end;
+    end;
+    keep {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ANALYSIS_VARIABLE __CDE_BASE_DECIMALS;
+run;
+{% endfor %}
+
+data work.{{ work_decimal_values }};
+    set {% for item in analysis %}work.{{ item.work_decimals }}{% if not loop.last %} {% endif %}{% endfor %};
+run;
+
+proc sql;
+    create table work.{{ work_decimal_rules }} as
+    select {% for variable in display.decimal_group_variables %}{{ variable | sas_name }}, {% endfor %}ANALYSIS_VARIABLE,
+           max(__CDE_BASE_DECIMALS) as __CDE_BASE_DECIMALS
+    from work.{{ work_decimal_values }}
+    group by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }}, {% endfor %}ANALYSIS_VARIABLE;
+quit;
+
+proc sort data={{ sas_output_dataset }};
+    by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ANALYSIS_VARIABLE;
+run;
+proc sort data=work.{{ work_decimal_rules }};
+    by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ANALYSIS_VARIABLE;
+run;
+
+data {{ sas_output_dataset }};
+    merge {{ sas_output_dataset }}(in=__result) work.{{ work_decimal_rules }};
+    by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ANALYSIS_VARIABLE;
+    if __result;
+    if missing(__CDE_BASE_DECIMALS) then __CDE_BASE_DECIMALS=0;
+{% for statistic in decimal_statistics %}
+    length {{ statistic.name }}_DISPLAY $40;
+    __CDE_DECIMALS=min({{ display.decimal_inference.maximum_decimals }}, __CDE_BASE_DECIMALS+{{ statistic.offset }});
+    if missing({{ statistic.name }}) then {{ statistic.name }}_DISPLAY='';
+    else {{ statistic.name }}_DISPLAY=strip(putn({{ statistic.name }}, cats('32.', __CDE_DECIMALS)));
+{% endfor %}
+    drop __CDE_DECIMALS;
+run;
+{% endif %}

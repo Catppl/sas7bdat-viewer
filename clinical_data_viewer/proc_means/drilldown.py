@@ -127,12 +127,13 @@ class ProcMeansQueryBuilder:
             target = None
             marker.touch()
             metadata = DatasetMetadata(title, row_count, variables)
-            safe_dataset_name = "".join(
-                character
-                if character.isalnum() or character in {"-", "_"}
-                else "_"
-                for character in source.metadata.name
-            ).strip("_") or "Dataset"
+            safe_dataset_name = (
+                "".join(
+                    character if character.isalnum() or character in {"-", "_"} else "_"
+                    for character in source.metadata.name
+                ).strip("_")
+                or "Dataset"
+            )
             return DatasetHandle(
                 source.source_path.parent / f"Query-{safe_dataset_name}.query",
                 marker,

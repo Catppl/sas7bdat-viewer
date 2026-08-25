@@ -132,6 +132,8 @@ class VariableTokenEditor(QWidget):
 
 class ProcMeansBuilder(QWidget):
     run_requested = Signal(object)
+    sas_code_requested = Signal(object)
+    r_code_requested = Signal(object)
     validation_error = Signal(str)
     settings_requested = Signal()
 
@@ -202,19 +204,25 @@ class ProcMeansBuilder(QWidget):
         self.status = QLabel("")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        buttons = QHBoxLayout()
+        buttons = QGridLayout()
         buttons.setContentsMargins(6, 0, 6, 6)
         settings = QPushButton("Settings…")
         settings.clicked.connect(self.settings_requested)
-        buttons.addWidget(settings)
+        buttons.addWidget(settings, 0, 0)
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
-        buttons.addWidget(clear)
-        buttons.addStretch(1)
+        buttons.addWidget(clear, 0, 1)
+        self.sas_code_button = QPushButton("SAS Code Generator…")
+        self.sas_code_button.clicked.connect(self._generate_sas_code)
+        buttons.addWidget(self.sas_code_button, 1, 0, 1, 1)
+        self.r_code_button = QPushButton("R Code Generator…")
+        self.r_code_button.clicked.connect(self._generate_r_code)
+        buttons.addWidget(self.r_code_button, 1, 1, 1, 1)
         self.run_button = QPushButton("Run")
         self.run_button.setDefault(True)
         self.run_button.clicked.connect(self._run)
-        buttons.addWidget(self.run_button)
+        buttons.addWidget(self.run_button, 0, 2, 2, 1)
+        buttons.setColumnStretch(2, 1)
         outer_layout.addLayout(buttons)
         self.set_dataset(None, "")
 
@@ -237,6 +245,8 @@ class ProcMeansBuilder(QWidget):
         self.filter_label.setText(filter_text or "All rows")
         available = metadata is not None and not self._busy
         self.run_button.setEnabled(available)
+        self.sas_code_button.setEnabled(available)
+        self.r_code_button.setEnabled(available)
         for editor in (
             self.analysis_variables,
             self.by_variables,
@@ -263,6 +273,8 @@ class ProcMeansBuilder(QWidget):
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
         self.run_button.setEnabled(not busy and self._metadata is not None)
+        self.sas_code_button.setEnabled(not busy and self._metadata is not None)
+        self.r_code_button.setEnabled(not busy and self._metadata is not None)
         for editor in (
             self.analysis_variables,
             self.by_variables,
@@ -293,7 +305,7 @@ class ProcMeansBuilder(QWidget):
             if self.decimal_groups.item(index).checkState() == Qt.Checked
         )
 
-    def _run(self) -> None:
+    def _selection(self) -> ProcMeansBuilderSelection | None:
         selection = ProcMeansBuilderSelection(
             self.analysis_variables.selected_variables(),
             self.by_variables.selected_variables(),
@@ -305,8 +317,26 @@ class ProcMeansBuilder(QWidget):
         )
         if not selection.analysis_variables:
             self.validation_error.emit("Select at least one Analysis Variable.")
-            return
+            return None
         if not selection.statistics:
             self.validation_error.emit("Select at least one statistic.")
+            return None
+        return selection
+
+    def _run(self) -> None:
+        selection = self._selection()
+        if selection is None:
             return
         self.run_requested.emit(selection)
+
+    def _generate_sas_code(self) -> None:
+        selection = self._selection()
+        if selection is None:
+            return
+        self.sas_code_requested.emit(selection)
+
+    def _generate_r_code(self) -> None:
+        selection = self._selection()
+        if selection is None:
+            return
+        self.r_code_requested.emit(selection)
