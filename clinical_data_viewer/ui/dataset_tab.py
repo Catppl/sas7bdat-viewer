@@ -168,6 +168,7 @@ class DatasetTab(QWidget):
     analysis_invalidated = Signal()
     comparison_invalidated = Signal()
     source_navigation_requested = Signal(int, str)
+    proc_means_drilldown_requested = Signal(int, str, str)
 
     def __init__(self, handle: DatasetHandle, page_size: int, parent=None) -> None:
         super().__init__(parent)
@@ -271,7 +272,8 @@ class DatasetTab(QWidget):
         self.table.settings_requested.connect(self.settings_requested)
         self.table.compare_rows_requested.connect(self.compare_rows_requested)
         self.table.clear_comparison_requested.connect(self.clear_comparison_requested)
-        self.table.doubleClicked.connect(self._navigate_from_compare_cell)
+        self.table.doubleClicked.connect(self._cell_double_clicked)
+        self.table.drilldown_requested.connect(self._cell_double_clicked)
         layout.addWidget(self.table, 1)
 
         where_frame = QFrame()
@@ -407,11 +409,20 @@ class DatasetTab(QWidget):
             columns = [name for name in self.visible_columns if name not in advanced]
         self.set_visible_columns(columns)
 
-    def _navigate_from_compare_cell(self, index) -> None:
-        if self.handle.kind != "compare" or not index.isValid():
+    def _cell_double_clicked(self, index) -> None:
+        if not index.isValid():
             return
         column_name = self.visible_columns[index.column()]
         metadata = self.handle.metadata
+        if self.handle.kind == "proc_means":
+            statistic_columns = dict(metadata.proc_means_statistic_keys)
+            if column_name in statistic_columns:
+                self.proc_means_drilldown_requested.emit(
+                    index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
+                )
+            return
+        if self.handle.kind != "compare":
+            return
         auxiliary = {
             metadata.pair_id_column,
             metadata.compare_side_column,

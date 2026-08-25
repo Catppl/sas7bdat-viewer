@@ -30,6 +30,8 @@ class DatasetMetadata:
     source_obs_column: str | None = None
     decimal_base_column: str | None = None
     statistic_decimal_offsets: tuple[tuple[str, int], ...] = ()
+    proc_means_analysis_column: str | None = None
+    proc_means_statistic_keys: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

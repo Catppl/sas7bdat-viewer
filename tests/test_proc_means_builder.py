@@ -16,7 +16,12 @@ from clinical_data_viewer.domain import (
     VariableMetadata,
 )
 from clinical_data_viewer.filter_engine import FilterEngine
-from clinical_data_viewer.proc_means import ProcMeansConfig, ProcMeansEngine
+from clinical_data_viewer.proc_means import (
+    ProcMeansConfig,
+    ProcMeansEngine,
+    ProcMeansQueryBuilder,
+    build_drilldown_filter,
+)
 from clinical_data_viewer.temp_manager import TempManager
 
 VARIABLES = (
@@ -79,7 +84,7 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 ("subjects", "n", "nmiss", "mean", "std", "median", "min", "max"),
                 compiled,
                 'ANL01FL = "Y"',
-                "PARAMCD",
+                ("PARAMCD", "AVISITN"),
                 (("mean", 1), ("std", 2), ("median", 1), ("min", 0), ("max", 0)),
                 0.95,
             )
@@ -149,7 +154,8 @@ class ProcMeansBuilderTests(unittest.TestCase):
             self.assertTrue(configuration["options"]["nway"])
             self.assertTrue(configuration["options"]["include_missing_class"])
             self.assertEqual(
-                configuration["display"]["decimal_group_variable"], "PARAMCD"
+                configuration["display"]["decimal_group_variables"],
+                ["PARAMCD", "AVISITN"],
             )
             self.assertEqual(configuration["display"]["maximum_decimals"], 4)
             manager.cleanup()
@@ -162,7 +168,7 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 ("PARAMCD",),
                 (),
                 ("mean",),
-                decimal_group_variable="AVISITN",
+                decimal_group_variables=("AVISITN",),
             )
             with self.assertRaisesRegex(ValueError, "Decimal Group Variable"):
                 config.validate(source.metadata)
@@ -177,7 +183,7 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 ("PARAMCD",),
                 (),
                 ("mean",),
-                decimal_group_variable="PARAMCD",
+                decimal_group_variables=("PARAMCD",),
                 decimal_offsets=(("mean", 1),),
             )
             result = ProcMeansEngine(manager).run(source, config)
@@ -195,6 +201,92 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 dict(zip((row[0] for row in page.rows), page.row_decimal_bases))["ALT"],
                 3,
             )
+            manager.cleanup()
+
+    def test_multiple_decimal_groups_use_the_complete_combination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = make_source(root)
+            manager = TempManager(root / "temp")
+            with closing(sqlite3.connect(source.database_path)) as connection:
+                connection.execute(
+                    'INSERT INTO dataset("USUBJID", "PARAMCD", "AVISITN", '
+                    '"TRT01AN", "AVAL", "CHG", "ANL01FL") '
+                    'VALUES ("S6", "ALB", 2, 1, 1.234, 0.4, "Y")'
+                )
+                connection.commit()
+            config = ProcMeansConfig(
+                ("AVAL",),
+                ("PARAMCD", "AVISITN"),
+                (),
+                ("mean",),
+                decimal_group_variables=("PARAMCD", "AVISITN"),
+            )
+            result = ProcMeansEngine(manager).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                bases = {
+                    (row[0], row[1]): row[2]
+                    for row in connection.execute(
+                        'SELECT "PARAMCD", "AVISITN", "__CDE_BASE_DECIMALS" '
+                        'FROM dataset WHERE "PARAMCD" = ?',
+                        ("ALB",),
+                    )
+                }
+            self.assertEqual(bases[("ALB", 1.0)], 1)
+            self.assertEqual(bases[("ALB", 2.0)], 3)
+            manager.cleanup()
+
+    def test_drilldown_builds_independent_query_rows_from_result_group(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = make_source(root)
+            manager = TempManager(root / "temp")
+            source_filter = FilterEngine(VARIABLES).compile('ANL01FL = "Y"')
+            config = ProcMeansConfig(
+                ("AVAL",),
+                ("PARAMCD", "AVISITN"),
+                ("TRT01AN",),
+                ("mean", "nmiss"),
+                source_filter,
+                'ANL01FL = "Y"',
+            )
+            mean_filter = build_drilldown_filter(
+                source.metadata,
+                config,
+                {"PARAMCD": "ALB", "AVISITN": 1.0, "TRT01AN": 1.0},
+                "AVAL",
+                "mean",
+            )
+            query = ProcMeansQueryBuilder(manager).run(
+                source, mean_filter, "Query: Mean: 1.55"
+            )
+            self.assertEqual(query.kind, "query")
+            self.assertEqual(query.metadata.row_count, 2)
+            self.assertNotIn(":", query.source_path.name)
+            with closing(sqlite3.connect(query.database_path)) as connection:
+                subjects = connection.execute(
+                    'SELECT "USUBJID" FROM dataset ORDER BY _source_row'
+                ).fetchall()
+            self.assertEqual(subjects, [("S1",), ("S2",)])
+
+            missing_filter = build_drilldown_filter(
+                source.metadata,
+                config,
+                {"PARAMCD": "ALB", "AVISITN": 1.0, "TRT01AN": None},
+                "AVAL",
+                "nmiss",
+            )
+            missing_query = ProcMeansQueryBuilder(manager).run(
+                source, missing_filter, "Query: NMISS: 1"
+            )
+            self.assertEqual(missing_query.metadata.row_count, 1)
+            with closing(sqlite3.connect(missing_query.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        'SELECT "USUBJID", "AVAL" FROM dataset'
+                    ).fetchone(),
+                    ("S3", None),
+                )
             manager.cleanup()
 
 

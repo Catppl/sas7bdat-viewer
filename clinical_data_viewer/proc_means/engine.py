@@ -41,10 +41,8 @@ class ProcMeansEngine:
         }
         analyses = tuple(by_fold[name.casefold()] for name in config.analysis_variables)
         groups = tuple(by_fold[name.casefold()] for name in config.group_variables)
-        decimal_group = (
-            by_fold[config.decimal_group_variable.casefold()]
-            if config.decimal_group_variable
-            else None
+        decimal_groups = tuple(
+            by_fold[name.casefold()] for name in config.decimal_group_variables
         )
         result_directory = self.temp_manager.create_dataset_directory()
         schema = build_result_schema(groups, config.statistics)
@@ -53,14 +51,16 @@ class ProcMeansEngine:
         )
         try:
             notify("Determining observed decimal precision…")
-            decimal_bases = self._decimal_bases(source, config, analyses, decimal_group)
+            decimal_bases = self._decimal_bases(
+                source, config, analyses, decimal_groups
+            )
             notify("Calculating grouped PROC MEANS statistics…")
             self._calculate_groups(
                 source,
                 config,
                 analyses,
                 groups,
-                decimal_group,
+                decimal_groups,
                 decimal_bases,
                 writer,
                 notify,
@@ -86,28 +86,27 @@ class ProcMeansEngine:
         source: DatasetHandle,
         config: ProcMeansConfig,
         analyses: tuple[VariableMetadata, ...],
-        decimal_group: VariableMetadata | None,
-    ) -> dict[tuple[str, object], int]:
-        columns = ([decimal_group] if decimal_group else []) + list(analyses)
+        decimal_groups: tuple[VariableMetadata, ...],
+    ) -> dict[tuple[str, tuple[object, ...]], int]:
+        columns = [*decimal_groups, *analyses]
         select = ", ".join(quote_identifier(variable.name) for variable in columns)
         where, parameters = self._where(config)
-        bases: dict[tuple[str, object], int] = {}
+        bases: dict[tuple[str, tuple[object, ...]], int] = {}
         uri = source.database_path.resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True)) as connection:
             rows = connection.execute(
                 f"SELECT {select} FROM dataset{where}", parameters
             )
             for row in rows:
-                if decimal_group:
-                    group_value = _normalized_group(row[0], decimal_group.kind)
-                    values = row[1:]
-                else:
-                    group_value = None
-                    values = row
+                group_values = tuple(
+                    _normalized_group(row[index], variable.kind)
+                    for index, variable in enumerate(decimal_groups)
+                )
+                values = row[len(decimal_groups) :]
                 for analysis, value in zip(analyses, values, strict=True):
                     if value is None:
                         continue
-                    key = (analysis.name, group_value)
+                    key = (analysis.name, group_values)
                     bases[key] = max(
                         bases.get(key, 0), observed_decimal_places(float(value))
                     )
@@ -119,8 +118,8 @@ class ProcMeansEngine:
         config: ProcMeansConfig,
         analyses: tuple[VariableMetadata, ...],
         groups: tuple[VariableMetadata, ...],
-        decimal_group: VariableMetadata | None,
-        decimal_bases: dict[tuple[str, object], int],
+        decimal_groups: tuple[VariableMetadata, ...],
+        decimal_bases: dict[tuple[str, tuple[object, ...]], int],
         writer: ProcMeansResultWriter,
         notify: ProgressCallback,
     ) -> None:
@@ -164,7 +163,9 @@ class ProcMeansEngine:
                 variable.name: value
                 for variable, value in zip(groups, current_values, strict=True)
             }
-            decimal_value = group_map.get(decimal_group.name) if decimal_group else None
+            decimal_values = tuple(
+                group_map[variable.name] for variable in decimal_groups
+            )
             for analysis in analyses:
                 values = values_by_analysis[analysis.name]
                 subject_count = (
@@ -181,7 +182,7 @@ class ProcMeansEngine:
                     group_map,
                     analysis,
                     statistics,
-                    decimal_bases.get((analysis.name, decimal_value), 0),
+                    decimal_bases.get((analysis.name, decimal_values), 0),
                 )
             groups_written += 1
             if groups_written % 100 == 0:

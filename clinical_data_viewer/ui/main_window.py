@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool
@@ -29,9 +29,14 @@ from ..data_store import DataStore
 from ..domain import CacheProgress, DatasetHandle
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
-from ..proc_means import ProcMeansConfig, ProcMeansEngine
+from ..proc_means import (
+    ProcMeansConfig,
+    ProcMeansEngine,
+    ProcMeansQueryBuilder,
+    build_drilldown_filter,
+)
 from ..sas_reader import SasDatasetReader
-from ..settings import AppSettings
+from ..settings import PROC_MEANS_STATISTICS, AppSettings
 from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
@@ -60,6 +65,12 @@ class LoadingPage(QWidget):
         layout.addStretch(1)
 
 
+@dataclass(frozen=True, slots=True)
+class ProcMeansResultContext:
+    source: DatasetHandle
+    config: ProcMeansConfig
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -75,6 +86,7 @@ class MainWindow(QMainWindow):
         self.reader = SasDatasetReader(temp_manager)
         self.comparer = DatasetComparer(temp_manager)
         self.proc_means_engine = ProcMeansEngine(temp_manager)
+        self.proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
         self.store = DataStore()
         self.exporter = CsvExporter()
         self.pool = QThreadPool.globalInstance()
@@ -85,6 +97,10 @@ class MainWindow(QMainWindow):
         self._comparison_owner: DatasetTab | None = None
         self._compare_input_tabs: set[DatasetTab] = set()
         self._proc_means_input_tabs: set[DatasetTab] = set()
+        self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
+        self._retained_directories: dict[Path, int] = {}
+        self._deferred_directory_removals: set[Path] = set()
+        self._pending_directory_releases: dict[QWidget, list[Path]] = {}
         self._compare_sources: dict[DatasetTab, dict[str, tuple[DatasetTab, Path]]] = {}
         self._recommendation_generation = 0
         self.setWindowTitle("SASDataViewer")
@@ -258,6 +274,7 @@ class MainWindow(QMainWindow):
         self.analysis_panel.clear_comparison_requested.connect(
             self._clear_row_comparison
         )
+        self.analysis_panel.all_tabs_closed.connect(self.analysis_dock.hide)
         self.analysis_panel.builder.run_requested.connect(self._run_proc_means_builder)
         self.analysis_panel.builder.validation_error.connect(
             lambda message: QMessageBox.warning(self, "PROC MEANS Builder", message)
@@ -532,6 +549,11 @@ class MainWindow(QMainWindow):
         tab.source_navigation_requested.connect(
             lambda row, variable, owner=tab: self._navigate_compare_source(
                 owner, row, variable
+            )
+        )
+        tab.proc_means_drilldown_requested.connect(
+            lambda row, column, display, owner=tab: self._drilldown_proc_means(
+                owner, row, column, display
             )
         )
         return tab
@@ -942,8 +964,8 @@ class MainWindow(QMainWindow):
                 self._recalculate_statistics()
 
     def show_proc_means_builder(self) -> None:
+        self.analysis_panel.show_builder_tab()
         self.analysis_dock.show()
-        self.analysis_panel.tabs.setCurrentIndex(self.analysis_panel.builder_index)
 
     def _run_proc_means_builder(self, selection) -> None:
         tab = self.current_dataset_tab()
@@ -961,7 +983,7 @@ class MainWindow(QMainWindow):
             selection.statistics,
             tab.compiled_filter,
             tab.current_where_text(),
-            selection.decimal_group_variable,
+            selection.decimal_group_variables,
             tuple(self.settings.proc_means_decimal_offsets.items()),
             self.settings.proc_means_confidence,
         )
@@ -982,6 +1004,11 @@ class MainWindow(QMainWindow):
                 False, f"Created {handle.metadata.row_count:,} result rows."
             )
             result_tab = self._make_dataset_tab(handle)
+            source_directory = source_handle.temporary_path.parent
+            self._retain_directory(source_directory)
+            self._proc_means_sources[result_tab] = ProcMeansResultContext(
+                source_handle, config
+            )
             index = self.tabs.addTab(result_tab, "PROC MEANS Result")
             self.tabs.setCurrentIndex(index)
             result_tab.start()
@@ -999,6 +1026,87 @@ class MainWindow(QMainWindow):
             completed,
             failed,
         )
+
+    def _drilldown_proc_means(
+        self, tab: DatasetTab, view_row: int, statistic_column: str, display: str
+    ) -> None:
+        context = self._proc_means_sources.get(tab)
+        metadata = tab.handle.metadata
+        analysis_column = metadata.proc_means_analysis_column
+        statistic_key = dict(metadata.proc_means_statistic_keys).get(statistic_column)
+        if context is None or analysis_column is None or statistic_key is None:
+            return
+        if display in {"", "—"}:
+            QMessageBox.information(
+                self,
+                "PROC MEANS Drill-down",
+                "This statistic has no calculated value to drill down from.",
+            )
+            return
+        generation = tab.generation
+        result_filter = tab.compiled_filter
+        result_sort = tab.model.sort_spec
+        group_columns = context.config.group_variables
+        lookup_columns = (*group_columns, analysis_column)
+        labels = dict(PROC_MEANS_STATISTICS)
+        statistic_label = labels.get(statistic_key, statistic_column.title())
+        base_title = f"Query: {statistic_label}: {display}"
+        self.task_status.setText(f"Building {base_title}…")
+
+        def build(worker: Worker):
+            values = self.store.view_row_values(
+                tab.handle.database_path,
+                metadata,
+                result_filter,
+                result_sort,
+                view_row,
+                lookup_columns,
+            )
+            if values is None:
+                raise ValueError("The selected PROC MEANS result row no longer exists.")
+            group_values = dict(zip(group_columns, values[:-1], strict=True))
+            analysis_variable = str(values[-1])
+            compiled = build_drilldown_filter(
+                context.source.metadata,
+                context.config,
+                group_values,
+                analysis_variable,
+                statistic_key,
+            )
+            handle = self.proc_means_query_builder.run(
+                context.source, compiled, base_title, worker.report
+            )
+            return handle, analysis_variable
+
+        def completed(result) -> None:
+            handle, analysis_variable = result
+            if self.tabs.indexOf(tab) < 0 or generation != tab.generation:
+                self._remove_dataset_directory(handle.temporary_path.parent)
+                return
+            title = self._unique_dataset_tab_title(base_title)
+            query_tab = self._make_dataset_tab(handle)
+            index = self.tabs.addTab(query_tab, title)
+            self.tabs.setCurrentIndex(index)
+            query_tab.start()
+            query_tab.locate_variable(analysis_variable)
+
+        self._submit(
+            tab,
+            build,
+            completed,
+            lambda message, details: self._show_error(
+                "PROC MEANS Drill-down Failed", message, details
+            ),
+        )
+
+    def _unique_dataset_tab_title(self, base: str) -> str:
+        existing = {self.tabs.tabText(index) for index in range(self.tabs.count())}
+        if base not in existing:
+            return base
+        suffix = 2
+        while f"{base} ({suffix})" in existing:
+            suffix += 1
+        return f"{base} ({suffix})"
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if (
@@ -1021,8 +1129,8 @@ class MainWindow(QMainWindow):
         compiled = tab.compiled_filter
         confidence = self.settings.proc_means_confidence
         self._last_statistics_request = (tab, variable_name)
+        self.analysis_panel.show_statistics_tab()
         self.analysis_dock.show()
-        self.analysis_panel.tabs.setCurrentIndex(self.analysis_panel.statistics_index)
         self.analysis_panel.statistics_scope.setText(
             f"Calculating {variable_name} on the current filtered result…"
         )
@@ -1078,8 +1186,8 @@ class MainWindow(QMainWindow):
         generation = tab.generation
         compiled = tab.compiled_filter
         sort = tab.model.sort_spec
+        self.analysis_panel.show_comparison_tab()
         self.analysis_dock.show()
-        self.analysis_panel.tabs.setCurrentIndex(self.analysis_panel.comparison_index)
         self.analysis_panel.comparison_scope.setText("Comparing selected rows…")
 
         def completed(result) -> None:
@@ -1280,6 +1388,11 @@ class MainWindow(QMainWindow):
         for worker in self._workers.get(widget, set()):
             worker.cancel()
         if isinstance(widget, DatasetTab):
+            proc_context = self._proc_means_sources.pop(widget, None)
+            if proc_context is not None:
+                self._pending_directory_releases.setdefault(widget, []).append(
+                    proc_context.source.temporary_path.parent
+                )
             self._compare_sources.pop(widget, None)
             if self._comparison_owner is widget:
                 self._clear_row_comparison()
@@ -1407,10 +1520,33 @@ class MainWindow(QMainWindow):
             return
         for path in self._pending_removals.pop(owner, []):
             self._remove_dataset_directory(path)
+        for path in self._pending_directory_releases.pop(owner, []):
+            self._release_directory(path)
+
+    def _retain_directory(self, path: Path) -> None:
+        directory = path.resolve()
+        self._retained_directories[directory] = (
+            self._retained_directories.get(directory, 0) + 1
+        )
+
+    def _release_directory(self, path: Path) -> None:
+        directory = path.resolve()
+        remaining = self._retained_directories.get(directory, 0) - 1
+        if remaining > 0:
+            self._retained_directories[directory] = remaining
+            return
+        self._retained_directories.pop(directory, None)
+        if directory in self._deferred_directory_removals:
+            self._deferred_directory_removals.discard(directory)
+            self._remove_dataset_directory(directory)
 
     def _remove_dataset_directory(self, path: Path) -> None:
+        directory = path.resolve()
+        if self._retained_directories.get(directory, 0) > 0:
+            self._deferred_directory_removals.add(directory)
+            return
         try:
-            self.temp_manager.remove_dataset(path)
+            self.temp_manager.remove_dataset(directory)
         except OSError:
             # The session-level cleanup retries after every worker has stopped and at exit.
             pass

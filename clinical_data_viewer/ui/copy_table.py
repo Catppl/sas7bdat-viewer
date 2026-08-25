@@ -87,6 +87,7 @@ class CopyTableView(QTableView):
     settings_requested = Signal()
     compare_rows_requested = Signal(object)
     clear_comparison_requested = Signal()
+    drilldown_requested = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -155,6 +156,12 @@ class CopyTableView(QTableView):
         settings = QAction("Settings…", self)
         settings.triggered.connect(self.settings_requested)
         menu.addAction(settings)
+        drilldown = QAction("Drill Down to Source Rows", self)
+        drilldown.setEnabled(self._context_variable_is_proc_means_statistic())
+        drilldown.triggered.connect(
+            lambda: self.drilldown_requested.emit(self._context_index)
+        )
+        menu.addAction(drilldown)
         menu.addSeparator()
         selected_rows = self.selected_row_numbers()
         compare = QAction("Compare Selected Rows", self)
@@ -205,4 +212,13 @@ class CopyTableView(QTableView):
         return any(
             variable.name == variable_name and variable.kind == "numeric"
             for variable in metadata.variables
+        )
+
+    def _context_variable_is_proc_means_statistic(self) -> bool:
+        variable_name = self._context_variable()
+        metadata = getattr(self.model(), "metadata", None)
+        return bool(
+            variable_name
+            and metadata is not None
+            and variable_name in dict(metadata.proc_means_statistic_keys)
         )

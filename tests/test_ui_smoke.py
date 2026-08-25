@@ -48,6 +48,13 @@ class UiSmokeTests(unittest.TestCase):
             window = MainWindow(
                 TestSettings(), manager, FilterHistory(root / "history.sqlite")
             )
+            retained = manager.create_dataset_directory()
+            (retained / "sentinel").touch()
+            window._retain_directory(retained)
+            window._remove_dataset_directory(retained)
+            self.assertTrue(retained.exists())
+            window._release_directory(retained)
+            self.assertFalse(retained.exists())
             self.assertEqual(window.windowTitle(), "SASDataViewer")
             self.assertEqual(
                 window.variable_search.placeholderText(), "Search Variable"
@@ -133,6 +140,10 @@ class UiSmokeTests(unittest.TestCase):
                 True,
             )
             builder = window.analysis_panel.builder
+            self.assertEqual(window.analysis_panel.tabs.count(), 0)
+            window.analysis_panel.show_builder_tab()
+            window.analysis_panel.show_builder_tab()
+            self.assertEqual(window.analysis_panel.tabs.count(), 1)
             builder.set_dataset(numeric_metadata, "adlb.sas7bdat", "All rows")
             builder.analysis_variables.editor.setText("aval")
             builder.analysis_variables._add_from_editor()
@@ -140,7 +151,19 @@ class UiSmokeTests(unittest.TestCase):
             builder.by_variables._add_from_editor()
             self.assertEqual(builder.analysis_variables.selected_variables(), ("AVAL",))
             self.assertEqual(builder.by_variables.selected_variables(), ("PARAMCD",))
-            self.assertGreaterEqual(builder.decimal_group.findData("PARAMCD"), 1)
+            self.assertEqual(builder.decimal_groups.count(), 1)
+            builder.decimal_groups.item(0).setCheckState(Qt.Checked)
+            self.assertEqual(builder.selected_decimal_groups(), ("PARAMCD",))
+            window.analysis_panel.show_statistics_tab()
+            self.assertEqual(window.analysis_panel.tabs.count(), 2)
+            builder_index = window.analysis_panel.tabs.indexOf(builder)
+            window.analysis_panel._close_tab(builder_index)
+            self.assertEqual(window.analysis_panel.tabs.count(), 1)
+            statistics_index = window.analysis_panel.tabs.indexOf(
+                window.analysis_panel.statistics_page
+            )
+            window.analysis_panel._close_tab(statistics_index)
+            self.assertEqual(window.analysis_panel.tabs.count(), 0)
             numeric_tab = DatasetTab(numeric_handle, 500)
             numeric_tab.set_column_filter(
                 "PARAMCD",

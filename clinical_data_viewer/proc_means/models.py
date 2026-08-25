@@ -17,7 +17,7 @@ class ProcMeansConfig:
         default_factory=lambda: CompiledFilter("", ())
     )
     filter_text: str = ""
-    decimal_group_variable: str | None = None
+    decimal_group_variables: tuple[str, ...] = ()
     decimal_offsets: tuple[tuple[str, int], ...] = ()
     confidence: float = 0.95
 
@@ -67,13 +67,20 @@ class ProcMeansConfig:
         ]
         if invalid_statistics:
             raise ValueError("Unknown statistics: " + ", ".join(invalid_statistics))
-        if (
-            self.decimal_group_variable
-            and self.decimal_group_variable.casefold()
-            not in {name.casefold() for name in self.group_variables}
-        ):
+        decimal_fold = [name.casefold() for name in self.decimal_group_variables]
+        if len(set(decimal_fold)) != len(decimal_fold):
+            raise ValueError("Decimal Group Variables contain duplicates.")
+        invalid_decimal_groups = [
+            name
+            for name in self.decimal_group_variables
+            if name.casefold()
+            not in {group.casefold() for group in self.group_variables}
+        ]
+        if invalid_decimal_groups:
             raise ValueError(
-                "Decimal Group Variable must also be selected as a BY or CLASS Variable."
+                "Decimal Group Variables must also be selected as BY or CLASS "
+                "Variables: "
+                + ", ".join(invalid_decimal_groups)
             )
         if not 0 < self.confidence < 1:
             raise ValueError("Confidence level must be between 0 and 1.")

@@ -43,7 +43,7 @@ PROC MEANS 用于查看当前数据子集中的数值型变量统计结果。它
 
 完整模式：从 `Tools > PROC MEANS Builder` 打开 Builder。Analysis、BY 和 CLASS Variables 均可输入变量名并按 Enter 连续添加；变量名不存在时会给出错误，Analysis Variables 只允许 numeric。
 
-Simple 保持原有的一列一键计算体验，非数值型变量自动禁用。Builder 支持多个 Analysis、BY 和 CLASS Variables，Run 后生成 long-format 临时 `PROC MEANS Result` Tab。
+Simple 保持原有的一列一键计算体验，非数值型变量自动禁用。Builder 支持多个 Analysis、BY 和 CLASS Variables，Run 后生成 long-format 临时 `PROC MEANS Result` Tab。Analysis 侧边栏按需打开 Simple、Builder 或 Row Comparison；不会预先显示未使用的模块。每个已打开模块都有独立关闭按钮，重复调用同一模块只会切换到已有 Tab。
 
 ![PROC MEANS Builder：Analysis、BY、CLASS、统计量与 Decimal Group 配置](docs/screenshots/SASDataViewer-proc-means-builder.png)
 
@@ -80,7 +80,7 @@ Builder 使用启动 Run 时已经成功应用的完整筛选快照。BY 和 CLA
 - 分别设置 Mean、SD、SE、Median、Q1、Q3、Min、Max、LCLM、UCLM 在观测基础精度上增加 `+0～+4` 位。
 - 最终小数位为 `min(观测基础小数位 + 统计量增量, 4)`。
 - Simple 的基础精度来自当前筛选后该分析变量的非缺失值。
-- Builder 可以从已选择的 BY/CLASS Variables 中指定一个 Decimal Group Variable；基础精度按 `Analysis Variable + Decimal Group Value` 独立计算。
+- Builder 可以从已选择的 BY/CLASS Variables 中勾选零个、一个或多个 Decimal Group Variables；基础精度按 `Analysis Variable + 完整 Decimal Group 组合` 独立计算。例如选择 `PARAMCD + AVISIT` 后，不同 PARAMCD/AVISIT combination 可以使用不同基础精度。
 
 显示和 CSV 都采用同一套 `ROUND_HALF_UP` 规则并保留尾随零；SQLite 仍保存完整精度 REAL，因此数值 WHERE 和排序不受显示格式影响。n、N、NMISS 始终按整数显示。SAS numeric 不保存录入时的尾随零，基础精度根据读取后的实际非缺失数值推断并忽略浮点尾差。
 
@@ -109,9 +109,23 @@ Builder 在生成结果 SQLite 的同一后台任务中写入 `proc_means_config
 }
 ```
 
-实际文件还包含 `display`，用于保存 long-format、Decimal Group Variable、各统计量 `+0～+4` 增量及最多 4 位小数的显示规则。统计配置与显示配置分开，后续 Jinja2 模板可以只读取生成 SAS 程序所需的核心字段。
+实际文件还包含 `display`，用于保存 long-format、`decimal_group_variables` 数组、各统计量 `+0～+4` 增量及最多 4 位小数的显示规则。统计配置与显示配置分开，后续 Jinja2 模板可以只读取生成 SAS 程序所需的核心字段。
 
 ![PROC MEANS long-format 临时结果 Tab](docs/screenshots/SASDataViewer-proc-means-result.png)
+
+### Drill-down Query Tab
+
+在 `PROC MEANS Result` 中双击统计值，或右键选择 `Drill Down to Source Rows`，程序会在后台生成一个新的只读临时 Tab，例如 `Query: Mean: 81.5`。它不会修改原数据集 Tab 的 WHERE、排序或浏览位置。
+
+Query 不是在原始数据中搜索 81.5；Mean 等汇总值可能并不存在于任何一条源记录。程序根据结果行的 Analysis Variable、完整 BY/CLASS combination，以及运行 Builder 时保存的筛选快照确定参与记录：
+
+- N、Mean、SD、SE、Median、Q1、Q3、Min、Max、LCLM、UCLM 显示分析变量非 missing 的参与记录。
+- NMISS 只显示分析变量 missing 的记录。
+- n (Subjects) 显示分析变量和固定 `USUBJID` 均非 missing 的记录；同一受试者的多条源记录仍全部展示。
+
+Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 CSV，并自动定位 Analysis Variable。它从生成 PROC MEANS 时的源 SQLite 快照复制所需的小范围记录，因此即使随后关闭或 Reload 原数据集显示 Tab，也不会改变已生成的 Query；关闭 Query 后自动清理。
+
+![PROC MEANS 统计值 Drill-down Query Tab](docs/screenshots/SASDataViewer-proc-means-query.png)
 
 ### PROC MEANS 限制
 
@@ -244,7 +258,7 @@ python -m clinical_data_viewer
 - 表头：首次点击升序，再次点击降序；相同行值按源行顺序稳定显示。
 - 列头筛选：点击列名主体仍然排序；点击表头最右侧 `▼` 打开当前列筛选。当前列候选值会遵循手写 WHERE 和其他列筛选。在 Search loaded values 粘贴完整候选值时优先显示精确匹配；搜索有效时 Apply 只使用当前可见且勾选的匹配值，因此输入 `ALB` 会生成 `PARAMCD in ("ALB")`，不会退化为 `not missing(PARAMCD)`。Select All 会显示为 Select All Matching，并只作用于搜索结果。高基数列最多载入前 2,000 个候选值，列表中找不到的任意值应改用 Condition。自动生成的关键词使用小写，单个条件不增加多余外层括号，只有明确勾选 Missing 才会生成 `or missing(FOLDERSEQ)`。
 - Copy：选择单元格、整行或矩形区域后按 `Ctrl+C`；右键可复制列名。
-- PROC MEANS：在数值列单元格上右键选择 `PROC MEANS (Simple)` 可立即查看单变量结果；从 Tools 打开 Builder 可配置多个 Analysis/BY/CLASS 和 Decimal Group Variable，并生成可筛选、排序、复制及导出 CSV 的临时结果 Tab。小写 `n (Subjects)` 是当前过滤结果中该分析变量非缺失且 `USUBJID` 非缺失的唯一受试者数；`N (Values)` 才是分析变量非缺失观测数。
+- PROC MEANS：在数值列单元格上右键选择 `PROC MEANS (Simple)` 可立即查看单变量结果；从 Tools 打开 Builder 可配置多个 Analysis/BY/CLASS 和多个 Decimal Group Variables，并生成可筛选、排序、复制及导出 CSV 的临时结果 Tab。双击结果统计值可生成独立 `Query: <Statistic>: <Value>` Drill-down Tab。小写 `n (Subjects)` 是当前过滤结果中该分析变量非缺失且 `USUBJID` 非缺失的唯一受试者数；`N (Values)` 才是分析变量非缺失观测数。
 - Row Comparison：点击左侧行号选择整行，按住 `Ctrl` 点击其他行号进行非连续多选，右键 Compare Selected Rows。黄色背景仅应用到选中比较行中有差异的列，并会覆盖这些单元格原有的蓝色选中背景；相同行的其他列仍保持蓝色，未选行不变。字符空值和 NULL 都视为 missing；数值按未格式化原值比较。筛选、排序或 Reload 后旧比较自动清除。
 - Dataset Compare：从 `Tools > Compare Datasets` 打开右侧面板。分别选择 Main/QC；Browse 会按普通 Open 流程把文件复制到临时目录、载入普通 Tab，完整缓存后可参与比较。程序按两侧实际 `value + frequency` 自动推荐最多 3 个 Group，全部可比较共同变量默认选为 Match，Key 默认不选；用户仍可逐变量调整 Group、Match、Key、权重和数值 tolerance。Compare 永远使用完整原始缓存，忽略两个输入 Tab 当前的 WHERE、显示列和排序。结果只保留 Different、Main only、QC only、Unmatched 和 Ambiguous observation；匹配对永远按 Main 后 QC 相邻显示。结果 Tab 支持 Variables、WHERE、表头筛选、查找、跳行、复制、配对排序、源数据跳转和 CSV；任一侧命中筛选时保留整对。`Advanced details` 控制内部匹配字段的显示，但 CSV 始终排除它们。Compare Result 禁用 Reload、PROC MEANS 和再次作为 Compare 输入，关闭后自动清理。
 - Variables：顶部列表是当前显示列；展开 All Variables 可查看完整 metadata 并勾选隐藏列。Select All 在“全选”和“全部取消”之间切换；部分选择或全部取消后再次点击会恢复全部变量。允许暂时隐藏全部列，此时 Apply、Find、Go to Row 和 Export 不可用。
@@ -340,7 +354,7 @@ python -m clinical_data_viewer
 6. 分别验证 `IN`、`NOT IN`、`CONTAINS`/`?`、`AND`/`&`、`OR`/`|`、`BETWEEN`、`LIKE`、`IS NULL/MISSING`、比较助记符和括号。
 7. 验证列对列条件，例如 `AESTDTC <= AEENDTC`，并确认字符列与数值列比较会给出明确类型错误。
 8. 点击不同列的筛选箭头，分别验证 Values、Missing、数值 Between 和字符 Contains；只选 `PARAMCD=ALB` 时 WHERE 应为 `PARAMCD in ("ALB")`，不得自动追加 missing 或多余外层括号；明确勾选 Missing 后才出现小写的 `or missing(PARAMCD)`。确认状态行数、CSV、PROC MEANS 和 Filter History 都使用同一最终结果。手工修改生成条件再 Apply，确认旧蓝色筛选标签清除且条件不重复。
-9. 在数值列右键运行 `PROC MEANS (Simple)`，核对当前筛选结果的受试者 n、观测 N、均值、分位数和 CI；在非数值列确认菜单禁用。设置 Mean=+1、SD=+2、Median=+1、Min/Max=+0，确认先按实际值推断基础精度、最终封顶 4 位且重启后恢复。再用 Builder 配置多个 Analysis/BY/CLASS、missing group 和 Decimal Group Variable，确认 long-format 结果、CSV 尾随零以及临时 `proc_means_config.json` 的字段与选择一致。
+9. 在数值列右键运行 `PROC MEANS (Simple)`，核对当前筛选结果的受试者 n、观测 N、均值、分位数和 CI；在非数值列确认菜单禁用。确认 Analysis 只按需出现使用过的模块 Tab，每个模块可独立关闭且不会重复打开。设置 Mean=+1、SD=+2、Median=+1、Min/Max=+0，确认先按实际值推断基础精度、最终封顶 4 位且重启后恢复。再用 Builder 配置多个 Analysis/BY/CLASS、missing group 和多个 Decimal Group Variables，确认按完整 combination 推断精度、long-format 结果、CSV 尾随零以及临时 `proc_means_config.json` 的字段与选择一致。双击 Mean/NMISS 等统计值，确认新建 Query Tab 只包含对应参与记录、自动定位分析列且不改变源 Tab。
 10. 在行号上用 Ctrl 非连续选择 2–20 行，运行 Compare Selected Rows；确认黄色只出现在所选行与差异列的交叉单元格，未选行不变；隐藏变量的差异仍出现在 Analysis 面板中。
 11. 按 `Ctrl+F` 查找当前显示文本，并用 `F3`/`Shift+F3` 前后查找；按 `Ctrl+G` 跳到第 1 行、末行和一个远端中间行。
 12. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QCompleter,
     QGridLayout,
     QGroupBox,
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -29,7 +29,7 @@ class ProcMeansBuilderSelection:
     by_variables: tuple[str, ...]
     class_variables: tuple[str, ...]
     statistics: tuple[str, ...]
-    decimal_group_variable: str | None
+    decimal_group_variables: tuple[str, ...]
 
 
 class VariableTokenEditor(QWidget):
@@ -174,14 +174,13 @@ class ProcMeansBuilder(QWidget):
         self.by_variables.changed.connect(self._refresh_decimal_groups)
         self.class_variables.changed.connect(self._refresh_decimal_groups)
 
-        decimal_row = QHBoxLayout()
-        decimal_row.addWidget(QLabel("Decimal Group Variable"))
-        self.decimal_group = QComboBox()
-        self.decimal_group.setToolTip(
-            "Must be one of the selected BY or CLASS Variables."
+        layout.addWidget(QLabel("Decimal Group Variables"))
+        self.decimal_groups = QListWidget()
+        self.decimal_groups.setMaximumHeight(72)
+        self.decimal_groups.setToolTip(
+            "Check zero or more variables already selected as BY or CLASS Variables."
         )
-        decimal_row.addWidget(self.decimal_group, 1)
-        layout.addLayout(decimal_row)
+        layout.addWidget(self.decimal_groups)
 
         statistics_box = QGroupBox("Statistics")
         statistics_layout = QGridLayout(statistics_box)
@@ -244,7 +243,7 @@ class ProcMeansBuilder(QWidget):
             self.class_variables,
         ):
             editor.setEnabled(available)
-        self.decimal_group.setEnabled(available)
+        self.decimal_groups.setEnabled(available)
 
     def set_default_statistics(self, statistics: list[str]) -> None:
         selected = set(statistics)
@@ -270,24 +269,29 @@ class ProcMeansBuilder(QWidget):
             self.class_variables,
         ):
             editor.setEnabled(not busy)
-        self.decimal_group.setEnabled(not busy)
+        self.decimal_groups.setEnabled(not busy)
         if message:
             self.status.setText(message)
 
     def _refresh_decimal_groups(self) -> None:
-        previous = self.decimal_group.currentData()
+        previous = set(self.selected_decimal_groups())
         values = (
             *self.by_variables.selected_variables(),
             *self.class_variables.selected_variables(),
         )
-        self.decimal_group.blockSignals(True)
-        self.decimal_group.clear()
-        self.decimal_group.addItem("None", None)
+        self.decimal_groups.clear()
         for variable in values:
-            self.decimal_group.addItem(variable, variable)
-        index = self.decimal_group.findData(previous)
-        self.decimal_group.setCurrentIndex(max(0, index))
-        self.decimal_group.blockSignals(False)
+            item = QListWidgetItem(variable)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if variable in previous else Qt.Unchecked)
+            self.decimal_groups.addItem(item)
+
+    def selected_decimal_groups(self) -> tuple[str, ...]:
+        return tuple(
+            self.decimal_groups.item(index).text()
+            for index in range(self.decimal_groups.count())
+            if self.decimal_groups.item(index).checkState() == Qt.Checked
+        )
 
     def _run(self) -> None:
         selection = ProcMeansBuilderSelection(
@@ -297,7 +301,7 @@ class ProcMeansBuilder(QWidget):
             tuple(
                 key for key, checkbox in self.statistics.items() if checkbox.isChecked()
             ),
-            self.decimal_group.currentData(),
+            self.selected_decimal_groups(),
         )
         if not selection.analysis_variables:
             self.validation_error.emit("Select at least one Analysis Variable.")

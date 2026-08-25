@@ -170,6 +170,10 @@ class ProcMeansResultWriter:
             self.schema.visible_variables,
             decimal_base_column=self.schema.decimal_base,
             statistic_decimal_offsets=statistic_offsets,
+            proc_means_analysis_column=self.schema.analysis_variable,
+            proc_means_statistic_keys=tuple(
+                (column, key) for key, column in self.schema.statistic_columns
+            ),
         )
         marker = result_directory / "proc-means-result.tmp"
         marker.touch()
@@ -193,7 +197,9 @@ class ProcMeansResultWriter:
             },
             "display": {
                 "result_layout": "long",
-                "decimal_group_variable": self.config.decimal_group_variable,
+                "decimal_group_variables": list(
+                    self.config.decimal_group_variables
+                ),
                 "decimal_offsets": {
                     STATISTIC_COLUMN_NAMES.get(key, key.upper()): value
                     for key, value in self.config.decimal_offsets

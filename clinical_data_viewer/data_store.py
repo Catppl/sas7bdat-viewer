@@ -197,6 +197,30 @@ class DataStore:
             return None
         return str(row[1]), int(row[2])
 
+    def view_row_values(
+        self,
+        database_path: Path,
+        metadata: DatasetMetadata,
+        compiled_filter: CompiledFilter,
+        sort: SortSpec | None,
+        view_row: int,
+        columns: list[str] | tuple[str, ...],
+    ) -> tuple[object, ...] | None:
+        selected = _validated_columns(columns, metadata)
+        where = self._where_clause(metadata, compiled_filter)
+        select = ", ".join(quote_identifier(column) for column in selected)
+        sql = (
+            f"SELECT {select} FROM dataset{where}{order_clause(sort, metadata)} "
+            "LIMIT 1 OFFSET ?"
+        )
+        with closing(
+            sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            row = connection.execute(
+                sql, (*compiled_filter.parameters, int(view_row))
+            ).fetchone()
+        return None if row is None else tuple(row)
+
     def find_text(
         self,
         database_path: Path,

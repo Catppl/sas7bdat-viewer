@@ -26,20 +26,23 @@ class AnalysisPanel(QWidget):
     recalculate_requested = Signal()
     settings_requested = Signal()
     clear_comparison_requested = Signal()
+    all_tabs_closed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self._close_tab)
         layout.addWidget(self.tabs)
         self._create_statistics_tab()
         self._create_builder_tab()
         self._create_comparison_tab()
 
     def _create_statistics_tab(self) -> None:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        self.statistics_page = QWidget()
+        layout = QVBoxLayout(self.statistics_page)
         self.statistics_scope = QLabel("Run PROC MEANS from a numeric column.")
         self.statistics_scope.setWordWrap(True)
         layout.addWidget(self.statistics_scope)
@@ -61,15 +64,13 @@ class AnalysisPanel(QWidget):
         buttons.addWidget(settings)
         buttons.addWidget(copy)
         layout.addLayout(buttons)
-        self.statistics_index = self.tabs.addTab(page, "PROC MEANS (Simple)")
 
     def _create_builder_tab(self) -> None:
         self.builder = ProcMeansBuilder()
-        self.builder_index = self.tabs.addTab(self.builder, "PROC MEANS Builder")
 
     def _create_comparison_tab(self) -> None:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        self.comparison_page = QWidget()
+        layout = QVBoxLayout(self.comparison_page)
         self.comparison_scope = QLabel("Select at least two rows to compare.")
         self.comparison_scope.setWordWrap(True)
         layout.addWidget(self.comparison_scope)
@@ -86,7 +87,29 @@ class AnalysisPanel(QWidget):
         buttons.addWidget(clear)
         buttons.addWidget(copy)
         layout.addLayout(buttons)
-        self.comparison_index = self.tabs.addTab(page, "Row Comparison")
+
+    def _activate(self, page: QWidget, title: str) -> None:
+        index = self.tabs.indexOf(page)
+        if index < 0:
+            index = self.tabs.addTab(page, title)
+        self.tabs.setCurrentIndex(index)
+
+    def show_statistics_tab(self) -> None:
+        self._activate(self.statistics_page, "PROC MEANS (Simple)")
+
+    def show_builder_tab(self) -> None:
+        self._activate(self.builder, "PROC MEANS Builder")
+
+    def show_comparison_tab(self) -> None:
+        self._activate(self.comparison_page, "Row Comparison")
+
+    def _close_tab(self, index: int) -> None:
+        page = self.tabs.widget(index)
+        self.tabs.removeTab(index)
+        if page is self.comparison_page:
+            self.clear_comparison_requested.emit()
+        if self.tabs.count() == 0:
+            self.all_tabs_closed.emit()
 
     @staticmethod
     def _format(value: float | None, decimals: int) -> str:
@@ -125,7 +148,7 @@ class AnalysisPanel(QWidget):
                     )
                 ),
             )
-        self.tabs.setCurrentIndex(self.statistics_index)
+        self.show_statistics_tab()
 
     def mark_statistics_stale(self) -> None:
         if self.statistics_table.rowCount():
@@ -173,7 +196,7 @@ class AnalysisPanel(QWidget):
             "Double-click a variable to locate its visible column."
         )
         self.comparison_table.resizeColumnsToContents()
-        self.tabs.setCurrentIndex(self.comparison_index)
+        self.show_comparison_tab()
 
     def clear_comparison(self) -> None:
         self.comparison_table.setRowCount(0)
