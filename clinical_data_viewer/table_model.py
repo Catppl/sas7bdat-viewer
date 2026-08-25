@@ -32,6 +32,9 @@ class DatasetTableModel(QAbstractTableModel):
         self.filtered_count = metadata.row_count
         self.sort_spec: SortSpec | None = None
         self._pages: OrderedDict[int, tuple[tuple[object, ...], ...]] = OrderedDict()
+        self._page_highlights: OrderedDict[int, tuple[frozenset[str], ...]] = (
+            OrderedDict()
+        )
         self._loading_pages: set[int] = set()
         self._variable_by_name = {
             variable.name: variable for variable in metadata.variables
@@ -69,6 +72,12 @@ class DatasetTableModel(QAbstractTableModel):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ToolTipRole:
             return "Missing" if value is None else str(value)
+        if (
+            role == Qt.BackgroundRole
+            and self.columns[index.column()]
+            in self._page_highlights.get(offset, (frozenset(),) * len(page))[local_row]
+        ):
+            return QColor("#ffe29a")
         if (
             role == Qt.BackgroundRole
             and index.row() in self.highlighted_rows
@@ -131,6 +140,7 @@ class DatasetTableModel(QAbstractTableModel):
         if columns is not None:
             self.columns = list(columns)
         self._pages.clear()
+        self._page_highlights.clear()
         self._loading_pages.clear()
         self.filtered_count = (
             self.metadata.row_count if filtered_count is None else filtered_count
@@ -144,20 +154,26 @@ class DatasetTableModel(QAbstractTableModel):
         offset: int,
         rows: tuple[tuple[object, ...], ...],
         filtered_count: int,
+        cell_highlights: tuple[frozenset[str], ...] = (),
     ) -> None:
         self._loading_pages.discard(offset)
         if filtered_count != self.filtered_count:
             self.beginResetModel()
             self.filtered_count = filtered_count
             self._pages.clear()
+            self._page_highlights.clear()
             self._loading_pages.clear()
             self.endResetModel()
         if not rows:
             return
         self._pages[offset] = rows
+        self._page_highlights[offset] = cell_highlights or tuple(
+            frozenset() for _row in rows
+        )
         self._pages.move_to_end(offset)
         while len(self._pages) > self.max_cached_pages:
-            self._pages.popitem(last=False)
+            expired, _rows = self._pages.popitem(last=False)
+            self._page_highlights.pop(expired, None)
         bottom = min(offset + len(rows), self.filtered_count) - 1
         if bottom >= offset and self.columns:
             self.dataChanged.emit(
@@ -178,6 +194,7 @@ class DatasetTableModel(QAbstractTableModel):
             self.beginResetModel()
             self.filtered_count = row_count
             self._pages.clear()
+            self._page_highlights.clear()
             self._loading_pages.clear()
             self.endResetModel()
 

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
-from .data_store import _validated_columns, order_clause
+from .data_store import DataStore, _validated_columns, order_clause
 from .domain import DatasetHandle, SortSpec
 from .filter_engine import CompiledFilter, quote_identifier
 
@@ -23,7 +23,7 @@ class CsvExporter:
     ) -> int:
         notify = progress or (lambda _message: None)
         selected = _validated_columns(columns, handle.metadata)
-        where = f" WHERE {compiled_filter.sql}" if compiled_filter.sql else ""
+        where = DataStore._where_clause(handle.metadata, compiled_filter)
         select = ", ".join(quote_identifier(column) for column in selected)
         sql = (
             f"SELECT {select} FROM dataset{where}{order_clause(sort, handle.metadata)}"

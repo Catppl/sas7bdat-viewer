@@ -18,6 +18,9 @@ class DatasetMetadata:
     name: str
     row_count: int
     variables: tuple[VariableMetadata, ...]
+    pair_id_column: str | None = None
+    side_order_column: str | None = None
+    diff_columns_column: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +31,8 @@ class DatasetHandle:
     metadata: DatasetMetadata
     cached_row_count: int = 0
     cache_complete: bool = True
+    kind: str = "sas"
+    display_source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +45,7 @@ class SortSpec:
 class PageResult:
     rows: tuple[tuple[object, ...], ...]
     filtered_count: int
+    cell_highlights: tuple[frozenset[str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

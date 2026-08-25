@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -31,6 +32,23 @@ def order_clause(sort: SortSpec | None, metadata: DatasetMetadata) -> str:
 
 
 def order_expression(sort: SortSpec | None, metadata: DatasetMetadata) -> str:
+    if metadata.pair_id_column and metadata.side_order_column:
+        pair = quote_identifier(metadata.pair_id_column)
+        side = quote_identifier(metadata.side_order_column)
+        if sort is None:
+            return f"{pair} ASC, {side} ASC"
+        allowed = {variable.name for variable in metadata.variables}
+        if sort.variable not in allowed:
+            raise ValueError(f"Unknown sort variable: {sort.variable}")
+        column = quote_identifier(sort.variable)
+        direction = "ASC" if sort.ascending else "DESC"
+        # Sort pairs by their Main value while preserving Main -> QC adjacency.
+        pair_value = (
+            f"(SELECT paired.{column} FROM dataset AS paired "
+            f"WHERE paired.{pair} = dataset.{pair} "
+            f"ORDER BY paired.{side} ASC LIMIT 1)"
+        )
+        return f"{pair_value} {direction}, {pair} ASC, {side} ASC"
     if sort is None:
         return "_source_row ASC"
     allowed = {variable.name for variable in metadata.variables}
@@ -41,6 +59,20 @@ def order_expression(sort: SortSpec | None, metadata: DatasetMetadata) -> str:
 
 
 class DataStore:
+    @staticmethod
+    def _where_clause(
+        metadata: DatasetMetadata, compiled_filter: CompiledFilter
+    ) -> str:
+        if not compiled_filter.sql:
+            return ""
+        if metadata.pair_id_column:
+            pair = quote_identifier(metadata.pair_id_column)
+            return (
+                f" WHERE {pair} IN (SELECT DISTINCT {pair} FROM dataset "
+                f"WHERE {compiled_filter.sql})"
+            )
+        return f" WHERE {compiled_filter.sql}"
+
     def query_page(
         self,
         database_path: Path,
@@ -53,7 +85,7 @@ class DataStore:
         known_count: int | None = None,
     ) -> PageResult:
         selected = _validated_columns(columns, metadata)
-        where = f" WHERE {compiled_filter.sql}" if compiled_filter.sql else ""
+        where = self._where_clause(metadata, compiled_filter)
         with closing(
             sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
         ) as connection:
@@ -67,11 +99,22 @@ class DataStore:
                     ).fetchone()[0]
                 )
             select = ", ".join(quote_identifier(column) for column in selected)
+            include_highlights = bool(metadata.diff_columns_column)
+            if include_highlights:
+                select += ", " + quote_identifier(metadata.diff_columns_column or "")
             sql = f"SELECT {select} FROM dataset{where}{order_clause(sort, metadata)} LIMIT ? OFFSET ?"
-            rows = connection.execute(
+            raw_rows = connection.execute(
                 sql, (*compiled_filter.parameters, int(limit), int(offset))
             ).fetchall()
-        return PageResult(tuple(tuple(row) for row in rows), filtered_count)
+        highlights: tuple[frozenset[str], ...] = ()
+        if include_highlights:
+            rows = tuple(tuple(row[:-1]) for row in raw_rows)
+            highlights = tuple(
+                frozenset(json.loads(row[-1] or "[]")) for row in raw_rows
+            )
+        else:
+            rows = tuple(tuple(row) for row in raw_rows)
+        return PageResult(rows, filtered_count, highlights)
 
     def find_text(
         self,
@@ -88,7 +131,7 @@ class DataStore:
         selected = _validated_columns(columns, metadata)
         if not text:
             return None
-        where = f" WHERE {compiled_filter.sql}" if compiled_filter.sql else ""
+        where = self._where_clause(metadata, compiled_filter)
         select = ", ".join(quote_identifier(column) for column in selected)
         matches = " OR ".join(
             f"instr(lower(CAST(COALESCE({quote_identifier(column)}, '') AS TEXT)), "
@@ -148,17 +191,22 @@ class DataStore:
         except KeyError as error:
             raise ValueError(f"Unknown variable: {variable_name}") from error
         column = quote_identifier(variable.name)
-        where = f" WHERE {compiled_filter.sql}" if compiled_filter.sql else ""
+        where = self._where_clause(metadata, compiled_filter)
         missing = (
             f"({column} IS NULL OR {column} = '')"
             if variable.kind == "character"
             else f"{column} IS NULL"
         )
-        nonmissing_where = (
-            f" WHERE ({compiled_filter.sql}) AND NOT ({missing})"
-            if compiled_filter.sql
-            else f" WHERE NOT ({missing})"
-        )
+        if compiled_filter.sql and metadata.pair_id_column:
+            pair = quote_identifier(metadata.pair_id_column)
+            nonmissing_where = (
+                f" WHERE {pair} IN (SELECT DISTINCT {pair} FROM dataset WHERE "
+                f"{compiled_filter.sql}) AND NOT ({missing})"
+            )
+        elif compiled_filter.sql:
+            nonmissing_where = f" WHERE ({compiled_filter.sql}) AND NOT ({missing})"
+        else:
+            nonmissing_where = f" WHERE NOT ({missing})"
         with closing(
             sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
         ) as connection:
@@ -203,7 +251,7 @@ class DataStore:
             raise ValueError("Row comparison supports at most 20 rows at a time.")
         columns = [variable.name for variable in metadata.variables]
         select = ", ".join(quote_identifier(column) for column in columns)
-        where = f" WHERE {compiled_filter.sql}" if compiled_filter.sql else ""
+        where = self._where_clause(metadata, compiled_filter)
         placeholders = ", ".join("?" for _row in requested)
         sql = (
             "WITH current_view AS ("

@@ -23,7 +23,16 @@ class ComparisonHighlightDelegate(QStyledItemDelegate):
         columns = getattr(model, "columns", ())
         rows = getattr(model, "highlighted_rows", set())
         highlighted_columns = getattr(model, "highlighted_columns", set())
-        return (
+        page_highlights = getattr(model, "_page_highlights", {})
+        page_size = getattr(model, "page_size", 1)
+        page = page_highlights.get((index.row() // page_size) * page_size, ())
+        local_row = index.row() % page_size
+        generated_highlight = (
+            local_row < len(page)
+            and 0 <= index.column() < len(columns)
+            and columns[index.column()] in page[local_row]
+        )
+        return generated_highlight or (
             index.isValid()
             and index.row() in rows
             and 0 <= index.column() < len(columns)
@@ -128,7 +137,9 @@ class CopyTableView(QTableView):
         menu.addSeparator()
         selected_rows = self.selected_row_numbers()
         compare = QAction("Compare Selected Rows", self)
-        compare.setEnabled(2 <= len(selected_rows) <= 20)
+        compare.setEnabled(
+            not bool(self.property("pairedDataset")) and 2 <= len(selected_rows) <= 20
+        )
         compare.triggered.connect(
             lambda: self.compare_rows_requested.emit(self.selected_row_numbers())
         )
@@ -165,6 +176,8 @@ class CopyTableView(QTableView):
         model = self.model()
         metadata = getattr(model, "metadata", None)
         if not variable_name or metadata is None:
+            return False
+        if metadata.pair_id_column:
             return False
         return any(
             variable.name == variable_name and variable.kind == "numeric"

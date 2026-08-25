@@ -25,3 +25,7 @@
 21. 从 Filter History 回填包含列头筛选的完整 WHERE 并 Apply，确认结果一致。当前版本不要求恢复原来的列头复选框/蓝色标签，只要求条件语义与结果一致。
 22. 在表头筛选 Search loaded values 中粘贴一个已加载的完整值，确认优先显示精确匹配，Apply 后 WHERE 为该值的 `in` 条件，而不是 `not missing(...)`。再测试多个部分匹配、无匹配、Missing 和超过 2,000 个候选值的截断列表；搜索有效时 Select All Matching 只能影响当前可见匹配值。
 23. 使用构建脚本生成 `SASDataViewer-Windows-x64.zip`，将 ZIP 复制到没有 Python 的干净 Windows 机器并完整解压。确认 `SASDataViewer\SASDataViewer.exe` 与 `_internal` 同时存在，程序可启动、可打开数据，并且不能只复制 EXE 单独运行。核对脚本输出的 ZIP SHA256。
+24. 打开 `Tools > Compare Datasets`，分别从现有 Tab 和 Browse 选择 Main/QC。Browse 的文件应作为普通 Tab 打开，缓存完成前 Compare 禁用；完成后原始 Main/QC 文件仍可由 SAS 覆盖或删除。
+25. 使用包含重复 Group、顺序交换、错误 `AVISITN/ASEQ`、数值 tolerance 范围内/外差异、Main/QC 独有记录和近似候选的数据验证 Dataset Compare。确认 Hungarian 匹配不重复使用 observation，threshold 产生 Unmatched，近似候选产生 Ambiguous，状态使用 Main/QC 而不是 A/B 代码。
+26. Compare Result 只保留差异或匹配异常 observation；正常匹配按 Main 后 QC 相邻显示，差异变量的两侧单元格均为浅黄色。指定 Key Variables 后，key 不同时只正式标记 key；key 相同时再标记其余差异。
+27. 在 Compare Result 使用 Variables、手写 WHERE、表头筛选、排序、Ctrl+F、Ctrl+G、复制和 CSV。任一侧命中筛选应保留整个匹配对，排序后 Main/QC 不得拆散；CSV 行、列和顺序与当前结果一致。Reload、PROC MEANS 和把 Compare Result 再作为 Compare 输入应禁用。关闭结果 Tab 后对应临时 SQLite 目录应删除。

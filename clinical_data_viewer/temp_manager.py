@@ -106,6 +106,12 @@ class TempManager:
             shutil.rmtree(dataset_directory, ignore_errors=True)
             raise
 
+    def create_dataset_directory(self) -> Path:
+        """Create an owned directory for a generated, session-only dataset."""
+        dataset_directory = self.session_directory / uuid.uuid4().hex
+        dataset_directory.mkdir(mode=0o700)
+        return dataset_directory
+
     def remove_dataset(self, dataset_directory: Path) -> None:
         self._safe_remove(dataset_directory)
 

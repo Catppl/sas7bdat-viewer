@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..compare_engine import DatasetComparer
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
 from ..domain import CacheProgress, DatasetHandle
@@ -35,6 +36,7 @@ from ..temp_manager import TempManager
 from ..workers import Worker
 from .analysis_panel import AnalysisPanel
 from .column_filter_dialog import ColumnFilterDialog
+from .dataset_compare_panel import DatasetComparePanel
 from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
 from .settings_dialog import SettingsDialog
@@ -70,6 +72,7 @@ class MainWindow(QMainWindow):
         self.temp_manager = temp_manager
         self.history = history
         self.reader = SasDatasetReader(temp_manager)
+        self.comparer = DatasetComparer(temp_manager)
         self.store = DataStore()
         self.exporter = CsvExporter()
         self.pool = QThreadPool.globalInstance()
@@ -78,6 +81,7 @@ class MainWindow(QMainWindow):
         self._last_statistics_request: tuple[DatasetTab, str] | None = None
         self._statistics_owner: DatasetTab | None = None
         self._comparison_owner: DatasetTab | None = None
+        self._compare_input_tabs: set[DatasetTab] = set()
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
         self.setMinimumSize(850, 560)
@@ -87,6 +91,7 @@ class MainWindow(QMainWindow):
         self._create_center()
         self._create_variables_panel()
         self._create_analysis_panel()
+        self._create_compare_panel()
         self._create_status_bar()
         self._sync_active_tab()
 
@@ -129,6 +134,9 @@ class MainWindow(QMainWindow):
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
+        self.compare_datasets_action = QAction("Compare Datasets", self)
+        self.compare_datasets_action.setCheckable(True)
+        self.compare_datasets_action.setChecked(False)
         self.settings_action = QAction("Settings…", self)
         self.settings_action.triggered.connect(self.show_settings)
 
@@ -147,6 +155,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.variables_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.analysis_action)
+        tools_menu.addAction(self.compare_datasets_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.settings_action)
         help_menu = self.menuBar().addMenu("&Help")
@@ -239,6 +248,22 @@ class MainWindow(QMainWindow):
             self._clear_row_comparison
         )
 
+    def _create_compare_panel(self) -> None:
+        self.compare_panel = DatasetComparePanel()
+        self.compare_dock = QDockWidget("Dataset Compare", self)
+        self.compare_dock.setObjectName("datasetCompareDock")
+        self.compare_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        self.compare_dock.setWidget(self.compare_panel)
+        self.compare_dock.setMinimumWidth(430)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.compare_dock)
+        self.compare_dock.hide()
+        self.compare_datasets_action.toggled.connect(self.compare_dock.setVisible)
+        self.compare_dock.visibilityChanged.connect(
+            self.compare_datasets_action.setChecked
+        )
+        self.compare_panel.browse_requested.connect(self._browse_compare_dataset)
+        self.compare_panel.compare_requested.connect(self._run_dataset_compare)
+
     def _sync_top_search(self, text: str) -> None:
         if self.variable_search.text() == text:
             return
@@ -285,7 +310,7 @@ class MainWindow(QMainWindow):
         for source_path in paths:
             self._open_path(Path(source_path))
 
-    def _open_path(self, source_path: Path) -> None:
+    def _open_path(self, source_path: Path, when_ready=None) -> None:
         loading = LoadingPage(source_path)
         index = self.tabs.addTab(loading, source_path.name)
         self.tabs.setCurrentIndex(index)
@@ -301,7 +326,13 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(current_index)
             tab.start()
             if not handle.cache_complete:
-                self._continue_cache(tab)
+                self._continue_cache(
+                    tab,
+                    (lambda _handle: when_ready(tab)) if when_ready else None,
+                )
+            elif when_ready:
+                when_ready(tab)
+            self._refresh_compare_datasets()
 
         def failed(message: str, details: str) -> None:
             loading.progress.setRange(0, 1)
@@ -311,6 +342,89 @@ class MainWindow(QMainWindow):
         self._submit(
             loading,
             lambda worker: self.reader.load_initial(source_path, worker.report),
+            completed,
+            failed,
+        )
+
+    def _browse_compare_dataset(self, side: str) -> None:
+        initial = self.settings.last_open_directory or str(Path.home())
+        filename, _filter = QFileDialog.getOpenFileName(
+            self,
+            f"Choose {side.title()} SAS Dataset",
+            initial,
+            "SAS datasets (*.sas7bdat);;All files (*)",
+        )
+        if not filename:
+            return
+        source = Path(filename)
+        self.settings.last_open_directory = str(source.parent)
+        self.settings.save()
+
+        def ready(tab: DatasetTab) -> None:
+            self._refresh_compare_datasets()
+            self.compare_panel.select_dataset(side, tab)
+
+        self._open_path(source, ready)
+
+    def _refresh_compare_datasets(self) -> None:
+        if not hasattr(self, "compare_panel"):
+            return
+        datasets: list[tuple[object, str, bool]] = []
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+                datasets.append(
+                    (
+                        tab,
+                        f"{tab.handle.source_path.name} — {tab.handle.source_path.parent}",
+                        tab.cache_complete,
+                    )
+                )
+        self.compare_panel.set_datasets(datasets)
+
+    def _run_dataset_compare(
+        self, main_tab: DatasetTab, qc_tab: DatasetTab, config
+    ) -> None:
+        if (
+            self.tabs.indexOf(main_tab) < 0
+            or self.tabs.indexOf(qc_tab) < 0
+            or not main_tab.cache_complete
+            or not qc_tab.cache_complete
+        ):
+            QMessageBox.warning(
+                self, "Dataset Compare", "Main and QC must both be fully loaded."
+            )
+            return
+        self.compare_dock.show()
+        self.compare_panel.set_busy(True, "Comparing datasets in the background…")
+        self._compare_input_tabs = {main_tab, qc_tab}
+        main_handle = main_tab.handle
+        qc_handle = qc_tab.handle
+
+        def completed(handle: DatasetHandle) -> None:
+            self._compare_input_tabs.clear()
+            self.compare_panel.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
+            tab = self._make_dataset_tab(handle)
+            title = (
+                f"Compare Result: {main_handle.metadata.name} "
+                f"vs {qc_handle.metadata.name}"
+            )
+            index = self.tabs.addTab(tab, title)
+            self.tabs.setCurrentIndex(index)
+            tab.start()
+
+        def failed(message: str, details: str) -> None:
+            self._compare_input_tabs.clear()
+            self.compare_panel.set_busy(False, "Comparison failed.")
+            self._show_error("Dataset Compare Failed", message, details)
+
+        self._submit(
+            self.compare_panel,
+            lambda worker: self.comparer.compare(
+                main_handle, qc_handle, config, worker.report
+            ),
             completed,
             failed,
         )
@@ -382,6 +496,7 @@ class MainWindow(QMainWindow):
             )
             self._sync_active_tab()
             self._refresh_status(tab)
+            self._refresh_compare_datasets()
             if when_complete is not None:
                 when_complete(handle)
 
@@ -443,7 +558,7 @@ class MainWindow(QMainWindow):
                     if tab.cache_complete
                     else tab.handle.cached_row_count,
                 )
-            tab.model.set_page(offset, page.rows, displayed_count)
+            tab.model.set_page(offset, page.rows, displayed_count, page.cell_highlights)
             if offset == 0 and tab.pending_history_text:
                 self.history.add(tab.handle.source_path, tab.pending_history_text)
                 tab.pending_history_text = ""
@@ -610,7 +725,11 @@ class MainWindow(QMainWindow):
             self._recalculate_statistics()
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
-        if self.tabs.indexOf(tab) < 0 or not tab.cache_complete:
+        if (
+            self.tabs.indexOf(tab) < 0
+            or not tab.cache_complete
+            or tab.handle.kind == "compare"
+        ):
             return
         variable = next(
             (
@@ -741,7 +860,7 @@ class MainWindow(QMainWindow):
 
     def reload_current(self) -> None:
         tab = self.current_dataset_tab()
-        if not tab or tab.reload_in_progress:
+        if not tab or tab.reload_in_progress or tab.handle.kind != "sas":
             return
         source_path = tab.handle.source_path
         old_directory = tab.handle.temporary_path.parent
@@ -865,6 +984,14 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         widget = self.tabs.widget(index)
+        if widget in self._compare_input_tabs:
+            QMessageBox.information(
+                self,
+                "Dataset Compare Running",
+                "This dataset is currently being compared. Wait for the comparison "
+                "to finish before closing it.",
+            )
+            return
         self.tabs.removeTab(index)
         for worker in self._workers.get(widget, set()):
             worker.cancel()
@@ -880,6 +1007,7 @@ class MainWindow(QMainWindow):
             )
         self._cleanup_pending(widget)
         widget.deleteLater()
+        self._refresh_compare_datasets()
         self._sync_active_tab()
 
     def _sync_active_tab(self, _index: int | None = None) -> None:
@@ -899,12 +1027,14 @@ class MainWindow(QMainWindow):
         self.variables_panel.set_dataset(
             tab.handle.metadata, tab.visible_columns
         ) if tab else self.variables_panel.set_dataset(None)
+        self._refresh_compare_datasets()
         self._refresh_status(tab)
 
     def _sync_dataset_actions(self, tab: DatasetTab | None) -> None:
         enabled = tab is not None
         self.reload_action.setEnabled(
             enabled
+            and tab.handle.kind == "sas"
             and not tab.reload_in_progress
             and (tab.cache_complete or tab.cache_failed)
         )
@@ -935,7 +1065,8 @@ class MainWindow(QMainWindow):
         self.filter_status.setProperty("filtered", bool(tab.compiled_filter.sql))
         self.filter_status.style().unpolish(self.filter_status)
         self.filter_status.style().polish(self.filter_status)
-        self.source_status.setText(f"Source:  {tab.handle.source_path}")
+        source = tab.handle.display_source or str(tab.handle.source_path)
+        self.source_status.setText(f"Source:  {source}")
 
     def _submit(
         self, owner: QWidget, function, completed, failed, progress_data=None

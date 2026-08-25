@@ -9,6 +9,34 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class TableModelTests(unittest.TestCase):
+    def test_generated_compare_cells_use_page_level_highlights(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.table_model import DatasetTableModel
+
+        _application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "compare",
+            2,
+            (VariableMetadata("SIDE"), VariableMetadata("AVAL", kind="numeric")),
+            pair_id_column="COMPARE_PAIR",
+            side_order_column="__SIDE_ORDER",
+            diff_columns_column="__DIFF",
+        )
+        model = DatasetTableModel(metadata, ["SIDE", "AVAL"], page_size=10)
+        model.set_page(
+            0,
+            (("Main", 1.0), ("QC", 2.0)),
+            2,
+            (frozenset({"AVAL"}), frozenset({"AVAL"})),
+        )
+        self.assertIsNone(model.data(model.index(0, 0), Qt.BackgroundRole))
+        self.assertIsNotNone(model.data(model.index(0, 1), Qt.BackgroundRole))
+        self.assertIsNotNone(model.data(model.index(1, 1), Qt.BackgroundRole))
+
     def test_virtual_model_requests_an_offscreen_page_without_loading_prior_rows(
         self,
     ) -> None:

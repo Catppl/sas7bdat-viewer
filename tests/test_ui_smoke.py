@@ -60,6 +60,8 @@ class UiSmokeTests(unittest.TestCase):
                 for action in window.menuBar().actions()[3].menu().actions()
             ]
             self.assertIn("Analysis", tools_actions)
+            self.assertIn("Compare Datasets", tools_actions)
+            self.assertFalse(window.compare_dock.isVisible())
             self.assertTrue(window.variables_dock.isVisible() or not window.isVisible())
             metadata = DatasetMetadata(
                 "adae",
@@ -91,6 +93,7 @@ class UiSmokeTests(unittest.TestCase):
             window.tabs.addTab(dataset_tab, "adae.sas7bdat")
             window.tabs.setCurrentWidget(dataset_tab)
             window._sync_active_tab()
+            self.assertEqual(window.compare_panel.main_dataset.count(), 2)
             self.assertEqual(dataset_tab.model.rowCount(), 0)
 
             displayed_item = window.variables_panel.displayed_tree.topLevelItem(0)
