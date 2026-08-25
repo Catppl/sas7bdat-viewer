@@ -252,6 +252,7 @@ class DatasetTab(QWidget):
 
         self.table = CopyTableView()
         self.table.setProperty("pairedDataset", bool(handle.metadata.pair_id_column))
+        self.table.setProperty("allowProcMeans", handle.kind == "sas")
         self.filter_header = FilterHeaderView(self.table)
         self.table.setHorizontalHeader(self.filter_header)
         self.filter_header.setSectionsMovable(False)
@@ -629,11 +630,11 @@ class DatasetTab(QWidget):
         )
         menu.addAction(filter_action)
         menu.addSeparator()
-        means_action = QAction("PROC MEANS", self)
+        means_action = QAction("PROC MEANS (Simple)", self)
         means_action.setEnabled(
             self.cache_complete
             and variable.kind == "numeric"
-            and not self.handle.metadata.pair_id_column
+            and self.handle.kind == "sas"
         )
         means_action.triggered.connect(
             lambda: self.proc_means_requested.emit(variable_name)

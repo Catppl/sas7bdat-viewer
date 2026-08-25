@@ -4,6 +4,7 @@ import math
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .domain import DatasetMetadata
@@ -18,6 +19,20 @@ class StatisticsResult:
     values: dict[str, float | int | None]
     filtered_rows: int
     confidence: float
+    base_decimals: int = 0
+
+
+def observed_decimal_places(value: float) -> int:
+    """Infer meaningful decimal places from a normalized numeric value."""
+    try:
+        decimal = Decimal(str(value)).normalize()
+    except (InvalidOperation, ValueError):
+        return 0
+    return min(4, max(0, -decimal.as_tuple().exponent))
+
+
+def maximum_observed_decimals(values: list[float]) -> int:
+    return max((observed_decimal_places(value) for value in values), default=0)
 
 
 def qntldef5(values: list[float], probability: float) -> float | None:
@@ -34,6 +49,77 @@ def qntldef5(values: list[float], probability: float) -> float | None:
     if math.isclose(position, integer):
         return (ordered[integer - 1] + ordered[integer]) / 2
     return ordered[integer]
+
+
+def calculate_value_statistics(
+    values: list[float],
+    filtered_rows: int,
+    subject_count: int | None,
+    confidence: float,
+    requested: set[str] | None = None,
+) -> dict[str, float | int | None]:
+    selected = requested or {
+        "subjects",
+        "n",
+        "nmiss",
+        "mean",
+        "std",
+        "stderr",
+        "median",
+        "q1",
+        "q3",
+        "min",
+        "max",
+        "lclm",
+        "uclm",
+    }
+    count = len(values)
+    result: dict[str, float | int | None] = {
+        "subjects": subject_count,
+        "n": count,
+        "nmiss": filtered_rows - count,
+        "mean": None,
+        "std": None,
+        "stderr": None,
+        "median": qntldef5(values, 0.5) if "median" in selected else None,
+        "q1": qntldef5(values, 0.25) if "q1" in selected else None,
+        "q3": qntldef5(values, 0.75) if "q3" in selected else None,
+        "min": min(values) if values and "min" in selected else None,
+        "max": max(values) if values and "max" in selected else None,
+        "lclm": None,
+        "uclm": None,
+    }
+    if not values:
+        return result
+    needs_mean = bool(selected & {"mean", "std", "stderr", "lclm", "uclm"})
+    if not needs_mean:
+        return result
+    mean = math.fsum(values) / count
+    if "mean" in selected:
+        result["mean"] = mean
+    if count <= 1:
+        return result
+    variance = math.fsum((value - mean) ** 2 for value in values) / (count - 1)
+    standard_deviation = math.sqrt(variance)
+    standard_error = standard_deviation / math.sqrt(count)
+    if "std" in selected:
+        result["std"] = standard_deviation
+    if "stderr" in selected:
+        result["stderr"] = standard_error
+    if not selected & {"lclm", "uclm"}:
+        return result
+    try:
+        from scipy.stats import t
+    except ImportError as error:
+        raise RuntimeError(
+            "SciPy is required to calculate PROC MEANS confidence limits."
+        ) from error
+    critical = float(t.ppf((1 + confidence) / 2, count - 1))
+    if "lclm" in selected:
+        result["lclm"] = mean - critical * standard_error
+    if "uclm" in selected:
+        result["uclm"] = mean + critical * standard_error
+    return result
 
 
 def calculate_statistics(
@@ -89,41 +175,9 @@ def calculate_statistics(
                 ).fetchone()[0]
             )
 
-    count = len(values)
-    missing = filtered_rows - count
-    result: dict[str, float | int | None] = {
-        "subjects": subject_count,
-        "n": count,
-        "nmiss": missing,
-        "mean": None,
-        "std": None,
-        "stderr": None,
-        "median": qntldef5(values, 0.5),
-        "q1": qntldef5(values, 0.25),
-        "q3": qntldef5(values, 0.75),
-        "min": min(values) if values else None,
-        "max": max(values) if values else None,
-        "lclm": None,
-        "uclm": None,
-    }
-    if values:
-        mean = math.fsum(values) / count
-        result["mean"] = mean
-        if count > 1:
-            variance = math.fsum((value - mean) ** 2 for value in values) / (count - 1)
-            standard_deviation = math.sqrt(variance)
-            standard_error = standard_deviation / math.sqrt(count)
-            result["std"] = standard_deviation
-            result["stderr"] = standard_error
-            try:
-                from scipy.stats import t
-            except ImportError as error:
-                raise RuntimeError(
-                    "SciPy is required to calculate PROC MEANS confidence limits."
-                ) from error
-            critical = float(t.ppf((1 + confidence) / 2, count - 1))
-            result["lclm"] = mean - critical * standard_error
-            result["uclm"] = mean + critical * standard_error
+    result = calculate_value_statistics(
+        values, filtered_rows, subject_count, confidence
+    )
     return StatisticsResult(
         variable.name,
         variable.label,
@@ -131,4 +185,5 @@ def calculate_statistics(
         result,
         filtered_rows,
         confidence,
+        maximum_observed_decimals(values),
     )

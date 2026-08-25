@@ -28,6 +28,8 @@ class DatasetMetadata:
     warning_column_messages: tuple[tuple[str, str], ...] = ()
     compare_side_column: str | None = None
     source_obs_column: str | None = None
+    decimal_base_column: str | None = None
+    statistic_decimal_offsets: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +42,7 @@ class DatasetHandle:
     cache_complete: bool = True
     kind: str = "sas"
     display_source: str = ""
+    configuration_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +57,7 @@ class PageResult:
     filtered_count: int
     cell_highlights: tuple[frozenset[str], ...] = ()
     row_warnings: tuple[bool, ...] = ()
+    row_decimal_bases: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

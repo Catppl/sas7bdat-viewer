@@ -60,6 +60,7 @@ class UiSmokeTests(unittest.TestCase):
                 for action in window.menuBar().actions()[3].menu().actions()
             ]
             self.assertIn("Analysis", tools_actions)
+            self.assertIn("PROC MEANS Builder", tools_actions)
             self.assertIn("Compare Datasets", tools_actions)
             self.assertFalse(window.compare_dock.isVisible())
             self.assertTrue(window.variables_dock.isVisible() or not window.isVisible())
@@ -131,6 +132,15 @@ class UiSmokeTests(unittest.TestCase):
                 3,
                 True,
             )
+            builder = window.analysis_panel.builder
+            builder.set_dataset(numeric_metadata, "adlb.sas7bdat", "All rows")
+            builder.analysis_variables.editor.setText("aval")
+            builder.analysis_variables._add_from_editor()
+            builder.by_variables.editor.setText("PARAMCD")
+            builder.by_variables._add_from_editor()
+            self.assertEqual(builder.analysis_variables.selected_variables(), ("AVAL",))
+            self.assertEqual(builder.by_variables.selected_variables(), ("PARAMCD",))
+            self.assertGreaterEqual(builder.decimal_group.findData("PARAMCD"), 1)
             numeric_tab = DatasetTab(numeric_handle, 500)
             numeric_tab.set_column_filter(
                 "PARAMCD",
@@ -256,9 +266,10 @@ class UiSmokeTests(unittest.TestCase):
                     {"subjects": 2, "mean": 1.235, "std": 0.12345},
                     3,
                     0.95,
+                    1,
                 ),
                 ["subjects", "mean", "std"],
-                {"mean": 2, "std": 3},
+                {"mean": 1, "std": 2},
                 "All rows",
             )
             self.assertEqual(
@@ -274,7 +285,7 @@ class UiSmokeTests(unittest.TestCase):
             settings_dialog.statistic_decimals["mean"].setValue(4)
             settings_dialog._save()
             self.assertEqual(
-                settings_dialog.settings.proc_means_decimal_places["mean"], 4
+                settings_dialog.settings.proc_means_decimal_offsets["mean"], 4
             )
             numeric_tab.where_editor.setPlainText("AVAL > 1")
             self.assertTrue(numeric_tab.where_editor_is_dirty())

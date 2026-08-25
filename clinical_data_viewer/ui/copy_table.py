@@ -146,7 +146,7 @@ class CopyTableView(QTableView):
         menu.addAction(row_action)
         menu.addSeparator()
         variable = self._context_variable()
-        proc_means = QAction("PROC MEANS", self)
+        proc_means = QAction("PROC MEANS (Simple)", self)
         proc_means.setEnabled(self._context_variable_is_numeric())
         proc_means.triggered.connect(
             lambda: self.proc_means_requested.emit(variable) if variable else None
@@ -199,6 +199,8 @@ class CopyTableView(QTableView):
         if not variable_name or metadata is None:
             return False
         if metadata.pair_id_column:
+            return False
+        if not bool(self.property("allowProcMeans")):
             return False
         return any(
             variable.name == variable_name and variable.kind == "numeric"

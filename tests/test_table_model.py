@@ -123,6 +123,63 @@ class TableModelTests(unittest.TestCase):
         model.set_page(75_000, (("101-001",),), 100_000)
         self.assertEqual(model.data(model.index(75_000, 0)), "101-001")
 
+    def test_proc_means_rows_use_group_specific_display_precision(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.table_model import DatasetTableModel
+
+        _application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "proc means",
+            2,
+            (VariableMetadata("PARAMCD"), VariableMetadata("MEAN", kind="numeric")),
+            decimal_base_column="__BASE",
+            statistic_decimal_offsets=(("MEAN", 1),),
+        )
+        model = DatasetTableModel(metadata, ["PARAMCD", "MEAN"], page_size=10)
+        model.set_page(
+            0,
+            (("ALB", 1.55), ("ALT", 10.123)),
+            2,
+            row_decimal_bases=(1, 3),
+        )
+        self.assertEqual(model.data(model.index(0, 1)), "1.55")
+        self.assertEqual(model.data(model.index(1, 1)), "10.1230")
+
+    def test_proc_means_builder_rejects_unknown_and_character_analysis_variables(
+        self,
+    ) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.proc_means_builder import VariableTokenEditor
+
+        _application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "adlb",
+            1,
+            (
+                VariableMetadata("PARAMCD"),
+                VariableMetadata("AVAL", kind="numeric"),
+            ),
+        )
+        editor = VariableTokenEditor("Analysis", numeric_only=True)
+        editor.set_metadata(metadata)
+        errors: list[str] = []
+        editor.validation_error.connect(errors.append)
+        editor.editor.setText("UNKNOWN")
+        editor._add_from_editor()
+        self.assertIn("does not exist", errors[-1])
+        editor.editor.setText("PARAMCD")
+        editor._add_from_editor()
+        self.assertIn("must be numeric", errors[-1])
+        editor.editor.setText("aval")
+        editor._add_from_editor()
+        self.assertEqual(editor.selected_variables(), ("AVAL",))
+
     def test_zero_visible_columns_does_not_request_data(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication

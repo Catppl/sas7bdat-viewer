@@ -29,6 +29,7 @@ from ..data_store import DataStore
 from ..domain import CacheProgress, DatasetHandle
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
+from ..proc_means import ProcMeansConfig, ProcMeansEngine
 from ..sas_reader import SasDatasetReader
 from ..settings import AppSettings
 from ..statistics import calculate_statistics
@@ -73,6 +74,7 @@ class MainWindow(QMainWindow):
         self.history = history
         self.reader = SasDatasetReader(temp_manager)
         self.comparer = DatasetComparer(temp_manager)
+        self.proc_means_engine = ProcMeansEngine(temp_manager)
         self.store = DataStore()
         self.exporter = CsvExporter()
         self.pool = QThreadPool.globalInstance()
@@ -82,6 +84,7 @@ class MainWindow(QMainWindow):
         self._statistics_owner: DatasetTab | None = None
         self._comparison_owner: DatasetTab | None = None
         self._compare_input_tabs: set[DatasetTab] = set()
+        self._proc_means_input_tabs: set[DatasetTab] = set()
         self._compare_sources: dict[DatasetTab, dict[str, tuple[DatasetTab, Path]]] = {}
         self._recommendation_generation = 0
         self.setWindowTitle("SASDataViewer")
@@ -136,6 +139,8 @@ class MainWindow(QMainWindow):
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
+        self.proc_means_builder_action = QAction("PROC MEANS Builder", self)
+        self.proc_means_builder_action.triggered.connect(self.show_proc_means_builder)
         self.compare_datasets_action = QAction("Compare Datasets", self)
         self.compare_datasets_action.setCheckable(True)
         self.compare_datasets_action.setChecked(False)
@@ -157,6 +162,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.variables_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.analysis_action)
+        tools_menu.addAction(self.proc_means_builder_action)
         tools_menu.addAction(self.compare_datasets_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.settings_action)
@@ -234,6 +240,9 @@ class MainWindow(QMainWindow):
 
     def _create_analysis_panel(self) -> None:
         self.analysis_panel = AnalysisPanel()
+        self.analysis_panel.builder.set_default_statistics(
+            self.settings.proc_means_statistics
+        )
         self.analysis_dock = QDockWidget("Analysis", self)
         self.analysis_dock.setObjectName("analysisDock")
         self.analysis_dock.setAllowedAreas(Qt.RightDockWidgetArea)
@@ -249,6 +258,11 @@ class MainWindow(QMainWindow):
         self.analysis_panel.clear_comparison_requested.connect(
             self._clear_row_comparison
         )
+        self.analysis_panel.builder.run_requested.connect(self._run_proc_means_builder)
+        self.analysis_panel.builder.validation_error.connect(
+            lambda message: QMessageBox.warning(self, "PROC MEANS Builder", message)
+        )
+        self.analysis_panel.builder.settings_requested.connect(self.show_settings)
 
     def _create_compare_panel(self) -> None:
         self.compare_panel = DatasetComparePanel()
@@ -620,6 +634,7 @@ class MainWindow(QMainWindow):
                 displayed_count,
                 page.cell_highlights,
                 page.row_warnings,
+                page.row_decimal_bases,
             )
             if offset == 0 and tab.pending_history_text:
                 self.history.add(tab.handle.source_path, tab.pending_history_text)
@@ -919,14 +934,77 @@ class MainWindow(QMainWindow):
 
     def show_settings(self) -> None:
         dialog = SettingsDialog(self.settings, self)
-        if dialog.exec() and self._last_statistics_request is not None:
-            self._recalculate_statistics()
+        if dialog.exec():
+            self.analysis_panel.builder.set_default_statistics(
+                self.settings.proc_means_statistics
+            )
+            if self._last_statistics_request is not None:
+                self._recalculate_statistics()
+
+    def show_proc_means_builder(self) -> None:
+        self.analysis_dock.show()
+        self.analysis_panel.tabs.setCurrentIndex(self.analysis_panel.builder_index)
+
+    def _run_proc_means_builder(self, selection) -> None:
+        tab = self.current_dataset_tab()
+        if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
+            QMessageBox.warning(
+                self,
+                "PROC MEANS Builder",
+                "Select a fully loaded SAS source dataset before running the Builder.",
+            )
+            return
+        config = ProcMeansConfig(
+            selection.analysis_variables,
+            selection.by_variables,
+            selection.class_variables,
+            selection.statistics,
+            tab.compiled_filter,
+            tab.current_where_text(),
+            selection.decimal_group_variable,
+            tuple(self.settings.proc_means_decimal_offsets.items()),
+            self.settings.proc_means_confidence,
+        )
+        try:
+            config.validate(tab.handle.metadata)
+        except ValueError as error:
+            QMessageBox.warning(self, "PROC MEANS Builder", str(error))
+            return
+        source_handle = tab.handle
+        self._proc_means_input_tabs = {tab}
+        self.analysis_panel.builder.set_busy(
+            True, "Calculating PROC MEANS in the background…"
+        )
+
+        def completed(handle: DatasetHandle) -> None:
+            self._proc_means_input_tabs.clear()
+            self.analysis_panel.builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
+            result_tab = self._make_dataset_tab(handle)
+            index = self.tabs.addTab(result_tab, "PROC MEANS Result")
+            self.tabs.setCurrentIndex(index)
+            result_tab.start()
+
+        def failed(message: str, details: str) -> None:
+            self._proc_means_input_tabs.clear()
+            self.analysis_panel.builder.set_busy(False, "PROC MEANS failed.")
+            self._show_error("PROC MEANS Builder Failed", message, details)
+
+        self._submit(
+            self.analysis_panel.builder,
+            lambda worker: self.proc_means_engine.run(
+                source_handle, config, worker.report
+            ),
+            completed,
+            failed,
+        )
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if (
             self.tabs.indexOf(tab) < 0
             or not tab.cache_complete
-            or tab.handle.kind == "compare"
+            or tab.handle.kind != "sas"
         ):
             return
         variable = next(
@@ -944,7 +1022,7 @@ class MainWindow(QMainWindow):
         confidence = self.settings.proc_means_confidence
         self._last_statistics_request = (tab, variable_name)
         self.analysis_dock.show()
-        self.analysis_panel.tabs.setCurrentIndex(0)
+        self.analysis_panel.tabs.setCurrentIndex(self.analysis_panel.statistics_index)
         self.analysis_panel.statistics_scope.setText(
             f"Calculating {variable_name} on the current filtered result…"
         )
@@ -960,7 +1038,7 @@ class MainWindow(QMainWindow):
             self.analysis_panel.show_statistics(
                 result,
                 self.settings.proc_means_statistics,
-                self.settings.proc_means_decimal_places,
+                self.settings.proc_means_decimal_offsets,
                 tab.filter_description(),
             )
 
@@ -1001,7 +1079,7 @@ class MainWindow(QMainWindow):
         compiled = tab.compiled_filter
         sort = tab.model.sort_spec
         self.analysis_dock.show()
-        self.analysis_panel.tabs.setCurrentIndex(1)
+        self.analysis_panel.tabs.setCurrentIndex(self.analysis_panel.comparison_index)
         self.analysis_panel.comparison_scope.setText("Comparing selected rows…")
 
         def completed(result) -> None:
@@ -1190,6 +1268,14 @@ class MainWindow(QMainWindow):
                 "to finish before closing it.",
             )
             return
+        if widget in self._proc_means_input_tabs:
+            QMessageBox.information(
+                self,
+                "PROC MEANS Running",
+                "This dataset is currently being analyzed. Wait for PROC MEANS "
+                "to finish before closing it.",
+            )
+            return
         self.tabs.removeTab(index)
         for worker in self._workers.get(widget, set()):
             worker.cancel()
@@ -1228,6 +1314,16 @@ class MainWindow(QMainWindow):
         ) if tab else self.variables_panel.set_dataset(None)
         if tab and tab.handle.kind == "compare":
             self.compare_panel.set_advanced_checked(tab.advanced_visible)
+        builder_source = (
+            tab
+            if tab is not None and tab.handle.kind == "sas" and tab.cache_complete
+            else None
+        )
+        self.analysis_panel.builder.set_dataset(
+            builder_source.handle.metadata if builder_source else None,
+            str(builder_source.handle.source_path) if builder_source else "",
+            builder_source.filter_description() if builder_source else "",
+        )
         self._refresh_compare_datasets()
         self._refresh_status(tab)
 
@@ -1275,6 +1371,16 @@ class MainWindow(QMainWindow):
         self.filter_status.style().polish(self.filter_status)
         source = tab.handle.display_source or str(tab.handle.source_path)
         self.source_status.setText(f"Source:  {source}")
+        if (
+            tab is self.current_dataset_tab()
+            and tab.handle.kind == "sas"
+            and tab.cache_complete
+        ):
+            self.analysis_panel.builder.set_dataset(
+                tab.handle.metadata,
+                str(tab.handle.source_path),
+                tab.filter_description(),
+            )
 
     def _submit(
         self, owner: QWidget, function, completed, failed, progress_data=None

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from ..domain import DatasetMetadata, RowComparisonResult
 from ..settings import PROC_MEANS_STATISTICS
 from ..statistics import StatisticsResult
+from .proc_means_builder import ProcMeansBuilder
 
 
 class AnalysisPanel(QWidget):
@@ -33,6 +34,7 @@ class AnalysisPanel(QWidget):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         self._create_statistics_tab()
+        self._create_builder_tab()
         self._create_comparison_tab()
 
     def _create_statistics_tab(self) -> None:
@@ -59,7 +61,11 @@ class AnalysisPanel(QWidget):
         buttons.addWidget(settings)
         buttons.addWidget(copy)
         layout.addLayout(buttons)
-        self.tabs.addTab(page, "Statistics")
+        self.statistics_index = self.tabs.addTab(page, "PROC MEANS (Simple)")
+
+    def _create_builder_tab(self) -> None:
+        self.builder = ProcMeansBuilder()
+        self.builder_index = self.tabs.addTab(self.builder, "PROC MEANS Builder")
 
     def _create_comparison_tab(self) -> None:
         page = QWidget()
@@ -80,7 +86,7 @@ class AnalysisPanel(QWidget):
         buttons.addWidget(clear)
         buttons.addWidget(copy)
         layout.addLayout(buttons)
-        self.tabs.addTab(page, "Row Comparison")
+        self.comparison_index = self.tabs.addTab(page, "Row Comparison")
 
     @staticmethod
     def _format(value: float | None, decimals: int) -> str:
@@ -96,13 +102,14 @@ class AnalysisPanel(QWidget):
         self,
         result: StatisticsResult,
         statistic_keys: list[str],
-        decimal_places: dict[str, int],
+        decimal_offsets: dict[str, int],
         filter_description: str,
     ) -> None:
         labels = dict(PROC_MEANS_STATISTICS)
         self.statistics_scope.setText(
             f"{result.variable} — {result.label or 'Numeric'}\n"
             f"Scope: {result.filtered_rows:,} filtered rows; {filter_description}\n"
+            f"Observed base decimals: {result.base_decimals}; maximum output: 4\n"
             f"Mean CI: {result.confidence * 100:g}% Student-t"
         )
         self.statistics_table.setRowCount(len(statistic_keys))
@@ -112,10 +119,13 @@ class AnalysisPanel(QWidget):
                 row,
                 1,
                 QTableWidgetItem(
-                    self._format(result.values.get(key), decimal_places.get(key, 2))
+                    self._format(
+                        result.values.get(key),
+                        min(4, result.base_decimals + decimal_offsets.get(key, 0)),
+                    )
                 ),
             )
-        self.tabs.setCurrentIndex(0)
+        self.tabs.setCurrentIndex(self.statistics_index)
 
     def mark_statistics_stale(self) -> None:
         if self.statistics_table.rowCount():
@@ -163,7 +173,7 @@ class AnalysisPanel(QWidget):
             "Double-click a variable to locate its visible column."
         )
         self.comparison_table.resizeColumnsToContents()
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(self.comparison_index)
 
     def clear_comparison(self) -> None:
         self.comparison_table.setRowCount(0)

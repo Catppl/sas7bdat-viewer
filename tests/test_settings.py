@@ -17,6 +17,7 @@ class SettingsTests(unittest.TestCase):
                 last_open_directory="C:/clinical",
                 proc_means_decimals=4,
                 proc_means_decimal_places={"mean": 2, "q1": 1, "max": 12},
+                proc_means_decimal_offsets={"mean": 1, "q1": 3, "max": 9},
                 proc_means_confidence=0.9,
                 proc_means_statistics=["subjects", "mean", "q1"],
             )
@@ -29,6 +30,9 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(restored.proc_means_decimal_places["q1"], 1)
             self.assertEqual(restored.proc_means_decimal_places["max"], 10)
             self.assertEqual(restored.proc_means_decimal_places["std"], 4)
+            self.assertEqual(restored.proc_means_decimal_offsets["mean"], 1)
+            self.assertEqual(restored.proc_means_decimal_offsets["q1"], 3)
+            self.assertEqual(restored.proc_means_decimal_offsets["max"], 4)
             self.assertEqual(restored.proc_means_confidence, 0.9)
             self.assertEqual(restored.proc_means_statistics, ["subjects", "mean", "q1"])
 

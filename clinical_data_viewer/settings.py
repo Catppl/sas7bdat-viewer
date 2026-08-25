@@ -32,6 +32,18 @@ PROC_MEANS_DECIMAL_STATISTICS = tuple(
     if key not in PROC_MEANS_COUNT_STATISTICS
 )
 DEFAULT_PROC_MEANS_DECIMAL_PLACES = {key: 2 for key in PROC_MEANS_DECIMAL_STATISTICS}
+DEFAULT_PROC_MEANS_DECIMAL_OFFSETS = {
+    "mean": 1,
+    "std": 2,
+    "stderr": 2,
+    "median": 1,
+    "q1": 1,
+    "q3": 1,
+    "min": 0,
+    "max": 0,
+    "lclm": 1,
+    "uclm": 1,
+}
 
 
 def application_data_directory() -> Path:
@@ -68,6 +80,9 @@ class AppSettings:
     proc_means_decimal_places: dict[str, int] = field(
         default_factory=lambda: dict(DEFAULT_PROC_MEANS_DECIMAL_PLACES)
     )
+    proc_means_decimal_offsets: dict[str, int] = field(
+        default_factory=lambda: dict(DEFAULT_PROC_MEANS_DECIMAL_OFFSETS)
+    )
     proc_means_confidence: float = 0.95
     proc_means_statistics: list[str] = field(
         default_factory=lambda: list(DEFAULT_PROC_MEANS_STATISTICS)
@@ -97,6 +112,21 @@ class AppSettings:
                 decimals = value.proc_means_decimals
             decimal_places[key] = min(10, max(0, decimals))
         value.proc_means_decimal_places = decimal_places
+        raw_decimal_offsets = raw.get("proc_means_decimal_offsets", {})
+        if not isinstance(raw_decimal_offsets, dict):
+            raw_decimal_offsets = {}
+        decimal_offsets: dict[str, int] = {}
+        for key in PROC_MEANS_DECIMAL_STATISTICS:
+            try:
+                offset = int(
+                    raw_decimal_offsets.get(
+                        key, DEFAULT_PROC_MEANS_DECIMAL_OFFSETS[key]
+                    )
+                )
+            except (TypeError, ValueError):
+                offset = DEFAULT_PROC_MEANS_DECIMAL_OFFSETS[key]
+            decimal_offsets[key] = min(4, max(0, offset))
+        value.proc_means_decimal_offsets = decimal_offsets
         value.proc_means_confidence = min(
             0.999, max(0.5, float(value.proc_means_confidence))
         )

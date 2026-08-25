@@ -105,25 +105,43 @@ class DataStore:
             include_row_warnings = bool(metadata.row_warning_column)
             if include_row_warnings:
                 select += ", " + quote_identifier(metadata.row_warning_column or "")
+            include_decimal_bases = bool(metadata.decimal_base_column)
+            if include_decimal_bases:
+                select += ", " + quote_identifier(metadata.decimal_base_column or "")
             sql = f"SELECT {select} FROM dataset{where}{order_clause(sort, metadata)} LIMIT ? OFFSET ?"
             raw_rows = connection.execute(
                 sql, (*compiled_filter.parameters, int(limit), int(offset))
             ).fetchall()
         highlights: tuple[frozenset[str], ...] = ()
-        hidden_count = int(include_highlights) + int(include_row_warnings)
+        hidden_count = (
+            int(include_highlights)
+            + int(include_row_warnings)
+            + int(include_decimal_bases)
+        )
         if hidden_count:
             rows = tuple(tuple(row[:-hidden_count]) for row in raw_rows)
         else:
             rows = tuple(tuple(row) for row in raw_rows)
         if include_highlights:
-            highlight_index = -2 if include_row_warnings else -1
+            highlight_index = -(
+                1 + int(include_row_warnings) + int(include_decimal_bases)
+            )
             highlights = tuple(
                 frozenset(json.loads(row[highlight_index] or "[]")) for row in raw_rows
             )
         row_warnings = (
-            tuple(bool(row[-1]) for row in raw_rows) if include_row_warnings else ()
+            tuple(bool(row[-(1 + int(include_decimal_bases))]) for row in raw_rows)
+            if include_row_warnings
+            else ()
         )
-        return PageResult(rows, filtered_count, highlights, row_warnings)
+        row_decimal_bases = (
+            tuple(int(row[-1] or 0) for row in raw_rows)
+            if include_decimal_bases
+            else ()
+        )
+        return PageResult(
+            rows, filtered_count, highlights, row_warnings, row_decimal_bases
+        )
 
     def source_row_view_index(
         self,

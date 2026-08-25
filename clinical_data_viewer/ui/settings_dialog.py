@@ -34,11 +34,11 @@ class SettingsDialog(QDialog):
         self.confidence.setValue(settings.proc_means_confidence * 100)
         form.addRow("Mean confidence level:", self.confidence)
         layout.addLayout(form)
-        box = QGroupBox("Displayed statistics and decimal places")
+        box = QGroupBox("Displayed statistics and additional decimal places")
         box_layout = QGridLayout(box)
         box_layout.addWidget(QLabel("Show"), 0, 0)
         box_layout.addWidget(QLabel("Statistic"), 0, 1)
-        box_layout.addWidget(QLabel("Decimals"), 0, 2)
+        box_layout.addWidget(QLabel("Add decimals"), 0, 2)
         selected = set(settings.proc_means_statistics)
         self.statistics: dict[str, QCheckBox] = {}
         self.statistic_decimals: dict[str, QSpinBox] = {}
@@ -54,12 +54,9 @@ class SettingsDialog(QDialog):
                 box_layout.addWidget(integer, row, 2)
             else:
                 decimals = QSpinBox()
-                decimals.setRange(0, 10)
-                decimals.setValue(
-                    settings.proc_means_decimal_places.get(
-                        key, settings.proc_means_decimals
-                    )
-                )
+                decimals.setRange(0, 4)
+                decimals.setPrefix("+")
+                decimals.setValue(settings.proc_means_decimal_offsets.get(key, 0))
                 self.statistic_decimals[key] = decimals
                 box_layout.addWidget(decimals, row, 2)
         box_layout.setColumnStretch(1, 1)
@@ -83,7 +80,7 @@ class SettingsDialog(QDialog):
         for key, check in self.statistics.items():
             check.setChecked(key in selected)
         for key, decimals in self.statistic_decimals.items():
-            decimals.setValue(defaults.proc_means_decimal_places[key])
+            decimals.setValue(defaults.proc_means_decimal_offsets[key])
 
     def _save(self) -> None:
         selected = [
@@ -94,7 +91,7 @@ class SettingsDialog(QDialog):
         if not selected:
             self.statistics["mean"].setChecked(True)
             return
-        self.settings.proc_means_decimal_places = {
+        self.settings.proc_means_decimal_offsets = {
             key: decimals.value() for key, decimals in self.statistic_decimals.items()
         }
         self.settings.proc_means_confidence = self.confidence.value() / 100

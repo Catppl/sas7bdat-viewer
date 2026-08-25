@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from decimal import ROUND_HALF_UP, Decimal
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
@@ -36,6 +37,7 @@ class DatasetTableModel(QAbstractTableModel):
             OrderedDict()
         )
         self._page_row_warnings: OrderedDict[int, tuple[bool, ...]] = OrderedDict()
+        self._page_decimal_bases: OrderedDict[int, tuple[int, ...]] = OrderedDict()
         self._loading_pages: set[int] = set()
         self._variable_by_name = {
             variable.name: variable for variable in metadata.variables
@@ -68,11 +70,19 @@ class DatasetTableModel(QAbstractTableModel):
             return None
         value = page[local_row][index.column()]
         if role in {Qt.DisplayRole, Qt.EditRole}:
-            return "" if value is None else str(value)
+            return self._display_value(
+                value, self.columns[index.column()], offset, local_row
+            )
         if role == Qt.TextAlignmentRole and isinstance(value, (int, float)):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ToolTipRole:
-            tooltip = "Missing" if value is None else str(value)
+            tooltip = (
+                "Missing"
+                if value is None
+                else self._display_value(
+                    value, self.columns[index.column()], offset, local_row
+                )
+            )
             warning = dict(self.metadata.warning_column_messages).get(
                 self.columns[index.column()]
             )
@@ -95,6 +105,21 @@ class DatasetTableModel(QAbstractTableModel):
         ):
             return QColor("#fff2b2")
         return None
+
+    def _display_value(
+        self, value: object, column_name: str, offset: int, local_row: int
+    ) -> str:
+        if value is None:
+            return ""
+        offsets = dict(self.metadata.statistic_decimal_offsets)
+        if column_name not in offsets or not isinstance(value, (int, float)):
+            return str(value)
+        bases = self._page_decimal_bases.get(offset, ())
+        base = bases[local_row] if local_row < len(bases) else 0
+        decimals = min(4, max(0, int(base) + int(offsets[column_name])))
+        quantum = Decimal(1).scaleb(-decimals)
+        rounded = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)
+        return f"{rounded:.{decimals}f}"
 
     def headerData(
         self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole
@@ -160,6 +185,7 @@ class DatasetTableModel(QAbstractTableModel):
         self._pages.clear()
         self._page_highlights.clear()
         self._page_row_warnings.clear()
+        self._page_decimal_bases.clear()
         self._loading_pages.clear()
         self.filtered_count = (
             self.metadata.row_count if filtered_count is None else filtered_count
@@ -175,6 +201,7 @@ class DatasetTableModel(QAbstractTableModel):
         filtered_count: int,
         cell_highlights: tuple[frozenset[str], ...] = (),
         row_warnings: tuple[bool, ...] = (),
+        row_decimal_bases: tuple[int, ...] = (),
     ) -> None:
         self._loading_pages.discard(offset)
         if filtered_count != self.filtered_count:
@@ -183,6 +210,7 @@ class DatasetTableModel(QAbstractTableModel):
             self._pages.clear()
             self._page_highlights.clear()
             self._page_row_warnings.clear()
+            self._page_decimal_bases.clear()
             self._loading_pages.clear()
             self.endResetModel()
         if not rows:
@@ -192,11 +220,15 @@ class DatasetTableModel(QAbstractTableModel):
             frozenset() for _row in rows
         )
         self._page_row_warnings[offset] = row_warnings or tuple(False for _row in rows)
+        self._page_decimal_bases[offset] = row_decimal_bases or tuple(
+            0 for _row in rows
+        )
         self._pages.move_to_end(offset)
         while len(self._pages) > self.max_cached_pages:
             expired, _rows = self._pages.popitem(last=False)
             self._page_highlights.pop(expired, None)
             self._page_row_warnings.pop(expired, None)
+            self._page_decimal_bases.pop(expired, None)
         bottom = min(offset + len(rows), self.filtered_count) - 1
         if bottom >= offset and self.columns:
             self.dataChanged.emit(
@@ -219,6 +251,7 @@ class DatasetTableModel(QAbstractTableModel):
             self._pages.clear()
             self._page_highlights.clear()
             self._page_row_warnings.clear()
+            self._page_decimal_bases.clear()
             self._loading_pages.clear()
             self.endResetModel()
 

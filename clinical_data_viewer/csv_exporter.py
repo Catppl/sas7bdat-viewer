@@ -4,6 +4,7 @@ import csv
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from .data_store import DataStore, _validated_columns, order_clause
@@ -32,6 +33,10 @@ class CsvExporter:
             )
         where = DataStore._where_clause(handle.metadata, compiled_filter)
         select = ", ".join(quote_identifier(column) for column in selected)
+        decimal_base = handle.metadata.decimal_base_column
+        if decimal_base:
+            select += ", " + quote_identifier(decimal_base)
+        decimal_offsets = dict(handle.metadata.statistic_decimal_offsets)
         sql = (
             f"SELECT {select} FROM dataset{where}{order_clause(sort, handle.metadata)}"
         )
@@ -56,7 +61,12 @@ class CsvExporter:
                         break
                     # Keep row structure while converting SQLite NULL to an empty CSV field.
                     writer.writerows(
-                        tuple("" if value is None else value for value in row)
+                        self._format_row(
+                            row,
+                            selected,
+                            decimal_offsets,
+                            bool(decimal_base),
+                        )
                         for row in rows
                     )
                     exported += len(rows)
@@ -66,3 +76,25 @@ class CsvExporter:
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
+
+    @staticmethod
+    def _format_row(
+        row: tuple[object, ...],
+        columns: list[str],
+        decimal_offsets: dict[str, int],
+        has_decimal_base: bool,
+    ) -> tuple[object, ...]:
+        base = int(row[-1] or 0) if has_decimal_base else 0
+        values = row[:-1] if has_decimal_base else row
+        formatted: list[object] = []
+        for column, value in zip(columns, values, strict=True):
+            if value is None:
+                formatted.append("")
+            elif column not in decimal_offsets or not isinstance(value, (int, float)):
+                formatted.append(value)
+            else:
+                decimals = min(4, max(0, base + decimal_offsets[column]))
+                quantum = Decimal(1).scaleb(-decimals)
+                rounded = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)
+                formatted.append(f"{rounded:.{decimals}f}")
+        return tuple(formatted)
