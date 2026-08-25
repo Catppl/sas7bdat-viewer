@@ -1,5 +1,7 @@
 # SASDataViewer
 
+[中文](README.md) | [English](README.en.md)
+
 独立的 Windows 临床 SAS 数据集浏览器。它只读打开 `.sas7bdat`，采用 PySide6 原生桌面界面、pyreadstat 分块读取和磁盘 SQLite 查询缓存，目标是在日常查看大数据集时保持界面响应。
 
 ## 已实现功能
