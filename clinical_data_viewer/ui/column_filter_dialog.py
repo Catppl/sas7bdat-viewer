@@ -163,27 +163,64 @@ class ColumnFilterDialog(QDialog):
         self.tabs.addTab(page, "Condition")
 
     def _filter_items(self, text: str) -> None:
-        needle = text.casefold()
+        needle = text.strip().casefold()
+        matching = self._matching_item_indexes(needle)
         for index in range(self.value_list.count()):
             item = self.value_list.item(index)
-            item.setHidden(needle not in item.text().casefold())
+            item.setHidden(index not in matching)
+        self.select_all.setText("Select All Matching" if needle else "Select All")
+        self._sync_select_all()
+
+    def _matching_item_indexes(self, needle: str) -> set[int]:
+        indexes = range(self.value_list.count())
+        if not needle:
+            return set(indexes)
+        exact = {
+            index
+            for index in indexes
+            if self.value_list.item(index).text().casefold() == needle
+        }
+        if exact:
+            return exact
+        return {
+            index
+            for index in range(self.value_list.count())
+            if needle in self.value_list.item(index).text().casefold()
+        }
+
+    def _visible_items(self) -> list[QListWidgetItem]:
+        return [
+            self.value_list.item(index)
+            for index in range(self.value_list.count())
+            if not self.value_list.item(index).isHidden()
+        ]
 
     def _toggle_all(self, checked: bool) -> None:
         self.value_list.blockSignals(True)
-        for index in range(self.value_list.count()):
-            self.value_list.item(index).setCheckState(
-                Qt.Checked if checked else Qt.Unchecked
-            )
+        search_active = bool(self.value_search.text().strip())
+        items = (
+            self._visible_items()
+            if search_active
+            else [
+                self.value_list.item(index) for index in range(self.value_list.count())
+            ]
+        )
+        for item in items:
+            item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self.value_list.blockSignals(False)
-        self._initial_all = checked
+        self._initial_all = checked if not search_active else False
 
     def _sync_select_all(self) -> None:
-        checked = sum(
-            self.value_list.item(index).checkState() == Qt.Checked
-            for index in range(self.value_list.count())
+        items = (
+            self._visible_items()
+            if self.value_search.text().strip()
+            else [
+                self.value_list.item(index) for index in range(self.value_list.count())
+            ]
         )
+        checked = sum(item.checkState() == Qt.Checked for item in items)
         self.select_all.blockSignals(True)
-        self.select_all.setChecked(checked == self.value_list.count())
+        self.select_all.setChecked(bool(items) and checked == len(items))
         self.select_all.blockSignals(False)
 
     def _operator_changed(self, text: str) -> None:
@@ -219,14 +256,32 @@ class ColumnFilterDialog(QDialog):
             else:
                 checked: list[object] = []
                 unchecked: list[object] = []
+                search_active = bool(self.value_search.text().strip())
+                candidate_items = (
+                    self._visible_items()
+                    if search_active
+                    else [
+                        self.value_list.item(index)
+                        for index in range(self.value_list.count())
+                    ]
+                )
+                if search_active and not candidate_items:
+                    suffix = (
+                        " Use the Condition tab for a value outside the loaded list."
+                        if self.values.truncated
+                        else ""
+                    )
+                    raise ValueError(f"No loaded values match the search.{suffix}")
                 # Missing participates only when its visible list item is checked.
                 # If the current candidate query has no missing item, do not silently
                 # add missing values to the generated WHERE for a concrete selection.
-                include_missing = (
-                    self.existing.include_missing if self.existing else False
-                )
-                for index in range(self.value_list.count()):
-                    item = self.value_list.item(index)
+                if search_active:
+                    include_missing = False
+                elif self.existing:
+                    include_missing = self.existing.include_missing
+                else:
+                    include_missing = False
+                for item in candidate_items:
                     value = item.data(Qt.UserRole)
                     is_checked = item.checkState() == Qt.Checked
                     if value is None:
@@ -235,7 +290,16 @@ class ColumnFilterDialog(QDialog):
                         checked.append(value)
                     else:
                         unchecked.append(value)
-                if self._initial_all:
+                if search_active:
+                    if not checked and not include_missing:
+                        raise ValueError("Select at least one matching value.")
+                    self.result_spec = ColumnFilterSpec(
+                        self.variable.name,
+                        "include",
+                        tuple(checked),
+                        include_missing,
+                    )
+                elif self._initial_all:
                     self.result_spec = ColumnFilterSpec(
                         self.variable.name,
                         "exclude",
@@ -251,7 +315,10 @@ class ColumnFilterDialog(QDialog):
                     )
         except ValueError as error:
             QMessageBox.warning(self, "Invalid Column Filter", str(error))
-            self.first_value.setFocus()
+            if self.tabs.currentIndex() == 0:
+                self.value_search.setFocus()
+            else:
+                self.first_value.setFocus()
             return
         self.accept()
 

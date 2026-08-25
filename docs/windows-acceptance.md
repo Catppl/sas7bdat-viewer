@@ -23,3 +23,5 @@
 19. 改变筛选、排序、Reload 或关闭 Tab，确认旧行比较和高亮被清除。
 20. 从 PowerShell 运行 `SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"`，确认含空格/中文的传入文件自动打开。再用 Windows“始终使用此应用”关联 `.sas7bdat` 后双击文件，确认新 Viewer 窗口自动打开该数据集；加载后源文件仍可覆盖和删除。
 21. 从 Filter History 回填包含列头筛选的完整 WHERE 并 Apply，确认结果一致。当前版本不要求恢复原来的列头复选框/蓝色标签，只要求条件语义与结果一致。
+22. 在表头筛选 Search loaded values 中粘贴一个已加载的完整值，确认优先显示精确匹配，Apply 后 WHERE 为该值的 `in` 条件，而不是 `not missing(...)`。再测试多个部分匹配、无匹配、Missing 和超过 2,000 个候选值的截断列表；搜索有效时 Select All Matching 只能影响当前可见匹配值。
+23. 使用构建脚本生成 `SASDataViewer-Windows-x64.zip`，将 ZIP 复制到没有 Python 的干净 Windows 机器并完整解压。确认 `SASDataViewer\SASDataViewer.exe` 与 `_internal` 同时存在，程序可启动、可打开数据，并且不能只复制 EXE 单独运行。核对脚本输出的 ZIP SHA256。

@@ -36,11 +36,23 @@ $VenvPython = (Resolve-Path ".venv\Scripts\python.exe").Path
 & $VenvPython -m unittest discover -s tests -v
 & .\.venv\Scripts\pyinstaller.exe --noconfirm --clean SASDataViewer.spec
 
-$Executable = Resolve-Path "dist\SASDataViewer.exe"
+$BundleDirectory = (Resolve-Path "dist\SASDataViewer").Path
+$Executable = Resolve-Path "dist\SASDataViewer\SASDataViewer.exe"
 $ExecutableInfo = Get-Item $Executable
 $ExecutableHash = Get-FileHash $Executable -Algorithm SHA256
+$ArchivePath = Join-Path (Resolve-Path "dist").Path "SASDataViewer-Windows-x64.zip"
+if (Test-Path $ArchivePath) {
+    Remove-Item -Force $ArchivePath
+}
+Compress-Archive -Path $BundleDirectory -DestinationPath $ArchivePath -CompressionLevel Optimal
+$ArchiveInfo = Get-Item $ArchivePath
+$ArchiveHash = Get-FileHash $ArchivePath -Algorithm SHA256
 
 Write-Host "Build complete"
-Write-Host "EXE:  $($ExecutableInfo.FullName)"
-Write-Host "Size: $([math]::Round($ExecutableInfo.Length / 1MB, 2)) MB"
-Write-Host "SHA256: $($ExecutableHash.Hash)"
+Write-Host "Bundle:     $BundleDirectory"
+Write-Host "EXE:        $($ExecutableInfo.FullName)"
+Write-Host "EXE size:   $([math]::Round($ExecutableInfo.Length / 1MB, 2)) MB"
+Write-Host "EXE SHA256: $($ExecutableHash.Hash)"
+Write-Host "ZIP:        $($ArchiveInfo.FullName)"
+Write-Host "ZIP size:   $([math]::Round($ArchiveInfo.Length / 1MB, 2)) MB"
+Write-Host "ZIP SHA256: $($ArchiveHash.Hash)"

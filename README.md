@@ -47,7 +47,7 @@ python -m clinical_data_viewer
 - Open：可一次选择一个或多个文件。
 - 命令行/文件关联：程序接受一个或多个 `.sas7bdat` 路径，例如 `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`。Windows 将扩展名关联到该 EXE 后，双击数据集会启动一个 Viewer 窗口并自动打开传入文件；当前版本不把新文件转交给已经运行的窗口。
 - 表头：首次点击升序，再次点击降序；相同行值按源行顺序稳定显示。
-- 列头筛选：点击列名主体仍然排序；点击表头最右侧 `▼` 打开当前列筛选。当前列候选值会遵循手写 WHERE 和其他列筛选。高基数列最多载入前 2,000 个候选值，此时取消选中的值按排除条件处理，也可切换 Condition 精确输入。成功应用后，编辑框会生成如 `FOLDERSEQ in (3, 4)` 的完整 SAS-like WHERE；自动生成的关键词使用小写，单个条件不增加多余外层括号，只有明确勾选 Missing 才会生成 `or missing(FOLDERSEQ)`。
+- 列头筛选：点击列名主体仍然排序；点击表头最右侧 `▼` 打开当前列筛选。当前列候选值会遵循手写 WHERE 和其他列筛选。在 Search loaded values 粘贴完整候选值时优先显示精确匹配；搜索有效时 Apply 只使用当前可见且勾选的匹配值，因此输入 `ALB` 会生成 `PARAMCD in ("ALB")`，不会退化为 `not missing(PARAMCD)`。Select All 会显示为 Select All Matching，并只作用于搜索结果。高基数列最多载入前 2,000 个候选值，列表中找不到的任意值应改用 Condition。自动生成的关键词使用小写，单个条件不增加多余外层括号，只有明确勾选 Missing 才会生成 `or missing(FOLDERSEQ)`。
 - Copy：选择单元格、整行或矩形区域后按 `Ctrl+C`；右键可复制列名。
 - PROC MEANS：在数值列单元格上右键选择 PROC MEANS；结果显示在右侧 Analysis。小写 `n (Subjects)` 是当前过滤结果中该分析变量非缺失且 `USUBJID` 非缺失的唯一受试者数；`N (Values)` 才是分析变量非缺失观测数。若没有 `USUBJID`，受试者数显示为不可用，不会用其他列替代。
 - Row Comparison：点击左侧行号选择整行，按住 `Ctrl` 点击其他行号进行非连续多选，右键 Compare Selected Rows。黄色背景仅应用到选中比较行中有差异的列，并会覆盖这些单元格原有的蓝色选中背景；相同行的其他列仍保持蓝色，未选行不变。字符空值和 NULL 都视为 missing；数值按未格式化原值比较。筛选、排序或 Reload 后旧比较自动清除。
@@ -180,9 +180,9 @@ Copy-Item ".\manual-test\lock-test-backup.sas7bdat" ".\manual-test\lock-test.sas
 - 用行数超过 20,000 的数据集验证：首批行显示后 Tab 可立即浏览，底部缓存行数持续增加；缓存完成前筛选/排序/查找/跳转/导出不可用，完成后自动恢复。
 - 打开文件后检查 `%LOCALAPPDATA%\ClinicalDataViewer\temp`；关闭对应 Tab 后其 dataset 子目录应消失，正常退出后本次 `cde-*` 会话目录应消失。
 
-## 如何打包为 Windows EXE
+## 如何打包为 Windows ZIP
 
-Windows EXE 必须在 Windows 64 位环境构建；macOS 不能用 PyInstaller 直接交叉生成可用的 Windows EXE。目标环境建议使用已经验收的 Python 3.11.5 64 位，但构建配置没有限定到这个补丁版本。
+Windows 程序必须在 Windows 64 位环境构建；macOS 不能用 PyInstaller 直接交叉生成可用的 Windows EXE。项目使用 PyInstaller `onedir`，最终发布物是包含完整程序目录的 ZIP。目标环境建议使用已经验收的 Python 3.11.5 64 位，但构建配置没有限定到这个补丁版本。
 
 ### 方法一：使用自动构建脚本（推荐）
 
@@ -210,16 +210,23 @@ Set-ExecutionPolicy -Scope Process Bypass
 1. 创建 `.venv`（不存在时）。
 2. 安装 PySide6、pyreadstat、SciPy、Ruff 和 PyInstaller。
 3. 运行 Ruff、格式、Python 编译和全部单元测试。
-4. 仅在检查全部通过后构建 one-file GUI EXE。
-5. 输出 EXE 的完整路径、大小和 SHA256。
+4. 仅在检查全部通过后构建 `onedir` GUI 程序目录。
+5. 将整个 `SASDataViewer` 目录压缩为 Windows x64 ZIP。
+6. 输出 EXE 和 ZIP 的完整路径、大小与 SHA256。
 
 EXE、窗口标题栏和 Windows 任务栏图标使用 [assets/SASDataViewer.ico](assets/SASDataViewer.ico)。该文件由用户提供的 [原始 PNG](assets/SASDataViewer.png) 生成，内含 16、20、24、32、40、48、64、128 和 256 像素尺寸；正常构建无需再次手工转换图标。
 
-生成文件：
+生成目录和最终发布文件：
 
 ```text
-dist\SASDataViewer.exe
+dist\SASDataViewer\
+  SASDataViewer.exe
+  _internal\
+  ...
+dist\SASDataViewer-Windows-x64.zip
 ```
+
+发布时发送 `SASDataViewer-Windows-x64.zip`。用户必须先完整解压，然后从解压后的 `SASDataViewer\SASDataViewer.exe` 启动；不能只复制 EXE，也不要直接在 ZIP 预览窗口内运行。
 
 ### 方法二：手动打包
 
@@ -234,27 +241,34 @@ ruff format --check clinical_data_viewer tests run.py
 python -m compileall -q clinical_data_viewer tests run.py
 python -m unittest discover -s tests -v
 pyinstaller --noconfirm --clean SASDataViewer.spec
+if (Test-Path .\dist\SASDataViewer-Windows-x64.zip) {
+    Remove-Item .\dist\SASDataViewer-Windows-x64.zip
+}
+Compress-Archive -Path .\dist\SASDataViewer `
+    -DestinationPath .\dist\SASDataViewer-Windows-x64.zip `
+    -CompressionLevel Optimal
 ```
 
 ### 打包后验证
 
 ```powershell
-Get-Item .\dist\SASDataViewer.exe | Select-Object FullName, Length, LastWriteTime
-Get-FileHash .\dist\SASDataViewer.exe -Algorithm SHA256
-Start-Process .\dist\SASDataViewer.exe
+Get-Item .\dist\SASDataViewer-Windows-x64.zip | Select-Object FullName, Length, LastWriteTime
+Get-FileHash .\dist\SASDataViewer-Windows-x64.zip -Algorithm SHA256
+Expand-Archive .\dist\SASDataViewer-Windows-x64.zip .\dist\zip-test -Force
+Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 ```
 
 验证 EXE 能接收 Windows 文件关联传入的路径：
 
 ```powershell
-& .\dist\SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"
+& .\dist\zip-test\SASDataViewer\SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"
 ```
 
 程序本身不会静默修改注册表。请通过 Windows“打开方式 > 选择其他应用 > 始终使用此应用”关联 `.sas7bdat`，或由组织的安装包注册文件关联；关联命令必须包含带引号的 `%1`，典型形式为 `"C:\path\SASDataViewer.exe" "%1"`。当前版本采用多实例行为：双击文件会新开一个 Viewer 窗口，不会转交给已经运行的窗口。
 
-然后使用 `dist\SASDataViewer.exe` 重复上面的真实数据、源文件占用、历史恢复、筛选导出、Reload 和临时目录清理检查。至少还应在一台没有 Python/项目源码的干净 Windows 机器上启动一次，确认 EXE 确实独立运行。
+然后使用解压后的 `SASDataViewer.exe` 重复上面的真实数据、源文件占用、历史恢复、筛选导出、Reload 和临时目录清理检查。至少还应把 ZIP 复制到一台没有 Python/项目源码的干净 Windows 机器，完整解压后启动一次，确认程序确实独立运行且 `_internal` 依赖完整。
 
-这是未签名的 windowed one-file EXE：首次启动可能因为解包稍慢，Windows SmartScreen 也可能显示未知发布者提示。正式内部发布如需消除此提示，应使用组织的代码签名证书签名。若内部环境禁止 UPX，可在 `SASDataViewer.spec` 中把 `upx=True` 改为 `False` 后重新构建。
+这是未签名的 windowed `onedir` 程序：通常比 one-file 启动更快，但 Windows SmartScreen 仍可能显示未知发布者提示。正式内部发布如需消除此提示，应使用组织的代码签名证书签名。EXE 与 `_internal` 必须保持相对位置不变；Windows 文件关联应指向实际解压位置，移动目录后需要重新关联。若内部环境禁止 UPX，可在 `SASDataViewer.spec` 中把 `upx=True` 改为 `False` 后重新构建。
 
 ## 项目结构
 

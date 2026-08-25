@@ -143,14 +143,31 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(numeric_tab.pending_history_text, 'PARAMCD in ("ALT")')
             filter_dialog = ColumnFilterDialog(
                 VariableMetadata("PARAMCD"),
-                DistinctValuesResult(("ALB",), False, 1, False),
+                DistinctValuesResult(("ALB", "ALBU", "AST"), True, 3, False),
                 None,
             )
-            filter_dialog._initial_all = False
-            filter_dialog.value_list.item(0).setCheckState(Qt.Checked)
+            filter_dialog.value_search.setText("ALB")
+            self.assertEqual(
+                [item.text() for item in filter_dialog._visible_items()], ["ALB"]
+            )
             filter_dialog._accept_filter()
             self.assertFalse(filter_dialog.result_spec.include_missing)
             self.assertEqual(filter_dialog.result_spec.values, ("ALB",))
+            matching_dialog = ColumnFilterDialog(
+                VariableMetadata("PARAMCD"),
+                DistinctValuesResult(("ALB", "ALBU", "AST"), True, 3, False),
+                None,
+            )
+            matching_dialog.value_search.setText("AL")
+            matching_dialog._accept_filter()
+            self.assertFalse(matching_dialog.result_spec.include_missing)
+            self.assertEqual(matching_dialog.result_spec.values, ("ALB", "ALBU"))
+            no_match_dialog = ColumnFilterDialog(
+                VariableMetadata("PARAMCD"),
+                DistinctValuesResult(("ALB", "ALBU", "AST"), False, 3, True),
+                None,
+            )
+            self.assertEqual(no_match_dialog._matching_item_indexes("xxxx"), set())
             numeric_tab.resize(650, 420)
             numeric_tab.show()
             application.processEvents()
