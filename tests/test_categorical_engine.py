@@ -14,6 +14,7 @@ from clinical_data_viewer.categorical import (
     DenominatorConfig,
 )
 from clinical_data_viewer.categorical.drilldown import (
+    CategoricalCell,
     CategoricalQueryBuilder,
     build_cell_filter,
     build_n1_cell_filter,
@@ -77,6 +78,79 @@ def make_handle(
 
 
 class CategoricalEngineTests(unittest.TestCase):
+    def test_numerator_and_population_filters_are_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (
+                    ("S1", "A", "WHITE", "ALB", 1, 1.0, "Y"),
+                    ("S2", "A", "BLACK", "ALB", 1, 2.0, "Y"),
+                    ("S3", "B", "WHITE", "ALB", 1, 3.0, "Y"),
+                    ("S4", "B", "WHITE", "ALT", 1, 4.0, "Y"),
+                ),
+            )
+            adsl = make_handle(
+                root,
+                "adsl",
+                ADSL_VARIABLES,
+                (
+                    ("S1", "A", "WHITE", "Y"),
+                    ("S2", "A", "BLACK", "Y"),
+                    ("S3", "B", "WHITE", "Y"),
+                    ("S4", "B", "WHITE", "Y"),
+                ),
+            )
+            numerator = FilterEngine(SOURCE_VARIABLES).compile('PARAMCD = "ALB"')
+            population = FilterEngine(ADSL_VARIABLES).compile('SAFFL = "Y"')
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRT",
+                "USUBJID",
+                source_filter=numerator,
+                source_filter_text='PARAMCD = "ALB"',
+                denominator=DenominatorConfig(
+                    "population",
+                    population_filter=population,
+                    population_filter_text='SAFFL = "Y"',
+                ),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(
+                source, config, adsl
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                numerator_cell = connection.execute(
+                    "SELECT freq, denom FROM categorical_long "
+                    "WHERE level_json = ? AND treatment_json = ?",
+                    ('"WHITE"', '"B"'),
+                ).fetchone()
+            self.assertEqual(numerator_cell, (1, 2))
+            # Drilldown uses the same independent source/ADSL filters as the
+            # calculation.  Build the query directly from a known cell shape.
+            cell = CategoricalCell("RACE", {}, "WHITE", "B")
+            numerator_where, numerator_params = build_cell_filter(
+                source.metadata, config, cell
+            )
+            denominator_where, denominator_params = build_cell_filter(
+                adsl.metadata, config, cell, denominator=True
+            )
+            numerator_query = CategoricalQueryBuilder(
+                TempManager(root / "numerator-query")
+            ).run(source, numerator_where, numerator_params, "Numerator")
+            denominator_query = CategoricalQueryBuilder(
+                TempManager(root / "denominator-query")
+            ).run(adsl, denominator_where, denominator_params, "Denominator")
+            with closing(sqlite3.connect(numerator_query.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT count(*) FROM dataset").fetchone()[0], 1
+                )
+            with closing(sqlite3.connect(denominator_query.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT count(*) FROM dataset").fetchone()[0], 2
+                )
+
     def test_population_n_uses_adsl_subjects_total_and_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -236,8 +310,13 @@ class CategoricalEngineTests(unittest.TestCase):
                     ("S1", "A", "HIGH", "ALB", 2, 3.0, "N"),
                     ("S2", "A", "LOW", "ALB", 0, 2.0, "Y"),
                     ("S3", "B", "HIGH", "ALB", 1, 1.0, "N"),
+                    # A complete baseline/post pair in another PARAMCD must
+                    # be excluded by Numerator WHERE.
+                    ("S4", "A", "LOW", "ALT", 0, 2.0, "Y"),
+                    ("S4", "A", "HIGH", "ALT", 1, 3.0, "N"),
                 ),
             )
+            numerator = FilterEngine(SOURCE_VARIABLES).compile('PARAMCD = "ALB"')
             baseline = FilterEngine(SOURCE_VARIABLES).compile('ABLFL = "Y"')
             postbaseline = FilterEngine(SOURCE_VARIABLES).compile('ABLFL != "Y"')
             config = CategoricalConfig(
@@ -245,6 +324,8 @@ class CategoricalEngineTests(unittest.TestCase):
                 "TRT",
                 "USUBJID",
                 count_type="record",
+                source_filter=numerator,
+                source_filter_text='PARAMCD = "ALB"',
                 denominator=DenominatorConfig(
                     "baseline_postbaseline",
                     analysis_value_variable="AVAL",

@@ -43,6 +43,9 @@ class CategoricalConfig:
     treatment_variable: str
     subject_id_variable: str
     count_type: str = "distinct_subject"  # distinct_subject | record
+    # Kept as ``source_filter`` for compatibility with existing categorical
+    # result/config code; semantically this is the independent Numerator WHERE
+    # applied to the source dataset.
     source_filter: CompiledFilter = field(
         default_factory=lambda: CompiledFilter("", ())
     )
@@ -50,6 +53,22 @@ class CategoricalConfig:
     denominator: DenominatorConfig = field(default_factory=DenominatorConfig)
     include_total: bool = True
     percent_digits: int = 1
+
+    @property
+    def numerator_filter(self) -> CompiledFilter:
+        """The source-side filter used for every numerator calculation.
+
+        ``source_filter`` remains the stored field for compatibility with
+        existing result/config code, but the categorical API exposes the
+        analysis meaning explicitly so it cannot be confused with an ADSL
+        population filter.
+        """
+
+        return self.source_filter
+
+    @property
+    def numerator_filter_text(self) -> str:
+        return self.source_filter_text
 
     def validate(
         self,

@@ -252,13 +252,13 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 
 ## Categorical Table 模块
 
-从 `Tools > Categorical Table Builder` 打开右侧 Analysis 面板。选择一个或多个 Item、treatment variable、subject ID、计数方式和百分比小数位，再选择分母策略；Run 在后台生成可筛选、排序、选择显示列和导出 CSV 的 `Categorical Table Result` Tab。默认结果采用临床表格样式：第一列 `Item / Level` 中每个 Item 为加粗标题行，Level 缩进显示，treatment 与 Total 横向展开为 `freq (percent)`。
+从 `Tools > Categorical Table Builder` 打开右侧 Analysis 面板。选择一个或多个 Item、treatment variable、subject ID、计数方式和百分比小数位，并填写独立的 `Numerator WHERE`；打开 Builder 时它默认继承当前 source tab 的 WHERE，但后续编辑不会改变 source tab。再选择分母策略；Run 在后台生成可筛选、排序、选择显示列和导出 CSV 的 `Categorical Table Result` Tab。默认结果采用临床表格样式：第一列 `Item / Level` 中每个 Item 为加粗标题行，Level 缩进显示，treatment 与 Total 横向展开为 `freq (percent)`。
 
 | 分母 | 数据来源与口径 |
 | --- | --- |
-| Population N | 固定使用用户打开或 Browse 的 ADSL；Population WHERE、treatment、subject ID 和 context variables 均由用户选择。Total 基于总体 ADSL population 重新计算。 |
-| Non-missing N | 当前分析数据集；按指定 analysis value 非缺失的记录/受试者计算。 |
-| Baseline + Postbaseline n1 | 当前分析数据集；用户提供 baseline 与 postbaseline WHERE。只有同一 treatment/context/subject 同时满足两项且 analysis value 有效的 postbaseline 记录进入 n1。n1 固定使用 record count，不去重。 |
+| Population N | 分子使用 source + Numerator WHERE；分母只使用用户打开或 Browse 的 ADSL + Population WHERE。treatment、subject ID 和 context variables 均由用户选择，Total 基于总体 ADSL population 重新计算。 |
+| Non-missing N | 当前分析数据集 + Numerator WHERE，再按指定 analysis value 非缺失的记录/受试者计算。 |
+| Baseline + Postbaseline n1 | 当前分析数据集 + Numerator WHERE，再叠加用户提供的 baseline 与 postbaseline WHERE。只有同一 treatment/context/subject 同时满足两项且 analysis value 有效的 postbaseline 记录进入 n1。n1 固定使用 record count，不去重。 |
 
 Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以及是否展示 `(Missing)` level。Population N 使用 distinct subject 是临床表格的默认选择；若改为 record count 且 ADSL 并非每受试者一条记录，百分比可能超过 100%，Builder 会明确显示该计数口径。
 

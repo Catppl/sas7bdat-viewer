@@ -164,8 +164,8 @@ class CategoricalEngine:
         parameters: tuple[object, ...] = (),
     ) -> list[tuple[str, object, str]]:
         treatment = fields[config.treatment_variable.casefold()]
-        sql = where_sql if where_sql is not None else config.source_filter.sql
-        params = parameters if where_sql is not None else config.source_filter.parameters
+        sql = where_sql if where_sql is not None else config.numerator_filter.sql
+        params = parameters if where_sql is not None else config.numerator_filter.parameters
         where = f" WHERE {sql}" if sql else ""
         query = f"SELECT DISTINCT {quote_identifier(treatment.name)} FROM dataset{where}"
         with closing(self._connection(handle)) as connection:
@@ -227,11 +227,11 @@ class CategoricalEngine:
         subject = fields.get(config.subject_id_variable.casefold())
         columns, positions = self._selected_columns(treatment, contexts, item, subject)
         query = "SELECT " + ", ".join(quote_identifier(column.name) for column in columns) + " FROM dataset"
-        if config.source_filter.sql:
-            query += " WHERE " + config.source_filter.sql
+        if config.numerator_filter.sql:
+            query += " WHERE " + config.numerator_filter.sql
         values: dict[tuple[object, ...], int | set[object]] = {}
         with closing(self._connection(source)) as connection:
-            for row in connection.execute(query, config.source_filter.parameters):
+            for row in connection.execute(query, config.numerator_filter.parameters):
                 level = _canonical(row[positions[item.name]])
                 if _missing(level, item) and not item_config.include_missing_level:
                     continue
@@ -296,11 +296,11 @@ class CategoricalEngine:
         subject = fields.get(config.subject_id_variable.casefold())
         columns, positions = self._selected_columns(treatment, contexts, analysis, subject)
         query = "SELECT " + ", ".join(quote_identifier(column.name) for column in columns) + " FROM dataset"
-        if config.source_filter.sql:
-            query += " WHERE " + config.source_filter.sql
+        if config.numerator_filter.sql:
+            query += " WHERE " + config.numerator_filter.sql
         values: dict[tuple[object, ...], int | set[object]] = {}
         with closing(self._connection(source)) as connection:
-            for row in connection.execute(query, config.source_filter.parameters):
+            for row in connection.execute(query, config.numerator_filter.parameters):
                 if _missing(row[positions[analysis.name]], analysis):
                     continue
                 context_key = _json(
@@ -341,11 +341,11 @@ class CategoricalEngine:
             positions[analysis.name] = len(columns) - 1
         select = ", ".join(quote_identifier(column.name) for column in columns)
         base_sql, base_params = _and(
-            (config.source_filter.sql, config.source_filter.parameters),
+            (config.numerator_filter.sql, config.numerator_filter.parameters),
             (config.denominator.baseline_filter.sql, config.denominator.baseline_filter.parameters),
         )
         post_sql, post_params = _and(
-            (config.source_filter.sql, config.source_filter.parameters),
+            (config.numerator_filter.sql, config.numerator_filter.parameters),
             (config.denominator.postbaseline_filter.sql, config.denominator.postbaseline_filter.parameters),
         )
 

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -29,6 +30,7 @@ from .proc_means_builder import VariableTokenEditor
 @dataclass(frozen=True, slots=True)
 class CategoricalBuilderSelection:
     items: tuple[CategoricalItem, ...]
+    numerator_filter_text: str
     treatment_variable: str
     subject_id_variable: str
     count_type: str
@@ -169,7 +171,10 @@ class CategoricalBuilder(QWidget):
         super().__init__(parent)
         self.setObjectName("categoricalBuilder")
         self._metadata: DatasetMetadata | None = None
+        # Kept as _filter_text for compatibility with the existing Builder
+        # API; in this module it always means Numerator WHERE.
         self._filter_text = ""
+        self._source_filter_snapshot = ""
         self._busy = False
         self._adsl_user_selected = False
         outer = QVBoxLayout(self)
@@ -211,6 +216,16 @@ class CategoricalBuilder(QWidget):
         setup_layout.addRow("Percent decimal digits", self.percent_digits)
         setup_layout.addRow("", self.include_total)
         layout.addWidget(setup)
+
+        layout.addWidget(QLabel("Numerator WHERE"))
+        self.numerator_where = QPlainTextEdit()
+        self.numerator_where.setObjectName("categoricalNumeratorWhere")
+        self.numerator_where.setPlaceholderText(
+            'e.g. TRTEMFL = "Y" and AOCC01FL = "Y"'
+        )
+        self.numerator_where.setMaximumHeight(78)
+        self.numerator_where.textChanged.connect(self._numerator_where_changed)
+        layout.addWidget(self.numerator_where)
 
         denominator = QGroupBox("Denominator")
         denominator_layout = QVBoxLayout(denominator)
@@ -256,12 +271,6 @@ class CategoricalBuilder(QWidget):
         self.denominator_stack.addWidget(self.n1_page)
         denominator_layout.addWidget(self.denominator_stack)
         layout.addWidget(denominator)
-
-        layout.addWidget(QLabel("Filter"))
-        self.filter_label = QLabel("All rows")
-        self.filter_label.setWordWrap(True)
-        self.filter_label.setObjectName("filterNotice")
-        layout.addWidget(self.filter_label)
         self.status = QLabel("")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -283,6 +292,8 @@ class CategoricalBuilder(QWidget):
         if metadata is not None and metadata is not self._metadata:
             self._metadata = metadata
             self._filter_text = filter_text.strip()
+            self._source_filter_snapshot = self._filter_text
+            self._set_numerator_where(self._filter_text)
             names = [variable.name for variable in metadata.variables]
             numeric = [variable.name for variable in metadata.variables if variable.kind == "numeric"]
             for combo, values in (
@@ -297,7 +308,6 @@ class CategoricalBuilder(QWidget):
         self.source_label.setText(
             f"Source: {source_text}" if metadata else "Select a fully loaded source dataset."
         )
-        self.filter_label.setText(f"WHERE {self._filter_text}" if self._filter_text else "All rows")
         enabled = metadata is not None and not self._busy
         self.setEnabled(enabled or self._busy)
         self.run_button.setEnabled(enabled)
@@ -343,7 +353,33 @@ class CategoricalBuilder(QWidget):
 
     def apply_current_filter(self, text: str) -> None:
         self._filter_text = text.strip()
-        self.filter_label.setText(f"WHERE {self._filter_text}" if self._filter_text else "All rows")
+        self._source_filter_snapshot = self._filter_text
+        self._set_numerator_where(self._filter_text)
+
+    def inherit_current_filter(self, text: str) -> None:
+        """Refresh the default Numerator WHERE without overwriting edits.
+
+        The Builder is often opened after a user applies a WHERE on the
+        source tab.  If the Builder still contains the previous inherited
+        value, it is safe to refresh it; an explicitly edited Numerator WHERE
+        remains untouched.
+        """
+
+        if self._filter_text != self._source_filter_snapshot:
+            return
+        self._filter_text = text.strip()
+        self._source_filter_snapshot = self._filter_text
+        self._set_numerator_where(self._filter_text)
+
+    def _set_numerator_where(self, text: str) -> None:
+        self.numerator_where.blockSignals(True)
+        self.numerator_where.setPlainText(text)
+        self.numerator_where.blockSignals(False)
+
+    def _numerator_where_changed(self) -> None:
+        """Keep the Builder's numerator filter independent from the source tab."""
+
+        self._filter_text = self.numerator_where.toPlainText().strip()
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
@@ -377,6 +413,7 @@ class CategoricalBuilder(QWidget):
             return
         selection = CategoricalBuilderSelection(
             items,
+            self.current_filter_text(),
             self.treatment.currentText(),
             self.subject.currentText(),
             str(self.count_type.currentData()),

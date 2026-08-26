@@ -133,13 +133,13 @@ Generated scripts produce a `proc_means_result` data frame. The viewer previews 
 
 ## Categorical Table module
 
-Open `Tools > Categorical Table Builder` to configure one or more categorical Items, treatment and subject-ID variables, the counting unit, percent digits, and a denominator strategy. Run creates a paged `Categorical Table Result` SQLite tab which retains normal visible-column selection, WHERE filtering, sorting, copying, and CSV export. Its default clinical-table layout uses a bold Item header row, indented Levels, and treatment/Total `freq (percent)` columns.
+Open `Tools > Categorical Table Builder` to configure one or more categorical Items, treatment and subject-ID variables, the counting unit, percent digits, and an independent `Numerator WHERE`. It is initially inherited from the active source tab, but editing it never changes that source tab. Run creates a paged `Categorical Table Result` SQLite tab which retains normal visible-column selection, WHERE filtering, sorting, copying, and CSV export. Its default clinical-table layout uses a bold Item header row, indented Levels, and treatment/Total `freq (percent)` columns.
 
 | Denominator | Source and rule |
 | --- | --- |
-| Population N | A user-opened or browsed ADSL dataset. The population WHERE, treatment, subject ID, and context variables are configurable; Total is recomputed for the full eligible ADSL population. |
-| Non-missing N | The current analysis dataset, restricted to a configurable non-missing analysis-value variable. |
-| Baseline + Postbaseline n1 | The current analysis dataset. Baseline and postbaseline WHERE predicates are required. A postbaseline record is eligible only when the same treatment/context/subject has an eligible baseline record. Record-count mode does not deduplicate. |
+| Population N | Numerator uses source + Numerator WHERE; denominator uses only the user-opened or browsed ADSL + Population WHERE. Treatment, subject ID, and context variables are configurable; Total is recomputed for the eligible ADSL population. |
+| Non-missing N | The current analysis dataset + Numerator WHERE, restricted to a configurable non-missing analysis-value variable. |
+| Baseline + Postbaseline n1 | The current analysis dataset + Numerator WHERE, with the required baseline and postbaseline WHERE predicates layered on top. A postbaseline record is eligible only when the same treatment/context/subject has an eligible baseline record. Record-count mode does not deduplicate. |
 
 Each Item can have its own context variables, such as `PARAMCD + AVISIT`, and may opt into a `(Missing)` level. The same session SQLite retains an authoritative long table with `ITEM`, `ITEM_LABEL`, context variables, `LEVEL`, `TRT`, `FREQ`, `DENOM`, and `PCT`. With the default Result tab active, select `View > Open Categorical Long Result` to open it as an independent normal Viewer tab with WHERE, sorting, visible-column selection, and CSV export. Double-clicking a populated `n (%)` cell offers Numerator Records, Numerator Subjects, and Denominator Subjects as independent temporary query tabs. Categorical configuration JSON save/load is intentionally deferred; only the session result/configuration is retained while the result tab remains open.
 

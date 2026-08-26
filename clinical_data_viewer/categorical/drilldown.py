@@ -162,7 +162,7 @@ def build_cell_filter(
     if denominator and config.denominator.type == "population":
         clauses.append((config.denominator.population_filter.sql, config.denominator.population_filter.parameters))
     else:
-        clauses.append((config.source_filter.sql, config.source_filter.parameters))
+        clauses.append((config.numerator_filter.sql, config.numerator_filter.parameters))
     treatment = _field(metadata, config.treatment_variable)
     if cell.treatment is not None:
         clauses.append(_exact_clause(treatment, cell.treatment))
@@ -195,13 +195,13 @@ def build_n1_cell_filter(
         for field in match_fields
     )
     base_sql, base_params = _and(
-        (config.source_filter.sql, config.source_filter.parameters),
+        (config.numerator_filter.sql, config.numerator_filter.parameters),
         (config.denominator.baseline_filter.sql, config.denominator.baseline_filter.parameters),
         (_missing_sql(analysis.name, analysis.kind, missing=False), ()),
         (_missing_sql(subject.name, subject.kind, missing=False), ()),
     )
     post_sql, post_params = _and(
-        (config.source_filter.sql, config.source_filter.parameters),
+        (config.numerator_filter.sql, config.numerator_filter.parameters),
         (config.denominator.postbaseline_filter.sql, config.denominator.postbaseline_filter.parameters),
         (_missing_sql(analysis.name, analysis.kind, missing=False), ()),
         (_missing_sql(subject.name, subject.kind, missing=False), ()),

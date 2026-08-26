@@ -1068,6 +1068,23 @@ class MainWindow(QMainWindow):
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:
+        active_tab = self.current_dataset_tab()
+        if (
+            active_tab is not None
+            and active_tab.handle.kind == "sas"
+            and active_tab.cache_complete
+        ):
+            # Opening the Builder after applying a source-tab WHERE should
+            # seed Numerator WHERE.  An explicitly edited Builder filter is
+            # preserved by inherit_current_filter().
+            self.analysis_panel.categorical_builder.set_dataset(
+                active_tab.handle.metadata,
+                str(active_tab.handle.source_path),
+                active_tab.current_where_text(),
+            )
+            self.analysis_panel.categorical_builder.inherit_current_filter(
+                active_tab.current_where_text()
+            )
         self._refresh_categorical_sources()
         self.analysis_panel.show_categorical_tab()
         self.analysis_dock.show()
@@ -1093,8 +1110,11 @@ class MainWindow(QMainWindow):
                 )
                 return None
         try:
-            source_filter = FilterEngine(tab.handle.metadata.variables).compile(
-                self.analysis_panel.categorical_builder.current_filter_text()
+            # Keep the Builder's Numerator WHERE independent from the source
+            # DatasetTab WHERE.  The selection contains the editable Builder
+            # snapshot, so running a table never mutates the source tab.
+            numerator_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                selection.numerator_filter_text
             )
             population_filter = (
                 FilterEngine(population_tab.handle.metadata.variables).compile(
@@ -1114,8 +1134,8 @@ class MainWindow(QMainWindow):
                 selection.treatment_variable,
                 selection.subject_id_variable,
                 selection.count_type,
-                source_filter,
-                self.analysis_panel.categorical_builder.current_filter_text(),
+                numerator_filter,
+                selection.numerator_filter_text,
                 DenominatorConfig(
                     selection.denominator_type,
                     selection.analysis_value_variable,
@@ -1147,16 +1167,27 @@ class MainWindow(QMainWindow):
         builder = self.analysis_panel.categorical_builder
         current_filter = active_tab.current_where_text()
         builder_filter = builder.current_filter_text()
-        if not builder_filter or builder_filter != current_filter:
+        # An empty Builder value can still be offered the current source WHERE
+        # as a convenience.  A non-empty, different value is an intentional
+        # independent Numerator WHERE and must never be silently replaced.
+        if not builder_filter and current_filter:
             response = QMessageBox.question(
                 self,
                 "Categorical Table",
-                "Apply the current dataset filter to the Categorical Table?",
+                "Numerator WHERE is empty. Use the current dataset WHERE for this "
+                "calculation?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
             )
             if response == QMessageBox.Yes:
                 builder.apply_current_filter(current_filter)
+        # The confirmation above can change the Builder value after the
+        # selection signal was emitted.  Always build the config from the
+        # final, independent Numerator WHERE shown in the Builder.
+        selection = replace(
+            selection,
+            numerator_filter_text=builder.current_filter_text(),
+        )
         context = self._categorical_builder_context(selection)
         if context is None:
             return
