@@ -20,6 +20,7 @@ from ..settings import PROC_MEANS_STATISTICS
 from ..statistics import StatisticsResult
 from .categorical_builder import CategoricalBuilder
 from .proc_means_builder import ProcMeansBuilder
+from .rule_based_builder import RuleBasedBuilder
 
 
 class AnalysisPanel(QWidget):
@@ -40,6 +41,7 @@ class AnalysisPanel(QWidget):
         self._create_statistics_tab()
         self._create_builder_tab()
         self._create_categorical_tab()
+        self._create_rule_based_tab()
         self._create_comparison_tab()
 
     def _create_statistics_tab(self) -> None:
@@ -93,6 +95,9 @@ class AnalysisPanel(QWidget):
     def _create_categorical_tab(self) -> None:
         self.categorical_builder = CategoricalBuilder()
 
+    def _create_rule_based_tab(self) -> None:
+        self.rule_based_builder = RuleBasedBuilder()
+
     def _activate(self, page: QWidget, title: str) -> None:
         index = self.tabs.indexOf(page)
         if index < 0:
@@ -107,6 +112,9 @@ class AnalysisPanel(QWidget):
 
     def show_categorical_tab(self) -> None:
         self._activate(self.categorical_builder, "Categorical Table")
+
+    def show_rule_based_tab(self) -> None:
+        self._activate(self.rule_based_builder, "Rule-based Table")
 
     def show_comparison_tab(self) -> None:
         self._activate(self.comparison_page, "Row Comparison")

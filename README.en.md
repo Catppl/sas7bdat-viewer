@@ -14,7 +14,7 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
 | Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, and missing-value conditions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
-| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, row comparison, Dataset Compare, and temporary result tabs. |
+| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, row comparison, Dataset Compare, and temporary result tabs. |
 | Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used. |
 | Code generation | SAS and R PROC MEANS code generators based on the same language-neutral JSON v3 configuration. |
 
@@ -142,6 +142,22 @@ Open `Tools > Categorical Table Builder` to configure one or more categorical It
 | Baseline + Postbaseline n1 | The current analysis dataset + Numerator WHERE, with the required baseline and postbaseline WHERE predicates layered on top. A postbaseline record is eligible only when the same treatment/context/subject has an eligible baseline record. Record-count mode does not deduplicate. |
 
 Each Item can have its own context variables, such as `PARAMCD + AVISIT`, and may opt into a `(Missing)` level. The same session SQLite retains an authoritative long table with `ITEM`, `ITEM_LABEL`, context variables, `LEVEL`, `TRT`, `FREQ`, `DENOM`, and `PCT`. With the default Result tab active, select `View > Open Categorical Long Result` to open it as an independent normal Viewer tab with WHERE, sorting, visible-column selection, and CSV export. Double-clicking a populated `n (%)` cell offers Numerator Records, Numerator Subjects, and Denominator Subjects as independent temporary query tabs. Categorical configuration JSON save/load is intentionally deferred; only the session result/configuration is retained while the result tab remains open.
+
+## Rule-based Table module
+
+Open `Tools > Rule-based Table Builder` to turn multiple clinical rules into an `n (%)` table. Each row has an Item, an optional WHERE condition, an indentation level, and a fixed `distinct USUBJID` count. The Dataset-level Filter initially inherits the active dataset tab's WHERE, but editing it in the Builder never changes the source tab.
+
+The first version supports three independent denominators:
+
+| Denominator | Scope |
+| --- | --- |
+| Population N | Numerator: source + Dataset Filter + Row Filter. Denominator: the opened or browsed ADSL + Population WHERE. The two WHERE conditions remain independent. |
+| Non-missing N | Source + Dataset Filter, with the selected Analysis Value required to be non-missing for the denominator universe. |
+| Same-universe N | The source Dataset Filter treatment universe; a rule's Row Filter is not incorrectly applied to the denominator. |
+
+Calculation is blocked when a Rule row contains missing treatment values; the warning lists the affected Rule row and record count, and the user must change the Dataset Filter or Row Filter before rerunning. Results are stored in session-temporary SQLite, never written as SAS files, and reuse normal paging, WHERE filtering, sorting, visible-column selection, copying, CSV export, and drill-down. The default result is a clinical wide table; use `View > Open Rule-based Long Result` to open the same result in a long-format Viewer tab. Closing the result tab releases the result and the retained source/ADSL temporary caches.
+
+![Rule-based Table clinical wide result](docs/screenshots/SASDataViewer-rule-based-result.png)
 
 ## Dataset Compare module
 

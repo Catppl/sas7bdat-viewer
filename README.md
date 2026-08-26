@@ -21,6 +21,7 @@
 - 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
 - `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（固定 ADSL）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total 和单元格 drill-down。
+- `Tools > Rule-based Table Builder` 可按多条 Item/Row Filter 生成 distinct `USUBJID` 的临床 `n (%)` 宽表，第一版支持 Population N、Non-missing N 和 Same-universe 三种独立分母，并可从 `View > Open Rule-based Long Result` 打开长表。
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
@@ -263,6 +264,22 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以及是否展示 `(Missing)` level。Population N 使用 distinct subject 是临床表格的默认选择；若改为 record count 且 ADSL 并非每受试者一条记录，百分比可能超过 100%，Builder 会明确显示该计数口径。
 
 同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。所有结果、Query 和 ADSL/source 缓存仅在会话中保留；关闭结果 Tab 会清理对应临时 SQLite。当前版本不提供 Categorical JSON 保存/加载，后续会在配置界面稳定后补充。
+
+## Rule-based Table 模块
+
+从 `Tools > Rule-based Table Builder` 打开规则表 Builder。它适合把多条临床规则整理成 `n (%)` 结果：每一行包含一个 Item、可选的 WHERE 条件、缩进级别和固定的 `distinct USUBJID` 计数。Dataset-level Filter 会默认继承当前数据集 Tab 的 WHERE，但 Builder 中的修改不会改变源 Tab。
+
+第一版支持三种独立分母：
+
+| 分母 | 计算范围 |
+| --- | --- |
+| Population N | 分子使用 source + Dataset Filter + Row Filter；分母只使用打开或 Browse 的 ADSL + Population WHERE。两套 WHERE 不会互相套用。 |
+| Non-missing N | source + Dataset Filter，并在指定 Analysis Value 非缺失的受试者范围内计算分母。 |
+| Same-universe N | source + Dataset Filter 的 treatment universe；不会把某条规则的 Row Filter 错误地用于分母。 |
+
+Treatment 缺失时计算会被阻止，并列出发生缺失的 Rule row 及记录数；用户修改 Dataset Filter 或 Row Filter 后才能重新运行。结果写入会话临时 SQLite，不生成 SAS 文件，生成后可像普通数据集一样分页浏览、WHERE 筛选、排序、选择列、复制、CSV 导出和双击单元格钻取 Numerator Records / Numerator Subjects / Denominator Subjects。默认结果是临床宽表；选择 `View > Open Rule-based Long Result` 可打开同一结果的长表 Tab。关闭结果 Tab 后会清理结果及其保留的 source/ADSL 临时缓存。
+
+![Rule-based Table 临床宽表结果](docs/screenshots/SASDataViewer-rule-based-result.png)
 
 ## Dataset Compare 模块
 

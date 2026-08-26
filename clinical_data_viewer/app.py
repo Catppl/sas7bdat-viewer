@@ -188,7 +188,8 @@ QLabel#filterNotice {
     padding: 5px;
 }
 QWidget#procMeansBuilder, QWidget#procMeansBuilderContent,
-QWidget#categoricalBuilder, QWidget#categoricalBuilderContent {
+QWidget#categoricalBuilder, QWidget#categoricalBuilderContent,
+QWidget#ruleBasedBuilder, QWidget#ruleBasedBuilderContent {
     background: #f7fbff;
 }
 QTreeWidget#historyTable::item {
