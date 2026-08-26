@@ -264,6 +264,7 @@ class SasRuleBasedGenerator:
         used_members: set[str] = set()
         work_source = _work_member("rb_source", used_members)
         work_population = _work_member("rb_population", used_members)
+        work_items = _work_member("rb_items", used_members)
         work_long = _work_member("rb_long", used_members)
         work_denominator = _work_member("rb_denominator", used_members)
         work_denominator_total = _work_member("rb_denominator_total", used_members)
@@ -296,6 +297,7 @@ class SasRuleBasedGenerator:
                     "filter": _filter_text(
                         row_mapping.get("filter"), f"rows[{index - 1}].filter"
                     ),
+                    "source_member": _work_member(f"rb_{row_id}_source", used_members),
                     "member": _work_member(f"rb_{row_id}", used_members),
                 }
             )
@@ -405,6 +407,7 @@ class SasRuleBasedGenerator:
             "output_dataset": output_dataset,
             "work_source": work_source,
             "work_population": work_population,
+            "work_items": work_items,
             "work_long": work_long,
             "work_denominator": work_denominator,
             "work_denominator_total": work_denominator_total,

@@ -11,18 +11,31 @@ def _filter(ast: dict[str, object] | None, text: str = "") -> dict[str, object]:
 
 
 def _comparison(
-    variable: str, value: object, *, numeric: bool = False
+    variable: str,
+    value: object,
+    *,
+    numeric: bool = False,
+    operator: str = "=",
+    prefix: bool = False,
+    variable_operand: bool = False,
 ) -> dict[str, object]:
     return {
         "type": "comparison",
         "variable": variable,
-        "operator": "=",
+        "operator": operator,
         "operand": {
-            "type": "literal",
-            "value_type": "numeric" if numeric else "character",
-            "value": value,
+            "type": "variable" if variable_operand else "literal",
+            **(
+                {}
+                if variable_operand
+                else {
+                    "value_type": "numeric" if numeric else "character",
+                    "value": value,
+                }
+            ),
+            **({"name": value} if variable_operand else {}),
         },
-        "prefix": False,
+        "prefix": prefix,
     }
 
 
@@ -132,7 +145,11 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertIn("label TRT_1='Drug B n (%)';", code)
         self.assertIn("label TRT_2='Placebo n (%)';", code)
         self.assertIn("label TRT_3='Drug A n (%)';", code)
-        self.assertIn("repeat(' ', indent * 4) || strip(item) as ITEM", code)
+        self.assertIn(
+            "case when items.indent > 0\n"
+            "                 then repeat(' ', items.indent * 4 - 1)",
+            code,
+        )
         self.assertLess(code.index("label TRT_1"), code.index("label TRT_2"))
         self.assertLess(code.index("label TRT_2"), code.index("label TRT_3"))
         self.assertIn("as TOTAL length=200", code)
@@ -164,6 +181,60 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertIn("where (TRTEMFL = 'Y' and TRT01A in ('A', 'B'));", code)
         self.assertIn("'Patient''s TEAE'", code)
         self.assertNotIn('TRTEMFL = "Y"', code)
+
+    def test_ne_prefix_or_between_and_missing_filters_are_sas_compatible(self) -> None:
+        configuration = _base_configuration()
+        configuration["dataset_filter"] = _filter(
+            {
+                "type": "boolean",
+                "operator": "or",
+                "left": _comparison("TRTEMFL", "Y", operator="!=", prefix=False),
+                "right": {
+                    "type": "between",
+                    "variable": "AVAL",
+                    "lower": {"type": "literal", "value_type": "numeric", "value": 1},
+                    "upper": {"type": "literal", "value_type": "numeric", "value": 3},
+                    "negated": False,
+                },
+            }
+        )
+        configuration["rows"][0]["filter"] = _filter(
+            {
+                "type": "boolean",
+                "operator": "and",
+                "left": _comparison("AEDECOD", "HEAD", operator="=", prefix=True),
+                "right": {"type": "missing", "variable": "AESER"},
+            }
+        )
+        code = self.generator.generate(configuration)
+        self.assertIn("where (TRTEMFL ne 'Y' or AVAL between 1 and 3);", code)
+        self.assertIn(
+            "if not ((AEDECOD =: 'HEAD' and missing(AESER))) then delete;", code
+        )
+        self.assertNotIn("and (AEDECOD =: 'HEAD'", code)
+
+    def test_empty_treatment_levels_without_total_still_emit_rule_rows(self) -> None:
+        configuration = _base_configuration()
+        configuration["treatment"]["resolved_levels"] = []
+        configuration["total"] = {
+            "enabled": False,
+            "method": "recompute_distinct_subjects",
+        }
+        code = self.generator.generate(configuration)
+        self.assertIn("create table rb_items as", code)
+        self.assertIn("data rb_long;", code)
+        self.assertIn("create table work.rule_based_result as", code)
+        self.assertNotIn("as TRT_1", code)
+        self.assertNotIn("create table rb_long as\n    ;", code)
+
+    def test_percent_digits_zero_and_two_are_rendered(self) -> None:
+        for digits, increment in ((0, "1"), (2, "0.01")):
+            with self.subTest(digits=digits):
+                configuration = _base_configuration()
+                configuration["display"]["percent_digits"] = digits
+                code = self.generator.generate(configuration)
+                self.assertIn(f"round(pct, {increment})", code)
+                self.assertIn(f"32.{digits}", code)
 
     def test_numeric_treatment_literals_and_order_are_preserved(self) -> None:
         configuration = _base_configuration()

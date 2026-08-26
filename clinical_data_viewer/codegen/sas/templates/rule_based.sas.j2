@@ -30,7 +30,7 @@ data {{ work_source }};
 
 /* Treatment missing validation is intentionally performed before counting. */
 {% for row in rows %}
-data _null_;
+data {{ row.source_member }};
     set {{ work_source }};
 {% if row.filter %}    if not ({{ row.filter }}) then delete;
 {% endif %}    if missing({{ treatment }}) then do;
@@ -74,19 +74,29 @@ proc sql;
     create table {{ row.member }} as
     select {{ treatment }} as trt_value,
            count(distinct {{ subject }}) as freq
-    from {{ work_source }}
-    where not missing({{ subject }}){% if row.filter %}
-      and ({{ row.filter }}){% endif %}
+    from {{ row.source_member }}
+    where not missing({{ subject }})
     group by {{ treatment }};
     create table {{ row.member }}_total as
     select count(distinct {{ subject }}) as freq
-    from {{ work_source }}
-    where not missing({{ subject }}){% if row.filter %}
-      and ({{ row.filter }}){% endif %};
+    from {{ row.source_member }}
+    where not missing({{ subject }});
 quit;
 {% endfor %}
 
+/* Keep one output row per configured rule, including an empty treatment universe. */
+proc sql;
+    create table {{ work_items }} as
+{% for row in rows %}    select {{ row.order }} as row_order,
+           {{ row.item | sas_string }} as item length=1024,
+           {{ row.indent }} as indent
+    from dictionary.tables(obs=1)
+{% if not loop.last %}    union all
+{% endif %}{% endfor %};
+quit;
+
 /* Long trace table preserves row order, treatment order, and numeric values. */
+{% if long_branches %}
 proc sql;
     create table {{ work_long }} as
 {% for branch in long_branches %}    select {{ branch.row.order }} as row_order,
@@ -102,6 +112,13 @@ proc sql;
 {% if not loop.last %}    union all
 {% endif %}{% endfor %};
 quit;
+{% else %}
+data {{ work_long }};
+    length row_order 8 row_id $64 item $1024 indent 8 trt_order 8
+           trt_value $200 trt_label $200 freq 8 denom 8;
+    stop;
+run;
+{% endif %}
 
 data {{ work_long }};
     set {{ work_long }};
@@ -119,12 +136,16 @@ run;
 
 proc sql;
     create table {{ output_dataset }} as
-    select repeat(' ', indent * 4) || strip(item) as ITEM length=1024
+    select (case when items.indent > 0
+                 then repeat(' ', items.indent * 4 - 1)
+                 else '' end) || strip(items.item) as ITEM length=1024
 {% for level in levels %}        ,max(case when trt_order = {{ loop.index }} then display else '' end) as TRT_{{ loop.index }} length=200
 {% endfor %}{% if total_enabled %}        ,max(case when trt_order = {{ levels | length + 1 }} then display else '' end) as TOTAL length=200
-{% endif %}    from {{ work_long }}
-    group by row_order, item, indent
-    order by row_order;
+{% endif %}    from {{ work_items }} as items
+    left join {{ work_long }} as long
+      on long.row_order = items.row_order
+    group by items.row_order, items.item, items.indent
+    order by items.row_order;
 quit;
 
 data {{ output_dataset }};
@@ -134,9 +155,9 @@ data {{ output_dataset }};
 {% endif %}run;
 
 proc datasets library=work nolist;
-    delete {{ work_source }} {{ work_long }} {{ work_denominator }} {{ work_denominator_total }}
+    delete {{ work_source }} {{ work_items }} {{ work_long }} {{ work_denominator }} {{ work_denominator_total }}
 {% if denominator.type == "population" %}           {{ work_population }}
-{% endif %}{% for row in rows %}           {{ row.member }} {{ row.member }}_total
+{% endif %}{% for row in rows %}           {{ row.source_member }} {{ row.member }} {{ row.member }}_total
 {% endfor %}           ;
 quit;
 {% if denominator.type == "population" %}

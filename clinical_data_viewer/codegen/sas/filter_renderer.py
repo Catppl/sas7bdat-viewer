@@ -38,7 +38,23 @@ def sas_filter_expression(expression: dict[str, object] | None) -> str:
     if expression_type == "missing":
         return f"missing({variable})"
     if expression_type == "comparison":
-        operator = str(expression["operator"])
+        operator_map = {
+            "=": "=",
+            "!=": "ne",
+            "ne": "ne",
+            "^=": "ne",
+            "~=": "ne",
+            "<>": "ne",
+            ">": ">",
+            ">=": ">=",
+            "<": "<",
+            "<=": "<=",
+        }
+        operator = operator_map.get(str(expression["operator"]).casefold())
+        if operator is None:
+            raise ValueError(
+                f"Unsupported comparison operator: {expression['operator']}"
+            )
         if expression["prefix"]:
             operator += ":"
         return f"{variable} {operator} {sas_filter_operand(expression['operand'])}"
