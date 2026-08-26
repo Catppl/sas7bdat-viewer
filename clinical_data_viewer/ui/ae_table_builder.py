@@ -97,7 +97,7 @@ class AeTableBuilder(QWidget):
         current = self.adsl.currentData(); self.adsl.blockSignals(True); self.adsl.clear()
         for tab, label in datasets: self.adsl.addItem(label, tab)
         if current is not None and self.adsl.findData(current) >= 0:
-            self.adsl.setCurrentData(current)
+            self.adsl.setCurrentIndex(self.adsl.findData(current))
         else:
             for index in range(self.adsl.count()):
                 tab = self.adsl.itemData(index)

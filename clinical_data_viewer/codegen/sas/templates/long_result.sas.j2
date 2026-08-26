@@ -1,52 +1,42 @@
 {% for item in analysis %}
+/* Statistics for {{ item.name }} */
 proc means data=work.{{ work_source }} noprint{% if class_variables %} nway missing{% endif %}
     vardef={{ options.vardef | lower }} qntldef={{ options.qntldef }} alpha={{ options.alpha }};
 {% if by_variables %}    by {% for variable in by_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-{% endif %}
-{% if class_variables %}    class {% for variable in class_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-{% endif %}
-    var {{ item.name | sas_name }};
+{% endif %}{% if class_variables %}    class {% for variable in class_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
+{% endif %}    var {{ item.name | sas_name }};
     output out=work.{{ item.work_stats }}(drop=_TYPE_ _FREQ_)
-{% if proc_statistics %}
-{% for statistic in proc_statistics %}        {{ statistic.keyword }}={{ statistic.name }}{% if not loop.last %}
+{% if proc_statistics %}{% for statistic in proc_statistics %}        {{ statistic.keyword }}={{ statistic.name }}{% if not loop.last %}
 {% endif %}{% endfor %};
 {% else %}        n=internal_n;
-{% endif %}
-run;
+{% endif %}run;
 
-{% if include_subject_n and options.subject_id_variable and group_variables %}
-proc sort data=work.{{ item.work_stats }};
-    by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-run;
-{% endif %}
-
+{% if include_subject_n and options.subject_id_variable %}
+/* Count distinct subjects for {{ item.name }} */
 {% include "subject_count.sas.j2" %}
+{% endif %}
 
+/* Build the {{ item.name }} result rows */
 data work.{{ item.work_long }};
     length ana_var $32 ana_label $1024;
-{% if include_subject_n and options.subject_id_variable and group_variables %}
-    merge work.{{ item.work_stats }}(in=stats_row)
-          work.{{ item.work_subjects }};
+{% if include_subject_n and options.subject_id_variable and group_variables %}    merge work.{{ item.work_stats }}(in=in_stat)
+          work.{{ item.work_subjects }}(in=in_subj);
     by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-    if stats_row;
+    if in_stat;
     if missing(SUBJECT_N) then SUBJECT_N=0;
-{% elif include_subject_n and options.subject_id_variable %}
-    if _n_=1 then set work.{{ item.work_subjects }};
+{% elif include_subject_n and options.subject_id_variable %}    if _n_=1 then set work.{{ item.work_subjects }};
     set work.{{ item.work_stats }};
     if missing(SUBJECT_N) then SUBJECT_N=0;
-{% elif include_subject_n %}
-    set work.{{ item.work_stats }};
+{% elif include_subject_n %}    set work.{{ item.work_stats }};
     SUBJECT_N=.;
-{% else %}
-    set work.{{ item.work_stats }};
-{% endif %}
-    ana_var={{ item.name | sas_string }};
+{% else %}    set work.{{ item.work_stats }};
+{% endif %}    ana_var={{ item.name | sas_string }};
     ana_label={{ item.label | sas_string }};
 {% if needs_internal_n %}    drop internal_n;
-{% endif %}
-run;
+{% endif %}run;
 
 {% endfor %}
+/* Combine analysis variables into the long result */
 data {{ sas_output_dataset }};
     set {% for item in analysis %}work.{{ item.work_long }}{% if not loop.last %} {% endif %}{% endfor %};
 run;

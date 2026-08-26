@@ -89,20 +89,33 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             self.assertIn("stderr=SE", code)
             self.assertIn("lclm=LCLM", code)
             self.assertIn("count(distinct USUBJID) as SUBJECT_N", code)
-            self.assertIn("decimal_candidate=0 to 4", code)
-            self.assertIn("base_decimals+1", code)
-            self.assertIn("base_decimals+2", code)
+            self.assertIn("do dec=0 to 4", code)
+            self.assertIn("base_dec=4", code)
+            self.assertIn("base_dec+1", code)
+            self.assertIn("base_dec+2", code)
             self.assertIn("length ana_var $32 ana_label $1024", code)
             self.assertNotIn("__CDE_", code)
             self.assertIn("data work.proc_means_result;", code)
-            self.assertIn("data work.adlb_source;", code)
-            self.assertIn("work.adlb_aval_stats", code)
-            self.assertIn("work.adlb_aval_subjects", code)
-            self.assertIn("work.adlb_aval_long", code)
-            self.assertIn("work.adlb_aval_decimals", code)
-            self.assertIn("work.adlb_decimal_rules", code)
-            self.assertNotIn("work.pm_", code)
+            self.assertIn("data work.pm_src;", code)
+            self.assertIn("work.stat_aval", code)
+            self.assertIn("work.subj_aval", code)
+            self.assertIn("work.out_aval", code)
+            self.assertIn("work.dec_aval", code)
+            self.assertIn("work.dec_rule", code)
+            self.assertNotIn("adlb_aval_", code)
+            self.assertNotIn("adlb_decimal_", code)
             self.assertNotIn("__CDE_PM_", code)
+            for section in (
+                "/* Prepare source data */",
+                "/* Statistics for AVAL */",
+                "/* Count distinct subjects for AVAL */",
+                "/* Determine display precision from the current filtered source */",
+                "/* Apply each statistic's configured decimal offset */",
+                "/* Clean up intermediate WORK tables */",
+            ):
+                self.assertIn(section, code)
+            for readable_name in ("pm_src", "stat_aval", "subj_aval", "out_aval", "dec_aval", "dec_rule"):
+                self.assertRegex(code, rf"\b{readable_name}\b")
 
     def test_subject_only_and_no_grouping_or_filter_render(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -135,8 +148,29 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             self.assertEqual(configuration["targets"]["sas"]["source_member"], "adae")
             code = SasProcMeansGenerator().generate(configuration)
             self.assertIn("set analysis.adae;", code)
-            self.assertIn("data work.adae_source;", code)
+            self.assertIn("data work.pm_src;", code)
             self.assertNotIn("analysis.adlb", code.casefold())
+
+    def test_multiple_analysis_variables_use_short_distinct_members(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            # The fixture does not contain CHG, so validate the naming helper
+            # through a metadata copy that includes a second numeric variable.
+            source = self.make_source(Path(directory), dataset_name="ADLB2")
+            variables = (*source.metadata.variables, VariableMetadata("CHG", kind="numeric"))
+            source = DatasetHandle(
+                source.source_path,
+                source.temporary_path,
+                source.database_path,
+                DatasetMetadata("ADLB2", 10, variables),
+                10,
+                True,
+            )
+            code = SasProcMeansGenerator().generate(
+                build_proc_means_configuration(source, ProcMeansConfig(("AVAL", "CHG"), statistics=("mean",)))
+            )
+            for name in ("stat_aval", "stat_chg", "out_aval", "out_chg"):
+                self.assertIn(name, code)
+            self.assertNotIn("adlb2_aval_", code)
 
     def test_xpt_configuration_and_sas_use_xport_engine(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

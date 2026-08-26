@@ -1,21 +1,21 @@
 {% if decimal_statistics %}
-/* Infer the source precision again at SAS run time. */
+/* Determine display precision from the current filtered source */
 {% for item in analysis %}
 data work.{{ item.work_decimals }};
     set work.{{ work_source }}(keep={% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}{{ item.name | sas_name }});
     length ana_var $32;
     ana_var={{ item.name | sas_string }};
     if not missing({{ item.name | sas_name }});
-    base_decimals={{ display.decimal_inference.maximum_decimals }};
-    do decimal_candidate=0 to {{ display.decimal_inference.maximum_decimals }};
-        decimal_unit=10**(-decimal_candidate);
-        if abs({{ item.name | sas_name }}-round({{ item.name | sas_name }}, decimal_unit))
+    base_dec={{ display.decimal_inference.maximum_decimals }};
+    do dec=0 to {{ display.decimal_inference.maximum_decimals }};
+        unit=10**(-dec);
+        if abs({{ item.name | sas_name }}-round({{ item.name | sas_name }}, unit))
            <= max({{ sas_decimal_tolerance }}, abs({{ item.name | sas_name }})*{{ sas_decimal_tolerance }}) then do;
-            base_decimals=decimal_candidate;
+            base_dec=dec;
             leave;
         end;
     end;
-    keep {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ana_var base_decimals;
+    keep {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ana_var base_dec;
 run;
 {% endfor %}
 
@@ -25,12 +25,14 @@ run;
 
 proc sql;
     create table work.{{ work_decimal_rules }} as
-    select {% for variable in display.decimal_group_variables %}{{ variable | sas_name }}, {% endfor %}ana_var,
-           max(base_decimals) as base_decimals
+    select {% for variable in display.decimal_group_variables %}{{ variable | sas_name }}, {% endfor %}
+           ana_var,
+           max(base_dec) as base_dec
     from work.{{ work_decimal_values }}
     group by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }}, {% endfor %}ana_var;
 quit;
 
+/* Apply each statistic's configured decimal offset */
 proc sort data={{ sas_output_dataset }};
     by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ana_var;
 run;
@@ -39,16 +41,14 @@ proc sort data=work.{{ work_decimal_rules }};
 run;
 
 data {{ sas_output_dataset }};
-    merge {{ sas_output_dataset }}(in=result_row) work.{{ work_decimal_rules }};
+    merge {{ sas_output_dataset }}(in=in_stat)
+          work.{{ work_decimal_rules }};
     by {% for variable in display.decimal_group_variables %}{{ variable | sas_name }} {% endfor %}ana_var;
-    if result_row;
-    if missing(base_decimals) then base_decimals=0;
-{% for statistic in decimal_statistics %}
-    length {{ statistic.name }}_DISPLAY $40;
-    display_decimals=min({{ display.decimal_inference.maximum_decimals }}, base_decimals+{{ statistic.offset }});
+    if in_stat;
+    if missing(base_dec) then base_dec=0;
+{% for statistic in decimal_statistics %}    disp_dec=min({{ display.decimal_inference.maximum_decimals }}, base_dec+{{ statistic.offset }});
     if missing({{ statistic.name }}) then {{ statistic.name }}_DISPLAY='';
-    else {{ statistic.name }}_DISPLAY=strip(putn({{ statistic.name }}, cats('32.', display_decimals)));
-{% endfor %}
-    drop display_decimals;
+    else {{ statistic.name }}_DISPLAY=strip(putn({{ statistic.name }}, cats('32.', disp_dec)));
+{% endfor %}    drop disp_dec base_dec;
 run;
 {% endif %}

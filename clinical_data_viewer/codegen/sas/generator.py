@@ -70,8 +70,10 @@ class SasProcMeansGenerator:
             undefined=StrictUndefined,
             autoescape=False,
             keep_trailing_newline=True,
-            trim_blocks=True,
-            lstrip_blocks=True,
+            # Keep template line breaks: generated SAS is meant to be read
+            # and edited by a programmer, not minified.
+            trim_blocks=False,
+            lstrip_blocks=False,
         )
         self.environment.filters["sas_string"] = _sas_string
         self.environment.filters["sas_name"] = _sas_name
@@ -108,15 +110,13 @@ class SasProcMeansGenerator:
         ]
         analysis = []
         variables = context["variables"]
-        source_prefix = _safe_token(context["targets"]["sas"]["source_member"])
+        # Keep generated WORK members short and descriptive.  The source
+        # member is deliberately not prefixed into every intermediate name;
+        # the generated program already documents its input at the top.
         used_work_members: set[str] = set()
-        work_source = _work_member(f"{source_prefix}_source", used_work_members)
-        work_decimal_values = _work_member(
-            f"{source_prefix}_decimal_values", used_work_members
-        )
-        work_decimal_rules = _work_member(
-            f"{source_prefix}_decimal_rules", used_work_members
-        )
+        work_source = _work_member("pm_src", used_work_members)
+        work_decimal_values = _work_member("dec_values", used_work_members)
+        work_decimal_rules = _work_member("dec_rule", used_work_members)
         for index, name in enumerate(context["analysis_variables"], start=1):
             analysis_token = _safe_token(name)[:12]
             analysis.append(
@@ -124,18 +124,10 @@ class SasProcMeansGenerator:
                     "index": index,
                     "name": name,
                     "label": variables[name]["label"],
-                    "work_stats": _work_member(
-                        f"{source_prefix}_{analysis_token}_stats", used_work_members
-                    ),
-                    "work_subjects": _work_member(
-                        f"{source_prefix}_{analysis_token}_subjects", used_work_members
-                    ),
-                    "work_long": _work_member(
-                        f"{source_prefix}_{analysis_token}_long", used_work_members
-                    ),
-                    "work_decimals": _work_member(
-                        f"{source_prefix}_{analysis_token}_decimals", used_work_members
-                    ),
+                    "work_stats": _work_member(f"stat_{analysis_token}", used_work_members),
+                    "work_subjects": _work_member(f"subj_{analysis_token}", used_work_members),
+                    "work_long": _work_member(f"out_{analysis_token}", used_work_members),
+                    "work_decimals": _work_member(f"dec_{analysis_token}", used_work_members),
                 }
             )
         offsets = context["display"]["decimal_offsets"]

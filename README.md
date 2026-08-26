@@ -221,7 +221,7 @@ Builder 在生成结果 SQLite 的同一后台任务中写入 `proc_means_config
 - 应用 Builder 当前 Filter，并分别保留 BY 与 CLASS 配置；CLASS 使用 NWAY/missing。
 - 源成员名从当前数据集动态取得并以小写渲染，例如 `analysis.adlb` 或 `analysis.adae`，不写死 ADLB；非标准名称使用 SAS name literal。
 - 生成 long-format `work.proc_means_result`，`SUBJECT_N` 固定按非 missing `USUBJID` 去重。
-- 临时 Work 表使用来源数据集前缀和小写可读名称，例如 ADLB 会生成 `work.adlb_source`、`work.adlb_aval_stats`、`work.adlb_aval_subjects`、`work.adlb_aval_long` 和 `work.adlb_decimal_rules`；长变量名会安全截短并去重。变量名仍保留源数据集的真实大小写。
+- 临时 Work 表使用短且有用途的可读名称，例如会生成 `work.pm_src`、`work.stat_aval`、`work.subj_aval`、`work.out_aval`、`work.dec_aval` 和 `work.dec_rule`；长分析变量名会安全截短并去重。变量名仍保留源数据集的真实大小写。
 - 使用 `VARDEF=DF`、`QNTLDEF=5` 和设置中的 confidence/alpha。
 - 在 SAS 每次实际运行时，按 `Analysis Variable + 完整 Decimal Group combination` 从最新数据重新推断基础小数位，再应用各统计量 `+0～+4`、最多 4 位的显示规则。
 
