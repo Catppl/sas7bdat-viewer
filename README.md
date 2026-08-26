@@ -281,6 +281,8 @@ Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以�
 
 Treatment 缺失时计算会被阻止，并列出发生缺失的 Rule row 及记录数；用户修改 Dataset Filter 或 Row Filter 后才能重新运行。结果写入会话临时 SQLite，不生成 SAS 文件，生成后可像普通数据集一样分页浏览、WHERE 筛选、排序、选择列、复制、CSV 导出和双击单元格钻取 Numerator Records / Numerator Subjects / Denominator Subjects。默认结果是临床宽表；选择 `View > Open Rule-based Long Result` 可打开同一结果的长表 Tab。关闭结果 Tab 后会清理结果及其保留的 source/ADSL 临时缓存。
 
+每个成功的 Rule-based Result 临时目录同时保存 `dataset.sqlite` 和 `rule_based_config.json`。JSON 使用固定的 Rule-based Table configuration v1，记录输入数据集、完整变量 metadata、Dataset/Row/Population Filter 的文本与 Filter AST、distinct `USUBJID`、resolved treatment 顺序、分母、Total、百分比及显示舍入语义。它是未来 SAS Generator 的唯一业务配置来源；当前版本尚未实现 Rule-based SAS/R Code Generator。Merge Result 会明确保存为 `input.kind="merge"`，不会伪装成真实 SAS 文件。
+
 ![Rule-based Table 临床宽表结果](docs/screenshots/SASDataViewer-rule-based-result.png)
 
 ## Dataset Compare 模块

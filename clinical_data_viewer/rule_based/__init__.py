@@ -1,5 +1,10 @@
 """Rule-based clinical n (%) tables."""
 
+from .configuration import (
+    build_rule_based_configuration,
+    rule_based_configuration_json,
+    write_rule_based_configuration,
+)
 from .engine import MissingTreatmentError, RuleBasedEngine
 from .models import (
     RuleBasedConfig,
@@ -15,4 +20,7 @@ __all__ = [
     "RuleBasedEngine",
     "RuleBasedLongResultBuilder",
     "RuleBasedRow",
+    "build_rule_based_configuration",
+    "rule_based_configuration_json",
+    "write_rule_based_configuration",
 ]

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import closing
-from decimal import Decimal, ROUND_HALF_UP
-from pathlib import Path
 from collections.abc import Callable
+from contextlib import closing
+from dataclasses import replace
 
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import quote_identifier
 from ..temp_manager import TempManager
+from .configuration import write_rule_based_configuration
 from .models import RuleBasedConfig, RuleBasedRow
 from .result_store import RuleBasedResultWriter
 
@@ -61,6 +61,10 @@ def _missing_sql(variable: VariableMetadata) -> str:
     )
 
 
+def _not_missing_sql(variable: VariableMetadata) -> str:
+    return f"NOT ({_missing_sql(variable)})"
+
+
 class RuleBasedEngine:
     """Calculate row-rule n (%) results from cached SQLite datasets."""
 
@@ -85,7 +89,9 @@ class RuleBasedEngine:
         subject = fields[config.subject_id_variable.casefold()]
         population_fields = self._fields(population.metadata) if population else {}
         if config.denominator.type == "population" and population is not None:
-            denominator_treatment = population_fields[config.treatment_variable.casefold()]
+            denominator_treatment = population_fields[
+                config.treatment_variable.casefold()
+            ]
         else:
             denominator_treatment = treatment
 
@@ -121,19 +127,28 @@ class RuleBasedEngine:
                 ),
             )
         directory = self.temp_manager.create_dataset_directory()
-        writer = RuleBasedResultWriter(
-            directory / "dataset.sqlite", treatments, config
-        )
+        writer = RuleBasedResultWriter(directory / "dataset.sqlite", treatments, config)
         try:
             denominator = self._denominator(
                 source, population, config, treatment, subject, notify
             )
             for index, row in enumerate(config.rows, start=1):
-                notify(f"Calculating Rule-based Table… row {index}/{len(config.rows)}: {row.item}")
+                notify(
+                    f"Calculating Rule-based Table… row {index}/{len(config.rows)}: {row.item}"
+                )
                 numerator = self._numerator(source, config, row, treatment, subject)
                 writer.add_row(row, numerator, denominator, treatments)
             notify(f"Finalizing Rule-based Table… {writer.row_count:,} rows")
-            return writer.finish(directory, source)
+            configuration_path = directory / "rule_based_config.json"
+            write_rule_based_configuration(
+                configuration_path,
+                source,
+                config,
+                population,
+                treatments,
+            )
+            result = writer.finish(directory, source)
+            return replace(result, configuration_path=configuration_path)
         except BaseException:
             writer.abort(self.temp_manager, directory)
             raise
@@ -144,7 +159,9 @@ class RuleBasedEngine:
 
     @staticmethod
     def _connection(handle: DatasetHandle) -> sqlite3.Connection:
-        return sqlite3.connect(handle.database_path.resolve().as_uri() + "?mode=ro", uri=True)
+        return sqlite3.connect(
+            handle.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
 
     @staticmethod
     def _merge_levels(
@@ -170,9 +187,13 @@ class RuleBasedEngine:
         treatment: VariableMetadata,
     ) -> list[tuple[str, object, str]]:
         where = f" WHERE {where_sql}" if where_sql else ""
-        query = f"SELECT DISTINCT {quote_identifier(treatment.name)} FROM dataset{where}"
+        query = (
+            f"SELECT DISTINCT {quote_identifier(treatment.name)} FROM dataset{where}"
+        )
         with closing(self._connection(handle)) as connection:
-            values = [_canonical(row[0]) for row in connection.execute(query, parameters)]
+            values = [
+                _canonical(row[0]) for row in connection.execute(query, parameters)
+            ]
         values.sort(key=lambda value: (value is None, str(value)))
         return [(_json(value), value, _display(value)) for value in values]
 
@@ -197,7 +218,9 @@ class RuleBasedEngine:
                     ).fetchone()[0]
                 )
             if count:
-                details.append(f"- {row.item}: {count:,} record(s) with missing treatment")
+                details.append(
+                    f"- {row.item}: {count:,} record(s) with missing treatment"
+                )
         if details:
             raise MissingTreatmentError(
                 "Missing treatment values were found. Modify the Dataset Filter or Row Filter before running:\n"
@@ -239,12 +262,12 @@ class RuleBasedEngine:
             f"SELECT {quote_identifier(treatment.name)}, "
             f"count(DISTINCT {quote_identifier(subject.name)}) "
             f"FROM dataset{where} "
-            f"AND {quote_identifier(subject.name)} IS NOT NULL "
+            f"AND {_not_missing_sql(subject)} "
             f"GROUP BY {quote_identifier(treatment.name)}"
             if where
             else f"SELECT {quote_identifier(treatment.name)}, "
             f"count(DISTINCT {quote_identifier(subject.name)}) FROM dataset "
-            f"WHERE {quote_identifier(subject.name)} IS NOT NULL "
+            f"WHERE {_not_missing_sql(subject)} "
             f"GROUP BY {quote_identifier(treatment.name)}"
         )
         with closing(self._connection(source)) as connection:
@@ -257,7 +280,7 @@ class RuleBasedEngine:
                 f"SELECT count(DISTINCT {quote_identifier(subject.name)}) "
                 f"FROM dataset{total_where}"
                 f"{' AND ' if total_where else ' WHERE '}"
-                f"{quote_identifier(subject.name)} IS NOT NULL",
+                f"{_not_missing_sql(subject)}",
                 params,
             ).fetchone()[0]
             counts[TOTAL_KEY] = int(total)
@@ -280,7 +303,9 @@ class RuleBasedEngine:
             handle = population
             where_sql = config.denominator.population_filter.sql
             params = config.denominator.population_filter.parameters
-            subject = self._fields(population.metadata)[config.subject_id_variable.casefold()]
+            subject = self._fields(population.metadata)[
+                config.subject_id_variable.casefold()
+            ]
             treatment = denominator_treatment
         else:
             handle = source
@@ -305,7 +330,7 @@ class RuleBasedEngine:
             f"SELECT {quote_identifier(treatment.name)}, "
             f"count(DISTINCT {quote_identifier(subject.name)}) FROM dataset{where}"
             f"{' AND ' if where else ' WHERE '}"
-            f"{quote_identifier(subject.name)} IS NOT NULL "
+            f"{_not_missing_sql(subject)} "
             f"GROUP BY {quote_identifier(treatment.name)}"
         )
         with closing(self._connection(handle)) as connection:
@@ -318,7 +343,7 @@ class RuleBasedEngine:
                 f"SELECT count(DISTINCT {quote_identifier(subject.name)}) "
                 f"FROM dataset{total_where}"
                 f"{' AND ' if total_where else ' WHERE '}"
-                f"{quote_identifier(subject.name)} IS NOT NULL",
+                f"{_not_missing_sql(subject)}",
                 params,
             ).fetchone()[0]
             counts[TOTAL_KEY] = int(total)

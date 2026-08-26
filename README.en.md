@@ -158,6 +158,8 @@ The first version supports three independent denominators:
 
 Calculation is blocked when a Rule row contains missing treatment values; the warning lists the affected Rule row and record count, and the user must change the Dataset Filter or Row Filter before rerunning. Results are stored in session-temporary SQLite, never written as SAS files, and reuse normal paging, WHERE filtering, sorting, visible-column selection, copying, CSV export, and drill-down. The default result is a clinical wide table; use `View > Open Rule-based Long Result` to open the same result in a long-format Viewer tab. Closing the result tab releases the result and the retained source/ADSL temporary caches.
 
+Each successful Rule-based Result directory also contains `dataset.sqlite` and `rule_based_config.json`. The JSON follows the fixed Rule-based Table configuration v1 contract and records the input dataset, complete variable metadata, Dataset/Row/Population filter text and Filter AST, distinct `USUBJID`, resolved treatment order, denominator, Total, percent, and display-rounding semantics. It is the only business configuration source planned for a future SAS Generator; Rule-based SAS/R Code Generator is not implemented in this version. A Merge Result is explicitly stored as `input.kind="merge"` and is never disguised as a real SAS file.
+
 ![Rule-based Table clinical wide result](docs/screenshots/SASDataViewer-rule-based-result.png)
 
 ## Dataset Compare module
