@@ -333,6 +333,7 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             ("type", "The configuration is not a Rule-based Table configuration."),
             ("version", "configuration v1"),
             ("count", "distinct USUBJID"),
+            ("numerator", "numerator calculation"),
             ("display", "half_up"),
             ("ast", "dataset_filter.ast is required"),
             ("missing", "missing: rows"),
@@ -345,6 +346,8 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
                 configuration["version"] = 2
             elif case == "count":
                 configuration["count"] = {"type": "record", "variable": "USUBJID"}
+            elif case == "numerator":
+                configuration["calculation"]["numerator"] = "records"
             elif case == "display":
                 configuration["display"]["rounding"] = "bankers"
             elif case == "ast":

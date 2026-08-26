@@ -185,6 +185,8 @@ class SasRuleBasedGenerator:
             )
         if calculation.get("reference_engine") != "python_rule_based_v1":
             raise ValueError("Unsupported Rule-based calculation reference engine.")
+        if calculation.get("numerator") != "distinct_subjects":
+            raise ValueError("Unsupported Rule-based numerator calculation.")
         if treatment_block.get("missing_policy") != "error":
             raise ValueError("Unsupported Rule-based treatment missing policy.")
         if treatment_block.get("level_order") != "resolved":
