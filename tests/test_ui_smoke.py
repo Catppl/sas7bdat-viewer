@@ -11,6 +11,36 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
+    def test_proc_means_codegen_stays_disabled_for_merge_when_busy_state_changes(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.proc_means_builder import ProcMeansBuilder
+
+        application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "Merge Result",
+            1,
+            (VariableMetadata("AVAL", kind="numeric"),),
+        )
+        builder = ProcMeansBuilder()
+        builder.set_dataset(metadata, "Merge Result", source_kind="merge")
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        self.assertFalse(builder.r_code_button.isEnabled())
+        builder.set_busy(True)
+        builder.set_busy(False)
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        self.assertFalse(builder.r_code_button.isEnabled())
+
+        builder.set_dataset(metadata, "adlb.sas7bdat", source_kind="sas")
+        builder.set_busy(True)
+        builder.set_busy(False)
+        self.assertTrue(builder.sas_code_button.isEnabled())
+        self.assertTrue(builder.r_code_button.isEnabled())
+        builder.deleteLater()
+        application.processEvents()
+
     def test_merge_sort_variables_accept_enter_and_default_ascending(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtCore import Qt

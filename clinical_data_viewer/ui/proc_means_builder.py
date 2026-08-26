@@ -314,8 +314,13 @@ class ProcMeansBuilder(QWidget):
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
         self.run_button.setEnabled(not busy and self._metadata is not None)
-        self.sas_code_button.setEnabled(not busy and self._metadata is not None)
-        self.r_code_button.setEnabled(not busy and self._metadata is not None)
+        codegen_available = (
+            not busy
+            and self._metadata is not None
+            and self._source_kind != "merge"
+        )
+        self.sas_code_button.setEnabled(codegen_available)
+        self.r_code_button.setEnabled(codegen_available)
         for editor in (
             self.analysis_variables,
             self.by_variables,
