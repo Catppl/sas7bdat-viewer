@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from ..domain import DatasetMetadata, RowComparisonResult
 from ..settings import PROC_MEANS_STATISTICS
 from ..statistics import StatisticsResult
+from .categorical_builder import CategoricalBuilder
 from .proc_means_builder import ProcMeansBuilder
 
 
@@ -38,6 +39,7 @@ class AnalysisPanel(QWidget):
         layout.addWidget(self.tabs)
         self._create_statistics_tab()
         self._create_builder_tab()
+        self._create_categorical_tab()
         self._create_comparison_tab()
 
     def _create_statistics_tab(self) -> None:
@@ -88,6 +90,9 @@ class AnalysisPanel(QWidget):
         buttons.addWidget(copy)
         layout.addLayout(buttons)
 
+    def _create_categorical_tab(self) -> None:
+        self.categorical_builder = CategoricalBuilder()
+
     def _activate(self, page: QWidget, title: str) -> None:
         index = self.tabs.indexOf(page)
         if index < 0:
@@ -99,6 +104,9 @@ class AnalysisPanel(QWidget):
 
     def show_builder_tab(self) -> None:
         self._activate(self.builder, "PROC MEANS Builder")
+
+    def show_categorical_tab(self) -> None:
+        self._activate(self.categorical_builder, "Categorical Table")
 
     def show_comparison_tab(self) -> None:
         self._activate(self.comparison_page, "Row Comparison")

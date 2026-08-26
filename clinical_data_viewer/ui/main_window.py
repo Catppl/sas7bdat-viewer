@@ -23,6 +23,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..categorical import (
+    CategoricalConfig,
+    CategoricalEngine,
+    CategoricalLongResultBuilder,
+    DenominatorConfig,
+)
+from ..categorical.drilldown import (
+    CategoricalQueryBuilder,
+    build_cell_filter,
+    build_n1_cell_filter,
+    lookup_cell,
+)
 from ..codegen import build_proc_means_configuration
 from ..codegen.r import RProcMeansGenerator
 from ..codegen.sas import SasProcMeansGenerator
@@ -45,6 +57,7 @@ from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
 from .analysis_panel import AnalysisPanel
+from .categorical_builder import CategoricalBuilderSelection
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
 from .dataset_tab import DatasetTab
@@ -76,6 +89,13 @@ class ProcMeansResultContext:
     config: ProcMeansConfig
 
 
+@dataclass(frozen=True, slots=True)
+class CategoricalResultContext:
+    source: DatasetHandle
+    population: DatasetHandle | None
+    config: CategoricalConfig
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -91,6 +111,9 @@ class MainWindow(QMainWindow):
         self.reader = SasDatasetReader(temp_manager)
         self.comparer = DatasetComparer(temp_manager)
         self.proc_means_engine = ProcMeansEngine(temp_manager)
+        self.categorical_engine = CategoricalEngine(temp_manager)
+        self.categorical_long_result_builder = CategoricalLongResultBuilder(temp_manager)
+        self.categorical_query_builder = CategoricalQueryBuilder(temp_manager)
         self.proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
         self.sas_proc_means_generator = SasProcMeansGenerator()
         self.r_proc_means_generator = RProcMeansGenerator()
@@ -104,7 +127,9 @@ class MainWindow(QMainWindow):
         self._comparison_owner: DatasetTab | None = None
         self._compare_input_tabs: set[DatasetTab] = set()
         self._proc_means_input_tabs: set[DatasetTab] = set()
+        self._categorical_input_tabs: set[DatasetTab] = set()
         self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
+        self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
         self._deferred_directory_removals: set[Path] = set()
         self._pending_directory_releases: dict[QWidget, list[Path]] = {}
@@ -159,11 +184,19 @@ class MainWindow(QMainWindow):
         self.variables_action = QAction("Variables Panel", self)
         self.variables_action.setCheckable(True)
         self.variables_action.setChecked(True)
+        self.open_categorical_long_action = QAction(
+            "Open Categorical Long Result", self
+        )
+        self.open_categorical_long_action.triggered.connect(
+            self._open_categorical_long_result
+        )
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
         self.proc_means_builder_action = QAction("PROC MEANS Builder", self)
         self.proc_means_builder_action.triggered.connect(self.show_proc_means_builder)
+        self.categorical_builder_action = QAction("Categorical Table Builder", self)
+        self.categorical_builder_action.triggered.connect(self.show_categorical_builder)
         self.compare_datasets_action = QAction("Compare Datasets", self)
         self.compare_datasets_action.setCheckable(True)
         self.compare_datasets_action.setChecked(False)
@@ -183,9 +216,11 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.history_action)
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.variables_action)
+        view_menu.addAction(self.open_categorical_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
+        tools_menu.addAction(self.categorical_builder_action)
         tools_menu.addAction(self.compare_datasets_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.settings_action)
@@ -293,6 +328,15 @@ class MainWindow(QMainWindow):
             lambda message: QMessageBox.warning(self, "PROC MEANS Builder", message)
         )
         self.analysis_panel.builder.settings_requested.connect(self.show_settings)
+        self.analysis_panel.categorical_builder.run_requested.connect(
+            self._run_categorical_builder
+        )
+        self.analysis_panel.categorical_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(self, "Categorical Table", message)
+        )
+        self.analysis_panel.categorical_builder.browse_adsl_requested.connect(
+            self._browse_categorical_adsl
+        )
 
     def _create_compare_panel(self) -> None:
         self.compare_panel = DatasetComparePanel()
@@ -383,6 +427,7 @@ class MainWindow(QMainWindow):
             elif when_ready:
                 when_ready(tab)
             self._refresh_compare_datasets()
+            self._refresh_categorical_sources()
 
         def failed(message: str, details: str) -> None:
             loading.progress.setRange(0, 1)
@@ -412,6 +457,7 @@ class MainWindow(QMainWindow):
 
         def ready(tab: DatasetTab) -> None:
             self._refresh_compare_datasets()
+            self._refresh_categorical_sources()
             self.compare_panel.select_dataset(side, tab)
 
         self._open_path(source, ready)
@@ -431,6 +477,41 @@ class MainWindow(QMainWindow):
                     )
                 )
         self.compare_panel.set_datasets(datasets)
+
+    def _refresh_categorical_sources(self) -> None:
+        if not hasattr(self, "analysis_panel"):
+            return
+        datasets: list[tuple[object, str]] = []
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+                datasets.append(
+                    (
+                        tab,
+                        f"{tab.handle.metadata.name} — {tab.handle.source_path.name}",
+                    )
+                )
+        self.analysis_panel.categorical_builder.set_adsl_sources(datasets)
+
+    def _browse_categorical_adsl(self) -> None:
+        initial = self.settings.last_open_directory or str(Path.home())
+        filename, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose ADSL Dataset",
+            initial,
+            "SAS datasets (*.sas7bdat *.xpt);;All files (*)",
+        )
+        if not filename:
+            return
+        source = Path(filename)
+        self.settings.last_open_directory = str(source.parent)
+        self.settings.save()
+
+        def ready(tab: DatasetTab) -> None:
+            self._refresh_categorical_sources()
+            self.analysis_panel.categorical_builder.select_adsl(tab)
+
+        self._open_path(source, ready)
 
     def _run_dataset_compare(
         self, main_tab: DatasetTab, qc_tab: DatasetTab, config
@@ -566,6 +647,11 @@ class MainWindow(QMainWindow):
         )
         tab.proc_means_drilldown_requested.connect(
             lambda row, column, display, owner=tab: self._drilldown_proc_means(
+                owner, row, column, display
+            )
+        )
+        tab.categorical_drilldown_requested.connect(
+            lambda row, column, display, owner=tab: self._drilldown_categorical(
                 owner, row, column, display
             )
         )
@@ -981,6 +1067,138 @@ class MainWindow(QMainWindow):
         self.analysis_panel.show_builder_tab()
         self.analysis_dock.show()
 
+    def show_categorical_builder(self) -> None:
+        self._refresh_categorical_sources()
+        self.analysis_panel.show_categorical_tab()
+        self.analysis_dock.show()
+
+    def _categorical_builder_context(
+        self, selection: CategoricalBuilderSelection
+    ) -> tuple[DatasetTab, DatasetTab | None, CategoricalConfig] | None:
+        tab = self.current_dataset_tab()
+        if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
+            QMessageBox.warning(
+                self,
+                "Categorical Table",
+                "Select a fully loaded SAS source dataset before using the Builder.",
+            )
+            return None
+        population_tab = selection.population_tab
+        if selection.denominator_type == "population":
+            if not isinstance(population_tab, DatasetTab) or not population_tab.cache_complete:
+                QMessageBox.warning(
+                    self,
+                    "Categorical Table",
+                    "Open or browse a fully loaded ADSL dataset for Population N.",
+                )
+                return None
+        try:
+            source_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                self.analysis_panel.categorical_builder.current_filter_text()
+            )
+            population_filter = (
+                FilterEngine(population_tab.handle.metadata.variables).compile(
+                    selection.population_filter_text
+                )
+                if isinstance(population_tab, DatasetTab)
+                else FilterEngine(tab.handle.metadata.variables).compile("")
+            )
+            baseline_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                selection.baseline_filter_text
+            )
+            postbaseline_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                selection.postbaseline_filter_text
+            )
+            config = CategoricalConfig(
+                selection.items,
+                selection.treatment_variable,
+                selection.subject_id_variable,
+                selection.count_type,
+                source_filter,
+                self.analysis_panel.categorical_builder.current_filter_text(),
+                DenominatorConfig(
+                    selection.denominator_type,
+                    selection.analysis_value_variable,
+                    population_filter,
+                    selection.population_filter_text,
+                    baseline_filter,
+                    selection.baseline_filter_text,
+                    postbaseline_filter,
+                    selection.postbaseline_filter_text,
+                ),
+                selection.include_total,
+                selection.percent_digits,
+            )
+            config.validate(
+                tab.handle.metadata,
+                population_tab.handle.metadata
+                if isinstance(population_tab, DatasetTab)
+                else None,
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Categorical Table", str(error))
+            return None
+        return tab, population_tab if isinstance(population_tab, DatasetTab) else None, config
+
+    def _run_categorical_builder(self, selection: CategoricalBuilderSelection) -> None:
+        active_tab = self.current_dataset_tab()
+        if active_tab is None or active_tab.handle.kind != "sas":
+            return
+        builder = self.analysis_panel.categorical_builder
+        current_filter = active_tab.current_where_text()
+        builder_filter = builder.current_filter_text()
+        if not builder_filter or builder_filter != current_filter:
+            response = QMessageBox.question(
+                self,
+                "Categorical Table",
+                "Apply the current dataset filter to the Categorical Table?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if response == QMessageBox.Yes:
+                builder.apply_current_filter(current_filter)
+        context = self._categorical_builder_context(selection)
+        if context is None:
+            return
+        source_tab, population_tab, config = context
+        source_handle = source_tab.handle
+        population_handle = population_tab.handle if population_tab else None
+        self._categorical_input_tabs = {source_tab}
+        if population_tab:
+            self._categorical_input_tabs.add(population_tab)
+        builder.set_busy(True, "Calculating categorical table in the background…")
+
+        def completed(handle: DatasetHandle) -> None:
+            self._categorical_input_tabs.clear()
+            builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
+            result_tab = self._make_dataset_tab(handle)
+            retained = {source_handle.temporary_path.parent}
+            if population_handle is not None:
+                retained.add(population_handle.temporary_path.parent)
+            for directory in retained:
+                self._retain_directory(directory)
+            self._categorical_sources[result_tab] = CategoricalResultContext(
+                source_handle, population_handle, config
+            )
+            index = self.tabs.addTab(result_tab, "Categorical Table Result")
+            self.tabs.setCurrentIndex(index)
+            self._sync_active_tab()
+            result_tab.start()
+
+        def failed(message: str, details: str) -> None:
+            self._categorical_input_tabs.clear()
+            builder.set_busy(False, "Categorical Table failed.")
+            self._show_error("Categorical Table Failed", message, details)
+
+        self._submit(
+            builder,
+            lambda worker: self.categorical_engine.run(
+                source_handle, config, population_handle, worker.report
+            ),
+            completed,
+            failed,
+        )
+
     def _proc_means_builder_context(self, selection, action_title: str):
         tab = self.current_dataset_tab()
         if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
@@ -1219,6 +1437,134 @@ class MainWindow(QMainWindow):
         while f"{base} ({suffix})" in existing:
             suffix += 1
         return f"{base} ({suffix})"
+
+    def _drilldown_categorical(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        context = self._categorical_sources.get(tab)
+        source_row = tab.model.source_row_id(view_row)
+        if context is None or source_row is None or not display:
+            return
+        cell = lookup_cell(tab.handle, source_row, column_name)
+        if cell is None:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Categorical Table Drill-down")
+        dialog.setText("Choose rows to display for this n (%) cell.")
+        records = dialog.addButton("Show Numerator Records", QMessageBox.ActionRole)
+        subjects = dialog.addButton("Show Numerator Subjects", QMessageBox.ActionRole)
+        denominator = dialog.addButton("Show Denominator Subjects", QMessageBox.ActionRole)
+        dialog.addButton(QMessageBox.Cancel)
+        dialog.exec()
+        selected = dialog.clickedButton()
+        if selected not in {records, subjects, denominator}:
+            return
+        is_denominator = selected is denominator
+        target = (
+            context.population
+            if is_denominator and context.config.denominator.type == "population"
+            else context.source
+        )
+        if target is None:
+            QMessageBox.warning(
+                self, "Categorical Table Drill-down", "The required source dataset is no longer available."
+            )
+            return
+        try:
+            if context.config.denominator.type == "baseline_postbaseline":
+                where_sql, parameters = build_n1_cell_filter(
+                    context.source.metadata,
+                    context.config,
+                    cell,
+                    denominator=is_denominator,
+                )
+            else:
+                where_sql, parameters = build_cell_filter(
+                    target.metadata,
+                    context.config,
+                    cell,
+                    denominator=is_denominator,
+                )
+        except (StopIteration, ValueError) as error:
+            QMessageBox.warning(self, "Categorical Table Drill-down", str(error))
+            return
+        mode = (
+            "Denominator Subjects"
+            if is_denominator
+            else "Numerator Subjects"
+            if selected is subjects
+            else "Numerator Records"
+        )
+        title = self._unique_dataset_tab_title(f"Query: {mode}")
+        self.task_status.setText(f"Building {title}…")
+
+        def completed(handle: DatasetHandle) -> None:
+            if self.tabs.indexOf(tab) < 0:
+                self._remove_dataset_directory(handle.temporary_path.parent)
+                return
+            query_tab = self._make_dataset_tab(handle)
+            index = self.tabs.addTab(query_tab, title)
+            self.tabs.setCurrentIndex(index)
+            query_tab.start()
+
+        self._submit(
+            tab,
+            lambda _worker: self.categorical_query_builder.run(
+                target,
+                where_sql,
+                parameters,
+                title,
+                subject_id_variable=(
+                    context.config.subject_id_variable
+                    if selected is subjects or is_denominator
+                    else None
+                ),
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "Categorical Table Drill-down Failed", message, details
+            ),
+        )
+
+    def _open_categorical_long_result(self) -> None:
+        tab = self.current_dataset_tab()
+        context = self._categorical_sources.get(tab) if tab is not None else None
+        if tab is None or tab.handle.kind != "categorical" or context is None:
+            return
+        context_names = tuple(
+            dict.fromkeys(
+                name
+                for item in context.config.items
+                for name in item.context_variables
+            )
+        )
+        fields = {
+            variable.name.casefold(): variable
+            for variable in context.source.metadata.variables
+        }
+        context_variables = tuple(fields[name.casefold()] for name in context_names)
+        title = self._unique_dataset_tab_title("Categorical Table Long Result")
+        self.task_status.setText(f"Building {title}…")
+
+        def completed(handle: DatasetHandle) -> None:
+            if self.tabs.indexOf(tab) < 0:
+                self._remove_dataset_directory(handle.temporary_path.parent)
+                return
+            long_tab = self._make_dataset_tab(handle)
+            index = self.tabs.addTab(long_tab, title)
+            self.tabs.setCurrentIndex(index)
+            long_tab.start()
+
+        self._submit(
+            tab,
+            lambda _worker: self.categorical_long_result_builder.run(
+                tab.handle, context.source, context_variables
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "Categorical Long Result Failed", message, details
+            ),
+        )
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if (
@@ -1496,6 +1842,13 @@ class MainWindow(QMainWindow):
                 "to finish before closing it.",
             )
             return
+        if widget in self._categorical_input_tabs:
+            QMessageBox.information(
+                self,
+                "Categorical Table Running",
+                "This dataset is currently used by a Categorical Table. Wait for the calculation to finish before closing it.",
+            )
+            return
         self.tabs.removeTab(index)
         for worker in self._workers.get(widget, set()):
             worker.cancel()
@@ -1504,6 +1857,14 @@ class MainWindow(QMainWindow):
             if proc_context is not None:
                 self._pending_directory_releases.setdefault(widget, []).append(
                     proc_context.source.temporary_path.parent
+                )
+            categorical_context = self._categorical_sources.pop(widget, None)
+            if categorical_context is not None:
+                directories = {categorical_context.source.temporary_path.parent}
+                if categorical_context.population is not None:
+                    directories.add(categorical_context.population.temporary_path.parent)
+                self._pending_directory_releases.setdefault(widget, []).extend(
+                    directories
                 )
             self._compare_sources.pop(widget, None)
             if self._comparison_owner is widget:
@@ -1518,6 +1879,7 @@ class MainWindow(QMainWindow):
         self._cleanup_pending(widget)
         widget.deleteLater()
         self._refresh_compare_datasets()
+        self._refresh_categorical_sources()
         self._sync_active_tab()
 
     def _sync_active_tab(self, _index: int | None = None) -> None:
@@ -1549,7 +1911,13 @@ class MainWindow(QMainWindow):
             str(builder_source.handle.source_path) if builder_source else "",
             builder_source.current_where_text() if builder_source else "",
         )
+        self.analysis_panel.categorical_builder.set_dataset(
+            builder_source.handle.metadata if builder_source else None,
+            str(builder_source.handle.source_path) if builder_source else "",
+            builder_source.current_where_text() if builder_source else "",
+        )
         self._refresh_compare_datasets()
+        self._refresh_categorical_sources()
         self._refresh_status(tab)
 
     def _sync_dataset_actions(self, tab: DatasetTab | None) -> None:
@@ -1565,6 +1933,9 @@ class MainWindow(QMainWindow):
         )
         self.clear_action.setEnabled(enabled and tab.cache_complete)
         self.close_tab_action.setEnabled(self.tabs.count() > 0)
+        self.open_categorical_long_action.setEnabled(
+            tab is not None and tab.handle.kind == "categorical"
+        )
 
     @staticmethod
     def _exportable_columns(tab: DatasetTab | None) -> list[str]:

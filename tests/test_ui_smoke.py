@@ -68,6 +68,12 @@ class UiSmokeTests(unittest.TestCase):
             ]
             self.assertIn("Analysis", tools_actions)
             self.assertIn("PROC MEANS Builder", tools_actions)
+            self.assertIn("Categorical Table Builder", tools_actions)
+            view_actions = [
+                action.text() for action in window.menuBar().actions()[2].menu().actions()
+            ]
+            self.assertIn("Open Categorical Long Result", view_actions)
+            self.assertFalse(window.open_categorical_long_action.isEnabled())
             self.assertEqual(
                 window.analysis_panel.builder.sas_code_button.text(),
                 "SAS Code Generator…",
@@ -217,6 +223,30 @@ class UiSmokeTests(unittest.TestCase):
                 window.analysis_panel.statistics_page
             )
             window.analysis_panel._close_tab(statistics_index)
+            self.assertEqual(window.analysis_panel.tabs.count(), 0)
+            categorical = window.analysis_panel.categorical_builder
+            window.analysis_panel.show_categorical_tab()
+            self.assertEqual(window.analysis_panel.tabs.count(), 1)
+            categorical.set_dataset(numeric_metadata, "adlb.sas7bdat", 'AVAL > 1')
+            categorical.items.editor.setText("PARAMCD")
+            categorical.items._add()
+            categorical.items.contexts.editor.setText("USUBJID")
+            categorical.items.contexts._add_from_editor()
+            other_source = object()
+            adsl_source = object()
+            categorical.set_adsl_sources(
+                [
+                    (other_source, "ADLB — adlb.sas7bdat"),
+                    (adsl_source, "ADSL — adsl.sas7bdat"),
+                ]
+            )
+            self.assertEqual(
+                categorical.items.selected_items()[0].context_variables, ("USUBJID",)
+            )
+            self.assertEqual(categorical.adsl.count(), 2)
+            self.assertIs(categorical.adsl.currentData(), adsl_source)
+            categorical_index = window.analysis_panel.tabs.indexOf(categorical)
+            window.analysis_panel._close_tab(categorical_index)
             self.assertEqual(window.analysis_panel.tabs.count(), 0)
             numeric_tab = DatasetTab(numeric_handle, 500)
             numeric_tab.set_column_filter(

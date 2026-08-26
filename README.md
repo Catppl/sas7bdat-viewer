@@ -20,6 +20,7 @@
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。
 - 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
+- `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（固定 ADSL）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total 和单元格 drill-down。
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
@@ -249,6 +250,20 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 - 不执行 SAS 或 R 程序。
 - pyreadstat 读取的原始数值和 SAS format 后的显示值可能不同，正式统计输出仍应由经过验证的 SAS 程序生成。
 
+## Categorical Table 模块
+
+从 `Tools > Categorical Table Builder` 打开右侧 Analysis 面板。选择一个或多个 Item、treatment variable、subject ID、计数方式和百分比小数位，再选择分母策略；Run 在后台生成可筛选、排序、选择显示列和导出 CSV 的 `Categorical Table Result` Tab。默认结果采用临床表格样式：第一列 `Item / Level` 中每个 Item 为加粗标题行，Level 缩进显示，treatment 与 Total 横向展开为 `freq (percent)`。
+
+| 分母 | 数据来源与口径 |
+| --- | --- |
+| Population N | 固定使用用户打开或 Browse 的 ADSL；Population WHERE、treatment、subject ID 和 context variables 均由用户选择。Total 基于总体 ADSL population 重新计算。 |
+| Non-missing N | 当前分析数据集；按指定 analysis value 非缺失的记录/受试者计算。 |
+| Baseline + Postbaseline n1 | 当前分析数据集；用户提供 baseline 与 postbaseline WHERE。只有同一 treatment/context/subject 同时满足两项且 analysis value 有效的 postbaseline 记录进入 n1。n1 固定使用 record count，不去重。 |
+
+Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以及是否展示 `(Missing)` level。Population N 使用 distinct subject 是临床表格的默认选择；若改为 record count 且 ADSL 并非每受试者一条记录，百分比可能超过 100%，Builder 会明确显示该计数口径。
+
+同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。所有结果、Query 和 ADSL/source 缓存仅在会话中保留；关闭结果 Tab 会清理对应临时 SQLite。当前版本不提供 Categorical JSON 保存/加载，后续会在配置界面稳定后补充。
+
 ## Dataset Compare 模块
 
 Dataset Compare 用于比较 Main 和 QC 两个 SAS 数据集，寻找对应 observation，并把存在差异或匹配异常的记录生成一个临时 Compare Result Tab。比较过程不会生成实体 SAS 文件，也不会修改 Main/QC 数据。
@@ -399,6 +414,7 @@ python -m clinical_data_viewer
 | --- | --- | --- |
 | PROC MEANS Simple | 数值列右键 → `PROC MEANS (Simple)` | 查看当前筛选结果的 n、N、均值、分位数和 CI。 |
 | PROC MEANS Builder | `Tools > PROC MEANS Builder` | 配置多个 Analysis/BY/CLASS、Decimal Group Variables，生成临时结果 Tab。 |
+| Categorical Table | `Tools > Categorical Table Builder` | 配置多个分类 Item、treatment、分母、Total 和百分比小数位，生成 `n (%)` 临时结果 Tab。 |
 | SAS/R 代码 | Builder 中点击 `SAS Code Generator…` 或 `R Code Generator…` | 生成代码预览，不执行 SAS/R。 |
 | 行比较 | 按住 `Ctrl` 选择多个行号 → 右键 Compare | 只高亮选中行中有差异的列。 |
 | 数据集比较 | `Tools > Compare Datasets` | 选择 Main/QC，生成临时 Compare Result Tab；支持筛选、排序、源行跳转和 CSV。 |

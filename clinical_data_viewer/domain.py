@@ -32,6 +32,8 @@ class DatasetMetadata:
     statistic_decimal_offsets: tuple[tuple[str, int], ...] = ()
     proc_means_analysis_column: str | None = None
     proc_means_statistic_keys: tuple[tuple[str, str], ...] = ()
+    display_column_names: tuple[tuple[str, str], ...] = ()
+    categorical_item_level_column: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

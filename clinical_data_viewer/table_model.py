@@ -4,7 +4,7 @@ from collections import OrderedDict
 from decimal import ROUND_HALF_UP, Decimal
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 
 from .domain import DatasetMetadata, SortSpec
 
@@ -71,12 +71,17 @@ class DatasetTableModel(QAbstractTableModel):
         if local_row >= len(page):
             return None
         value = page[local_row][index.column()]
+        is_categorical_header = self._is_categorical_header(page[local_row])
         if role in {Qt.DisplayRole, Qt.EditRole}:
             return self._display_value(
                 value, self.columns[index.column()], offset, local_row
             )
         if role == Qt.TextAlignmentRole and isinstance(value, (int, float)):
             return int(Qt.AlignRight | Qt.AlignVCenter)
+        if role == Qt.FontRole and is_categorical_header and index.column() == 0:
+            font = QFont()
+            font.setBold(True)
+            return font
         if role == Qt.ToolTipRole:
             tooltip = (
                 "Missing"
@@ -106,10 +111,22 @@ class DatasetTableModel(QAbstractTableModel):
             and self.columns[index.column()] in self.highlighted_columns
         ):
             return QColor("#fff2b2")
+        if role == Qt.BackgroundRole and is_categorical_header:
+            return QColor("#edf5fc")
         manual = self.manual_highlight_color(index.row())
         if manual is not None:
             return manual
         return None
+
+    def _is_categorical_header(self, row: tuple[object, ...]) -> bool:
+        item_level = self.metadata.categorical_item_level_column
+        return bool(
+            item_level
+            and self.columns
+            and self.columns[0] == item_level
+            and row[0] not in {None, ""}
+            and all(value in {None, ""} for value in row[1:])
+        )
 
     def _display_value(
         self, value: object, column_name: str, offset: int, local_row: int
@@ -132,7 +149,9 @@ class DatasetTableModel(QAbstractTableModel):
         if orientation == Qt.Horizontal and 0 <= section < len(self.columns):
             variable = self._variable_by_name[self.columns[section]]
             if role == Qt.DisplayRole:
-                return variable.name
+                return dict(self.metadata.display_column_names).get(
+                    variable.name, variable.name
+                )
             if role == Qt.ToolTipRole:
                 details = [variable.name]
                 if variable.label:

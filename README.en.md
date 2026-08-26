@@ -14,7 +14,7 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
 | Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, and missing-value conditions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
-| Analysis | PROC MEANS Simple, PROC MEANS Builder, row comparison, Dataset Compare, and temporary result tabs. |
+| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, row comparison, Dataset Compare, and temporary result tabs. |
 | Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used. |
 | Code generation | SAS and R PROC MEANS code generators based on the same language-neutral JSON v3 configuration. |
 
@@ -69,6 +69,7 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 | --- | --- | --- |
 | PROC MEANS Simple | Right-click a numeric column → `PROC MEANS (Simple)` | Statistics for the current filtered result. `n (Subjects)` is distinct nonmissing `USUBJID`; `N (Values)` is the number of nonmissing analysis values. |
 | PROC MEANS Builder | `Tools > PROC MEANS Builder` | Multiple Analysis/BY/CLASS variables, Decimal Group Variables, statistics, a long-format temporary result tab, and configuration JSON. |
+| Categorical Table | `Tools > Categorical Table Builder` | Multiple categorical items, treatment `n (%)`, denominator strategies, Total, and temporary result tabs. |
 | SAS/R code | `SAS Code Generator…` or `R Code Generator…` in Builder | Read-only code preview and Save As; SAS/R is not executed by the viewer. |
 | Row comparison | Select multiple row numbers with `Ctrl`, then right-click Compare | Highlights only different columns in the selected rows. |
 | Dataset Compare | `Tools > Compare Datasets` | Main/QC matching, difference output, warning rows, source-row navigation, filtering, sorting, and CSV export. |
@@ -129,6 +130,18 @@ Generated scripts produce a `proc_means_result` data frame. The viewer previews 
 ![PROC MEANS Builder](docs/screenshots/SASDataViewer-proc-means-builder.png)
 
 ![SAS Code Generator](docs/screenshots/SASDataViewer-sas-code-generator.png)
+
+## Categorical Table module
+
+Open `Tools > Categorical Table Builder` to configure one or more categorical Items, treatment and subject-ID variables, the counting unit, percent digits, and a denominator strategy. Run creates a paged `Categorical Table Result` SQLite tab which retains normal visible-column selection, WHERE filtering, sorting, copying, and CSV export. Its default clinical-table layout uses a bold Item header row, indented Levels, and treatment/Total `freq (percent)` columns.
+
+| Denominator | Source and rule |
+| --- | --- |
+| Population N | A user-opened or browsed ADSL dataset. The population WHERE, treatment, subject ID, and context variables are configurable; Total is recomputed for the full eligible ADSL population. |
+| Non-missing N | The current analysis dataset, restricted to a configurable non-missing analysis-value variable. |
+| Baseline + Postbaseline n1 | The current analysis dataset. Baseline and postbaseline WHERE predicates are required. A postbaseline record is eligible only when the same treatment/context/subject has an eligible baseline record. Record-count mode does not deduplicate. |
+
+Each Item can have its own context variables, such as `PARAMCD + AVISIT`, and may opt into a `(Missing)` level. The same session SQLite retains an authoritative long table with `ITEM`, `ITEM_LABEL`, context variables, `LEVEL`, `TRT`, `FREQ`, `DENOM`, and `PCT`. With the default Result tab active, select `View > Open Categorical Long Result` to open it as an independent normal Viewer tab with WHERE, sorting, visible-column selection, and CSV export. Double-clicking a populated `n (%)` cell offers Numerator Records, Numerator Subjects, and Denominator Subjects as independent temporary query tabs. Categorical configuration JSON save/load is intentionally deferred; only the session result/configuration is retained while the result tab remains open.
 
 ## Dataset Compare module
 
