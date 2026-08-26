@@ -89,14 +89,20 @@ class CategoricalItemEditor(QWidget):
         self.include_missing.toggled.connect(lambda _checked: self._save_current())
         layout.addWidget(self.include_missing)
 
-    def set_metadata(self, metadata: DatasetMetadata | None) -> None:
+    def set_metadata(
+        self, metadata: DatasetMetadata | None, *, preserve: bool = False
+    ) -> None:
         if metadata is self._metadata:
             return
+        existing = dict(self._configs) if preserve else {}
         self._metadata = metadata
-        self._configs.clear()
-        self.items.clear()
-        self.editor.clear()
-        self.contexts.set_metadata(metadata)
+        self.contexts.set_metadata(metadata, preserve=preserve)
+        if preserve:
+            self._configs = existing
+        else:
+            self._configs.clear()
+            self.items.clear()
+            self.editor.clear()
         self.setEnabled(metadata is not None)
 
     def selected_items(self) -> tuple[CategoricalItem, ...]:
@@ -294,21 +300,27 @@ class CategoricalBuilder(QWidget):
         self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = ""
     ) -> None:
         if metadata is not None and metadata is not self._metadata:
+            previous_metadata = self._metadata
             self._metadata = metadata
-            self._filter_text = filter_text.strip()
-            self._source_filter_snapshot = self._filter_text
-            self._set_numerator_where(self._filter_text)
+            if self._filter_text == self._source_filter_snapshot:
+                self._filter_text = filter_text.strip()
+                self._source_filter_snapshot = self._filter_text
+                self._set_numerator_where(self._filter_text)
             names = [variable.name for variable in metadata.variables]
-            numeric = [variable.name for variable in metadata.variables if variable.kind == "numeric"]
             for combo, values in (
                 (self.treatment, names),
                 (self.subject, names),
                 (self.nonmissing_value, names),
                 (self.n1_value, names),
             ):
+                current = combo.currentText()
                 combo.clear()
                 combo.addItems(values)
-            self.items.set_metadata(metadata)
+                if current:
+                    index = combo.findText(current, Qt.MatchFixedString)
+                    if index >= 0:
+                        combo.setCurrentIndex(index)
+            self.items.set_metadata(metadata, preserve=previous_metadata is not None)
         self.source_label.setText(
             f"Source: {source_text}" if metadata else "Select a fully loaded source dataset."
         )
@@ -394,9 +406,25 @@ class CategoricalBuilder(QWidget):
     def clear(self) -> None:
         self.items.set_metadata(None)
         self.items.set_metadata(self._metadata)
+        self._filter_text = ""
+        self._source_filter_snapshot = ""
+        self._set_numerator_where("")
+        self.treatment.setCurrentIndex(0 if self.treatment.count() else -1)
+        self.subject.setCurrentIndex(0 if self.subject.count() else -1)
+        self.nonmissing_value.setCurrentIndex(
+            0 if self.nonmissing_value.count() else -1
+        )
+        self.n1_value.setCurrentIndex(0 if self.n1_value.count() else -1)
+        self.count_type.setCurrentIndex(
+            self.count_type.findData("distinct_subject")
+        )
+        self.denominator_type.setCurrentIndex(0)
         self.population_where.clear()
         self.baseline_where.clear()
         self.postbaseline_where.clear()
+        self.include_total.setChecked(True)
+        self.percent_digits.setValue(1)
+        self._adsl_user_selected = False
         self.status.clear()
 
     def _sync_denominator_page(self) -> None:

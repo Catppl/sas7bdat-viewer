@@ -58,7 +58,10 @@ class VariableTokenEditor(QWidget):
         self.values.itemDoubleClicked.connect(lambda _item: self._remove_selected())
         layout.addWidget(self.values)
 
-    def set_metadata(self, metadata: DatasetMetadata | None) -> None:
+    def set_metadata(
+        self, metadata: DatasetMetadata | None, *, preserve: bool = False
+    ) -> None:
+        selected = self.selected_variables() if preserve else ()
         self._metadata = metadata
         names = (
             [
@@ -74,6 +77,8 @@ class VariableTokenEditor(QWidget):
         completer.setFilterMode(Qt.MatchContains)
         self.editor.setCompleter(completer)
         self.clear()
+        if preserve:
+            self.set_variables(selected)
         self.setEnabled(metadata is not None)
 
     def selected_variables(self) -> tuple[str, ...]:

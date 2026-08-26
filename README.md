@@ -263,7 +263,7 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 
 Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以及是否展示 `(Missing)` level。Population N 使用 distinct subject 是临床表格的默认选择；若改为 record count 且 ADSL 并非每受试者一条记录，百分比可能超过 100%，Builder 会明确显示该计数口径。
 
-同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。所有结果、Query 和 ADSL/source 缓存仅在会话中保留；关闭结果 Tab 会清理对应临时 SQLite。当前版本不提供 Categorical JSON 保存/加载，后续会在配置界面稳定后补充。
+同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。关闭 Categorical Result Tab 不会清空 Builder 配置；只有点击 Builder 底部 `Clear` 才会清除 Item、WHERE、分母和表格设置。所有结果、Query 和 ADSL/source 缓存仅在会话中保留；关闭结果 Tab 会清理对应临时 SQLite。当前版本不提供 Categorical JSON 保存/加载，后续会在配置界面稳定后补充。
 
 ## Rule-based Table 模块
 
