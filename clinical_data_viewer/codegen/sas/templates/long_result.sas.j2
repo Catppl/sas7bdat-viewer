@@ -10,7 +10,7 @@ proc means data=work.{{ work_source }} noprint{% if class_variables %} nway miss
 {% if proc_statistics %}
 {% for statistic in proc_statistics %}        {{ statistic.keyword }}={{ statistic.name }}{% if not loop.last %}
 {% endif %}{% endfor %};
-{% else %}        n=__CDE_INTERNAL_N;
+{% else %}        n=internal_n;
 {% endif %}
 run;
 
@@ -23,12 +23,12 @@ run;
 {% include "subject_count.sas.j2" %}
 
 data work.{{ item.work_long }};
-    length ANALYSIS_VARIABLE $32 ANALYSIS_LABEL $1024;
+    length ana_var $32 ana_label $1024;
 {% if include_subject_n and options.subject_id_variable and group_variables %}
-    merge work.{{ item.work_stats }}(in=__stats)
+    merge work.{{ item.work_stats }}(in=stats_row)
           work.{{ item.work_subjects }};
     by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-    if __stats;
+    if stats_row;
     if missing(SUBJECT_N) then SUBJECT_N=0;
 {% elif include_subject_n and options.subject_id_variable %}
     if _n_=1 then set work.{{ item.work_subjects }};
@@ -40,9 +40,9 @@ data work.{{ item.work_long }};
 {% else %}
     set work.{{ item.work_stats }};
 {% endif %}
-    ANALYSIS_VARIABLE={{ item.name | sas_string }};
-    ANALYSIS_LABEL={{ item.label | sas_string }};
-{% if needs_internal_n %}    drop __CDE_INTERNAL_N;
+    ana_var={{ item.name | sas_string }};
+    ana_label={{ item.label | sas_string }};
+{% if needs_internal_n %}    drop internal_n;
 {% endif %}
 run;
 
