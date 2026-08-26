@@ -76,19 +76,26 @@ class ComparisonHighlightDelegate(QStyledItemDelegate):
             return
         option.backgroundBrush = color
         option.palette.setColor(QPalette.Highlight, color)
-        option.palette.setColor(
-            QPalette.HighlightedText, option.palette.color(QPalette.Text)
-        )
+        text_color = QColor("#1f2937")
+        option.palette.setColor(QPalette.Text, text_color)
+        option.palette.setColor(QPalette.HighlightedText, text_color)
 
     def paint(self, painter, option, index) -> None:
-        if self.highlight_color(index) is None:
+        color = self.highlight_color(index)
+        if color is None:
             super().paint(painter, option, index)
             return
-        # The application stylesheet supplies a blue selection background that
-        # overrides BackgroundRole. Paint just these cells without Selected state;
-        # their model background remains yellow while equal cells stay blue.
+        # Do not let the table's blue Selected state obscure a manual/compare
+        # highlight.  Explicitly retain a dark text color so every value stays
+        # readable on the pale row background.
         comparison_option = QStyleOptionViewItem(option)
         comparison_option.state &= ~QStyle.State_Selected
+        comparison_option.backgroundBrush = color
+        comparison_option.palette.setColor(QPalette.Base, color)
+        comparison_option.palette.setColor(QPalette.AlternateBase, color)
+        text_color = QColor("#1f2937")
+        comparison_option.palette.setColor(QPalette.Text, text_color)
+        comparison_option.palette.setColor(QPalette.HighlightedText, text_color)
         super().paint(painter, comparison_option, index)
 
 
@@ -190,8 +197,9 @@ class CopyTableView(QTableView):
         menu.addAction(clear_compare)
         if bool(self.property("allowManualHighlights")):
             menu.addSeparator()
+            highlight_rows = self.manual_highlight_row_numbers()
             highlights = QMenu("Highlight Rows", menu)
-            highlights.setEnabled(bool(selected_rows))
+            highlights.setEnabled(bool(highlight_rows))
             for key, label in (
                 ("purple", "Light Purple"),
                 ("green", "Light Green"),
@@ -200,16 +208,16 @@ class CopyTableView(QTableView):
                 action = QAction(label, self)
                 action.triggered.connect(
                     lambda _checked=False, color=key: self.manual_highlight_requested.emit(
-                        self.selected_row_numbers(), color
+                        self.manual_highlight_row_numbers(), color
                     )
                 )
                 highlights.addAction(action)
             menu.addMenu(highlights)
             clear_highlight = QAction("Clear Highlight for Selected Rows", self)
-            clear_highlight.setEnabled(bool(selected_rows))
+            clear_highlight.setEnabled(bool(highlight_rows))
             clear_highlight.triggered.connect(
                 lambda: self.clear_manual_highlight_requested.emit(
-                    self.selected_row_numbers()
+                    self.manual_highlight_row_numbers()
                 )
             )
             menu.addAction(clear_highlight)
@@ -228,6 +236,20 @@ class CopyTableView(QTableView):
         if not self.selectionModel():
             return []
         return sorted(index.row() for index in self.selectionModel().selectedRows())
+
+    def manual_highlight_row_numbers(self) -> list[int]:
+        """Return row targets for the Highlight Rows menu.
+
+        A full-row selection keeps its existing multi-row behavior.  When the
+        user right-clicks a single cell, use that cell's row directly so a
+        prior Select Row action is not required.
+        """
+
+        rows = self.selected_row_numbers()
+        if rows:
+            return rows
+        context = getattr(self, "_context_index", None)
+        return [context.row()] if context is not None and context.isValid() else []
 
     def _context_variable(self) -> str:
         if (

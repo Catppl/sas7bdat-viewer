@@ -14,7 +14,7 @@ class UiSmokeTests(unittest.TestCase):
     def test_main_window_constructs_with_reference_layout(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtCore import QPoint, Qt
-        from PySide6.QtGui import QPalette
+        from PySide6.QtGui import QColor, QPalette
         from PySide6.QtTest import QTest
         from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
 
@@ -234,6 +234,31 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(categorical.current_filter_text(), 'AVAL > 2')
             categorical.inherit_current_filter('AVAL > 3')
             self.assertEqual(categorical.current_filter_text(), 'AVAL > 2')
+            categorical.items.resize(180, 100)
+            categorical.items.show()
+            application.processEvents()
+            self.assertLessEqual(
+                categorical.items.remove_button.geometry().right(),
+                categorical.items.width() - 1,
+            )
+            drilldown_dialog, records_button, subjects_button, denominator_button = (
+                window._categorical_drilldown_dialog()
+            )
+            self.assertEqual(
+                [
+                    records_button.text(),
+                    subjects_button.text(),
+                    denominator_button.text(),
+                ],
+                [
+                    "Show Numerator Records",
+                    "Show Numerator Subjects",
+                    "Show Denominator Subjects",
+                ],
+            )
+            self.assertEqual(drilldown_dialog.minimumWidth(), 420)
+            drilldown_dialog.deleteLater()
+            categorical.items.hide()
             categorical.items.editor.setText("PARAMCD")
             categorical.items._add()
             categorical.items.contexts.editor.setText("USUBJID")
@@ -370,6 +395,22 @@ class UiSmokeTests(unittest.TestCase):
             )
             self.assertNotEqual(
                 ordinary_option.palette.color(QPalette.Highlight).name(), "#fff2b2"
+            )
+            numeric_tab.table.clearSelection()
+            numeric_tab.table._context_index = numeric_tab.model.index(1, 2)
+            self.assertEqual(numeric_tab.table.manual_highlight_row_numbers(), [1])
+            numeric_tab.table.selectRow(0)
+            self.assertEqual(numeric_tab.table.manual_highlight_row_numbers(), [0])
+            numeric_tab.model.set_manual_row_highlight({0}, QColor("#e8ddff"))
+            manual_option = QStyleOptionViewItem()
+            numeric_tab.table.itemDelegate().initStyleOption(
+                manual_option, numeric_tab.model.index(0, 2)
+            )
+            self.assertEqual(
+                manual_option.palette.color(QPalette.Highlight).name(), "#e8ddff"
+            )
+            self.assertEqual(
+                manual_option.palette.color(QPalette.Text).name(), "#1f2937"
             )
             window.analysis_panel.show_statistics(
                 StatisticsResult(

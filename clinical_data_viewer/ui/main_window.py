@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
+    QDialog,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QSizePolicy,
     QStyle,
     QTabWidget,
@@ -1479,15 +1481,9 @@ class MainWindow(QMainWindow):
         cell = lookup_cell(tab.handle, source_row, column_name)
         if cell is None:
             return
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Categorical Table Drill-down")
-        dialog.setText("Choose rows to display for this n (%) cell.")
-        records = dialog.addButton("Show Numerator Records", QMessageBox.ActionRole)
-        subjects = dialog.addButton("Show Numerator Subjects", QMessageBox.ActionRole)
-        denominator = dialog.addButton("Show Denominator Subjects", QMessageBox.ActionRole)
-        dialog.addButton(QMessageBox.Cancel)
+        dialog, records, subjects, denominator = self._categorical_drilldown_dialog()
         dialog.exec()
-        selected = dialog.clickedButton()
+        selected = dialog.selected_button
         if selected not in {records, subjects, denominator}:
             return
         is_denominator = selected is denominator
@@ -1556,6 +1552,33 @@ class MainWindow(QMainWindow):
                 "Categorical Table Drill-down Failed", message, details
             ),
         )
+
+    def _categorical_drilldown_dialog(self):
+        """Create the compact, readable categorical drill-down chooser."""
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Categorical Table Drill-down")
+        dialog.setModal(True)
+        dialog.setMinimumSize(420, 250)
+        dialog.selected_button = None
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Choose rows to display for this n (%) cell."))
+        records = QPushButton("Show Numerator Records")
+        subjects = QPushButton("Show Numerator Subjects")
+        denominator = QPushButton("Show Denominator Subjects")
+        cancel = QPushButton("Cancel")
+        for button in (records, subjects, denominator):
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+            def choose(_checked=False, selected_button=button):
+                dialog.selected_button = selected_button
+                dialog.accept()
+
+            button.clicked.connect(choose)
+            layout.addWidget(button)
+        cancel.clicked.connect(dialog.reject)
+        layout.addWidget(cancel)
+        return dialog, records, subjects, denominator
 
     def _open_categorical_long_result(self) -> None:
         tab = self.current_dataset_tab()

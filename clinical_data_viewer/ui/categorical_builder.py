@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -60,12 +61,15 @@ class CategoricalItemEditor(QWidget):
         layout.setSpacing(3)
         row = QHBoxLayout()
         self.editor = QLineEdit()
-        self.editor.setPlaceholderText("Type a categorical variable and press Enter")
+        self.editor.setPlaceholderText("Variable name + Enter")
+        self.editor.setMinimumWidth(0)
+        self.editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.editor.returnPressed.connect(self._add)
         row.addWidget(self.editor, 1)
-        remove = QPushButton("Remove")
-        remove.clicked.connect(self._remove)
-        row.addWidget(remove)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.remove_button.clicked.connect(self._remove)
+        row.addWidget(self.remove_button, 0)
         layout.addLayout(row)
         self.items = QListWidget()
         self.items.setMaximumHeight(75)
