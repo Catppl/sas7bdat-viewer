@@ -7,7 +7,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from clinical_data_viewer.ae_table import AeTableConfig, AeTableDenominator, AeTableEngine, MissingTreatmentError
+from clinical_data_viewer.ae_table import AeTableConfig, AeTableDenominator, AeTableEngine, AeTableLongResultBuilder, MissingTreatmentError
 from clinical_data_viewer.ae_table.configuration import build_ae_table_configuration
 from clinical_data_viewer.ae_table.drilldown import AeTableCell, build_cell_filter
 from clinical_data_viewer.domain import DatasetHandle, DatasetMetadata, VariableMetadata
@@ -135,6 +135,48 @@ class AeTableTests(unittest.TestCase):
             merge = DatasetHandle(source.source_path, source.temporary_path, source.database_path, source.metadata, source.cached_row_count, True, kind="merge")
             cfg = build_ae_table_configuration(merge, AeTableConfig("SOC", "PT", "TRT"), resolved_treatment_levels=[])
             self.assertEqual((cfg["input"]["kind"], cfg["input"]["format"]), ("merge", "merge"))
+
+    def test_total_recomputes_distinct_subjects_not_arm_sum(self):
+        variables = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); source = handle(root, "adae", variables, (("S1", "A", "GI", "Nausea"), ("S1", "B", "GI", "Nausea"), ("S2", "A", "GI", "Nausea")))
+            result = AeTableEngine(TempManager(root / "temp")).run(source, AeTableConfig("SOC", "PT", "TRT"))
+            with closing(sqlite3.connect(result.database_path)) as c:
+                row = c.execute('SELECT "TRT_1", "TRT_2", "TOTAL" FROM dataset WHERE "ITEM" = ?', ("Any AE",)).fetchone()
+            self.assertEqual(row, ("2 (100.0)", "1 (100.0)", "2 (100.0)"))
+
+    def test_optional_any_total_and_decimal_display(self):
+        variables = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); source = handle(root, "adae", variables, (("S1", "A", "GI", "Nausea"), ("S2", "A", "GI", "Nausea"), ("S3", "A", "GI", "Other")))
+            result = AeTableEngine(TempManager(root / "temp")).run(source, AeTableConfig("SOC", "PT", "TRT", include_any_ae=False, include_total=False, percent_digits=2))
+            with closing(sqlite3.connect(result.database_path)) as c:
+                columns = [r[1] for r in c.execute("PRAGMA table_info(dataset)")]
+                item = c.execute('SELECT "ITEM", "TRT_1" FROM dataset ORDER BY _source_row LIMIT 1').fetchone()
+            self.assertEqual(columns, ["_source_row", "ITEM", "TRT_1"])
+            self.assertEqual(item, ("GI", "3 (100.00)"))
+
+    def test_numeric_treatment_and_long_result_order(self):
+        variables = (VariableMetadata("USUBJID"), VariableMetadata("TRT", kind="numeric"), VariableMetadata("SOC"), VariableMetadata("PT"))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); source = handle(root, "adae", variables, (("S1", 2, "GI", "Nausea"), ("S2", 1, "GI", "Nausea")))
+            manager = TempManager(root / "temp"); result = AeTableEngine(manager).run(source, AeTableConfig("SOC", "PT", "TRT"))
+            config = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            self.assertEqual([level["value"] for level in config["treatment"]["resolved_levels"]], [1, 2])
+            long_result = AeTableLongResultBuilder(manager).run(result, source)
+            with closing(sqlite3.connect(long_result.database_path)) as c:
+                orders = c.execute("SELECT ROW_ORDER, TRT_ORDER, TRT FROM dataset ORDER BY ROW_ORDER, TRT_ORDER").fetchall()
+            self.assertEqual(orders[:3], [(1, 1, "1"), (1, 2, "2"), (1, 3, "Total")])
+
+    def test_merge_source_runs_ae_table_engine(self):
+        variables = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); base = handle(root, "merged", variables, (("S1", "A", "GI", "Nausea"),))
+            merge = DatasetHandle(base.source_path, base.temporary_path, base.database_path, base.metadata, base.cached_row_count, True, kind="merge")
+            result = AeTableEngine(TempManager(root / "temp")).run(merge, AeTableConfig("SOC", "PT", "TRT"))
+            self.assertEqual(result.kind, "ae_table")
+            config = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            self.assertEqual((config["input"]["kind"], config["input"]["format"]), ("merge", "merge"))
 
 
 if __name__ == "__main__":

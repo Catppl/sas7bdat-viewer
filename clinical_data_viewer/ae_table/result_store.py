@@ -27,7 +27,8 @@ class AeTableResultWriter:
         defs = ", ".join(f"{quote_identifier(v.name)} TEXT" for v in self.variables)
         self.connection.execute(f"CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, {defs})")
         self.connection.execute("CREATE TABLE ae_table_cell_map (result_row INTEGER, column_name TEXT, row_type TEXT, soc_json TEXT, pt_json TEXT, treatment_json TEXT, PRIMARY KEY(result_row,column_name))")
-        self.connection.execute("CREATE TABLE ae_table_long (row_order INTEGER, row_type TEXT, soc_json TEXT, pt_json TEXT, item TEXT, indent INTEGER, trt_json TEXT, freq INTEGER, denom INTEGER, pct REAL, dataset_filter TEXT, denominator_type TEXT, count_type TEXT, count_variable TEXT)")
+        # Keep treatment order as data, rather than relying on SQLite insertion order.
+        self.connection.execute("CREATE TABLE ae_table_long (row_order INTEGER, trt_order INTEGER, row_type TEXT, soc_json TEXT, pt_json TEXT, item TEXT, indent INTEGER, trt_json TEXT, freq INTEGER, denom INTEGER, pct REAL, dataset_filter TEXT, denominator_type TEXT, count_type TEXT, count_variable TEXT)")
         self.row_count = 0
 
     def add_row(self, row, counts, denom, levels, filter_text, denominator_type):
@@ -39,12 +40,12 @@ class AeTableResultWriter:
         cols = [v.name for v in self.variables]
         self.connection.execute(f"INSERT INTO dataset ({','.join(quote_identifier(c) for c in cols)}) VALUES ({','.join('?' for _ in cols)})", values)
         self.row_count += 1; result_row = self.row_count
-        for key, col, _label in self.treatment_columns:
+        for trt_order, (key, col, _label) in enumerate(self.treatment_columns, 1):
             freq = len(counts.get(key, ())) if key is not None else len(counts.get("__ae_total__", ()))
             dn = denom.get(key if key is not None else "__ae_total__", 0)
             tjson = None if key is None else key
             self.connection.execute("INSERT INTO ae_table_cell_map VALUES (?,?,?,?,?,?)", (result_row, col, row["row_type"], json.dumps(row["soc"], ensure_ascii=False), json.dumps(row["pt"], ensure_ascii=False), tjson))
-            self.connection.execute("INSERT INTO ae_table_long VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (result_row, row["row_type"], json.dumps(row["soc"], ensure_ascii=False), json.dumps(row["pt"], ensure_ascii=False), row["item"], row["indent"], tjson, freq, dn, freq * 100.0 / dn if dn else None, filter_text, denominator_type, "distinct", "USUBJID"))
+            self.connection.execute("INSERT INTO ae_table_long VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (result_row, trt_order, row["row_type"], json.dumps(row["soc"], ensure_ascii=False), json.dumps(row["pt"], ensure_ascii=False), row["item"], row["indent"], tjson, freq, dn, freq * 100.0 / dn if dn else None, filter_text, denominator_type, "distinct", "USUBJID"))
 
     def finish(self, directory, source):
         self.connection.execute("CREATE TABLE cache_info (cached_rows INTEGER,total_rows INTEGER,complete INTEGER)")
@@ -63,13 +64,13 @@ class AeTableLongResultBuilder:
 
     def run(self, result, source):
         directory = self.temp_manager.create_dataset_directory(); database = directory / "dataset.sqlite"
-        variables = tuple(VariableMetadata(name, name.replace("_", " ").title(), "numeric" if name in {"ROW_ORDER","INDENT","FREQ","DENOM","PCT"} else "character") for name in ("ROW_ORDER","ROW_TYPE","SOC","PT","ITEM","INDENT","TRT","FREQ","DENOM","PCT","DATASET_FILTER","DENOMINATOR_TYPE","COUNT_TYPE","COUNT_VARIABLE"))
+        variables = tuple(VariableMetadata(name, name.replace("_", " ").title(), "numeric" if name in {"ROW_ORDER","TRT_ORDER","INDENT","FREQ","DENOM","PCT"} else "character") for name in ("ROW_ORDER","TRT_ORDER","ROW_TYPE","SOC","PT","ITEM","INDENT","TRT","FREQ","DENOM","PCT","DATASET_FILTER","DENOMINATOR_TYPE","COUNT_TYPE","COUNT_VARIABLE"))
         try:
             with closing(sqlite3.connect(database)) as target, closing(sqlite3.connect(result.database_path.resolve().as_uri()+"?mode=ro", uri=True)) as src:
                 target.execute("CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + ",".join(f'{quote_identifier(v.name)} {"REAL" if v.kind == "numeric" else "TEXT"}' for v in variables) + ")")
-                rows = src.execute("SELECT row_order,row_type,soc_json,pt_json,item,indent,trt_json,freq,denom,pct,dataset_filter,denominator_type,count_type,count_variable FROM ae_table_long ORDER BY row_order").fetchall()
+                rows = src.execute("SELECT row_order,trt_order,row_type,soc_json,pt_json,item,indent,trt_json,freq,denom,pct,dataset_filter,denominator_type,count_type,count_variable FROM ae_table_long ORDER BY row_order, trt_order").fetchall()
                 for row in rows:
-                    values = list(row); values[2] = None if values[2] == "null" else str(json.loads(values[2])); values[3] = None if values[3] == "null" else str(json.loads(values[3])); values[6] = "Total" if values[6] is None else str(json.loads(values[6]))
+                    values = list(row); values[3] = None if values[3] == "null" else str(json.loads(values[3])); values[4] = None if values[4] == "null" else str(json.loads(values[4])); values[7] = "Total" if values[7] is None else str(json.loads(values[7]))
                     target.execute("INSERT INTO dataset VALUES (" + ",".join("?" for _ in range(len(values)+1)) + ")", [None, *values])
                 target.execute("CREATE TABLE cache_info (cached_rows INTEGER,total_rows INTEGER,complete INTEGER)"); target.execute("INSERT INTO cache_info VALUES (?,?,1)",(len(rows),len(rows))); target.commit()
             marker = directory / "ae-table-long-result.tmp"; marker.touch()

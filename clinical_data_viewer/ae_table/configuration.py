@@ -53,6 +53,13 @@ def _levels(levels: Iterable[tuple[str, object, str] | Mapping[str, object]]) ->
 def build_ae_table_configuration(source: DatasetHandle, config: AeTableConfig,
                                  population: DatasetHandle | None = None,
                                  resolved_treatment_levels=(), resolved_hierarchy=()) -> dict[str, object]:
+    """Build the AE v1 contract.
+
+    ``sort`` is the reusable business contract: a future generator must
+    recalculate frequencies and apply it to its input data.  The optional
+    ``resolved_hierarchy`` is only the current Python run snapshot for audit,
+    debugging, and validation; it is not a persistent ordering instruction.
+    """
     config.validate(source.metadata, population.metadata if population else None)
     denominator: dict[str, object] = {"type": config.denominator.type}
     if config.denominator.type == "population":
