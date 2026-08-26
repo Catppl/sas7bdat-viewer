@@ -11,6 +11,11 @@ proc means data=work.{{ work_source }} noprint{% if class_variables %} nway miss
 {% else %}        n=internal_n;
 {% endif %}run;
 
+{% if group_variables %}proc sort data=work.{{ item.work_stats }};
+    by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
+run;
+{% endif %}
+
 {% if include_subject_n and options.subject_id_variable %}
 /* Count distinct subjects for {{ item.name }} */
 {% include "subject_count.sas.j2" %}
@@ -20,7 +25,7 @@ proc means data=work.{{ work_source }} noprint{% if class_variables %} nway miss
 data work.{{ item.work_long }};
     length ana_var $32 ana_label $1024;
 {% if include_subject_n and options.subject_id_variable and group_variables %}    merge work.{{ item.work_stats }}(in=in_stat)
-          work.{{ item.work_subjects }}(in=in_subj);
+          work.{{ item.work_subjects }};
     by {% for variable in group_variables %}{{ variable | sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
     if in_stat;
     if missing(SUBJECT_N) then SUBJECT_N=0;

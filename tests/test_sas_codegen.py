@@ -102,6 +102,16 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             self.assertIn("work.out_aval", code)
             self.assertIn("work.dec_aval", code)
             self.assertIn("work.dec_rule", code)
+            self.assertIn(
+                "proc sort data=work.stat_aval;\n"
+                "    by PARAMCD AVISITN TRT01AN;\n"
+                "run;",
+                code,
+            )
+            self.assertNotIn("in=in_subj", code)
+            stat_sort = code.index("proc sort data=work.stat_aval;")
+            stat_merge = code.index("merge work.stat_aval(in=in_stat)")
+            self.assertLess(stat_sort, stat_merge)
             self.assertNotIn("adlb_aval_", code)
             self.assertNotIn("adlb_decimal_", code)
             self.assertNotIn("__CDE_PM_", code)
