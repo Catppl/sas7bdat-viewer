@@ -161,7 +161,7 @@ def dataset_paths_from_arguments(arguments: Sequence[str]) -> tuple[Path, ...]:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
             value = value[1:-1]
         candidate = Path(value).expanduser()
-        if candidate.suffix.lower() != ".sas7bdat":
+        if candidate.suffix.lower() not in {".sas7bdat", ".xpt"}:
             continue
         resolved = candidate.resolve(strict=False)
         key = str(resolved).casefold() if sys.platform == "win32" else str(resolved)

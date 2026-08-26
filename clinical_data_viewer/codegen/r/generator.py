@@ -126,6 +126,9 @@ class RProcMeansGenerator:
             raise ValueError("R generation requires PROC MEANS configuration v3.")
 
         context = configuration.copy()
+        input_format = str(context["input"].get("format", "")).casefold()
+        if input_format not in {"sas7bdat", "xpt"}:
+            raise ValueError(f"Unsupported input format for R generation: {input_format}")
         statistics = list(context["statistics"])
         unknown_statistics = sorted(set(statistics) - set(_STATISTIC_KEYS))
         if unknown_statistics:
@@ -180,6 +183,7 @@ class RProcMeansGenerator:
         ]
         context.update(
             {
+                "input_format": input_format,
                 "variable_types": variable_types,
                 "variables_in_order": [
                     {

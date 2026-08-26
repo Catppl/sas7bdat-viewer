@@ -16,8 +16,16 @@ class FakePyreadstat:
     def __init__(self, expected_source: Path) -> None:
         self.expected_source = expected_source.resolve()
         self.read_paths: list[Path] = []
+        self.calls: list[tuple[str, dict[str, object]]] = []
 
     def read_sas7bdat(self, dataset, **kwargs):
+        return self._read("sas7bdat", dataset, **kwargs)
+
+    def read_xport(self, dataset, **kwargs):
+        return self._read("xpt", dataset, **kwargs)
+
+    def _read(self, kind, dataset, **kwargs):
+        self.calls.append((kind, kwargs))
         path = Path(dataset).resolve()
         self.read_paths.append(path)
         if kwargs.get("metadataonly"):
@@ -100,6 +108,27 @@ class SasReaderTests(unittest.TestCase):
             )
             self.assertEqual(result.filtered_count, 2)
             self.assertEqual(result.rows, (("101-001",), ("101-002",)))
+            manager.cleanup()
+
+    def test_xpt_uses_xport_reader_without_sas_only_options(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "adsl.xpt"
+            source.write_bytes(b"xpt fixture placeholder")
+            manager = TempManager(root / "temp")
+            fake = FakePyreadstat(source)
+            with patch(
+                "clinical_data_viewer.sas_reader._import_pyreadstat", return_value=fake
+            ):
+                handle = SasDatasetReader(manager, chunk_size=2).load(source)
+            self.assertTrue(handle.cache_complete)
+            self.assertTrue(all(kind == "xpt" for kind, _kwargs in fake.calls))
+            self.assertTrue(
+                all("user_missing" not in kwargs for _kind, kwargs in fake.calls)
+            )
+            self.assertTrue(
+                all(path == handle.temporary_path.resolve() for path in fake.read_paths)
+            )
             manager.cleanup()
 
 

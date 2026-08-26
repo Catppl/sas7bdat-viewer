@@ -79,8 +79,8 @@ class TempManager:
         self, source: Path, progress: Callable[[int, int], None] | None = None
     ) -> tuple[Path, Path]:
         source = source.resolve(strict=True)
-        if source.suffix.lower() != ".sas7bdat" or not source.is_file():
-            raise ValueError("Please select a valid .sas7bdat file.")
+        if source.suffix.lower() not in {".sas7bdat", ".xpt"} or not source.is_file():
+            raise ValueError("Please select a valid .sas7bdat or .xpt file.")
         dataset_directory = self.session_directory / uuid.uuid4().hex
         dataset_directory.mkdir(mode=0o700)
         destination = dataset_directory / source.name

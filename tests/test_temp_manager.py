@@ -25,6 +25,18 @@ class TempManagerTests(unittest.TestCase):
             self.assertFalse(dataset_directory.exists())
             manager.cleanup()
 
+    def test_copy_accepts_xpt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "adlb.xpt"
+            source.write_bytes(b"xpt bytes")
+            manager = TempManager(root / "cache")
+            copied, dataset_directory = manager.copy_dataset(source)
+            self.assertEqual(copied.name, "adlb.xpt")
+            self.assertEqual(copied.read_bytes(), b"xpt bytes")
+            manager.remove_dataset(dataset_directory)
+            manager.cleanup()
+
     def test_startup_cleanup_removes_only_old_session_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

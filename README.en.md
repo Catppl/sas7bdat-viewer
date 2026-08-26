@@ -2,13 +2,13 @@
 
 [中文](README.md) | [English](README.en.md)
 
-A compact, read-only Windows desktop viewer for clinical `.sas7bdat` datasets. SASDataViewer uses PySide6, pyreadstat, paged `QTableView` rendering, and a SQLite cache so that day-to-day browsing stays responsive without holding the original SAS file open.
+A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Transport `.xpt` datasets. SASDataViewer uses PySide6, pyreadstat, paged `QTableView` rendering, and a SQLite cache so that day-to-day browsing stays responsive without holding the original SAS file open.
 
 ## Features
 
 | Area | Supported functionality |
 | --- | --- |
-| Datasets | Open multiple `.sas7bdat` files in tabs; open files from the command line or Windows file association. |
+| Datasets | Open multiple `.sas7bdat` / `.xpt` files in tabs; open files from the command line or Windows file association. |
 | File safety | Copy the source to a session temporary directory, read only the copy/cache, and clean temporary data on tab close and application exit. |
 | Large data | Show metadata and the first batch quickly, then continue caching in the background. Virtual paging avoids rendering the full dataset at once. |
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
@@ -44,8 +44,8 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 
 | Action | How to use it | Notes |
 | --- | --- | --- |
-| Open datasets | Click `Open`; select one or more `.sas7bdat` files | Each file gets its own tab. |
-| Direct open | Run `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`, or associate `.sas7bdat` with the EXE | Spaces and non-ASCII paths are supported. The current version uses multiple windows. |
+| Open datasets | Click `Open`; select one or more `.sas7bdat` / `.xpt` files | Each file gets its own tab. |
+| Direct open | Run `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`, or associate `.sas7bdat` / `.xpt` with the EXE | Spaces and non-ASCII paths are supported. The current version uses multiple windows. |
 | Sort | Click a column header; click again to reverse the order | Equal values remain stable by source row order. |
 | Choose columns | Check variables in the Variables panel | `Select All` toggles all variables and can restore them after clearing the selection. |
 | Inspect metadata | Expand `All Variables` | Shows Variable, Label, Type, Length, and Format. |
@@ -118,7 +118,7 @@ Builder writes `proc_means_config.json` next to the temporary result. JSON v3 is
 
 The SAS generator renders Jinja2 templates under `clinical_data_viewer/codegen/sas/templates/`. Work members use the lower-case source dataset prefix, for example `work.adlb_source` and `work.adlb_aval_stats`; the final result remains `work.proc_means_result`.
 
-The R generator renders `clinical_data_viewer/codegen/r/templates/proc_means.R.j2`. It uses `haven::read_sas()`, the saved Python WHERE AST, missing-aware grouping, the Python PROC MEANS statistics contract, dynamic precision inference, and half-up display columns. Install the R dependency once with:
+The R generator renders `clinical_data_viewer/codegen/r/templates/proc_means.R.j2`. It uses `haven::read_sas()` for SAS7BDAT and `haven::read_xpt()` for XPT, the saved Python WHERE AST, missing-aware grouping, the Python PROC MEANS statistics contract, dynamic precision inference, and half-up display columns. Install the R dependency once with:
 
 ```r
 install.packages("haven")
@@ -189,7 +189,7 @@ Use copies of real SDTM/ADaM files, not the only production copy. Check the foll
 5. Test Row Comparison with non-contiguous Ctrl-selected rows; only selected rows and differing columns should be highlighted.
 6. Test Dataset Compare with reordered rows, duplicate groups, tolerance, threshold, ambiguity, Main/QC-only records, one-sided variables, source navigation, Advanced details, filtering, sorting, and CSV exclusion of internal fields.
 7. Close and reopen the application; verify WHERE history restoration and stale temporary-directory cleanup.
-8. Launch the EXE with paths containing spaces and non-ASCII characters, and test the `.sas7bdat` file association.
+8. Launch the EXE with `.sas7bdat` and `.xpt` paths containing spaces and non-ASCII characters, and test both file associations.
 
 ### Verify the source file is not held open
 

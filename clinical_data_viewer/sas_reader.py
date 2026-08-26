@@ -47,6 +47,26 @@ class SasDatasetReader:
         self.temp_manager = temp_manager
         self.chunk_size = chunk_size
 
+    @staticmethod
+    def _read_function(pyreadstat: Any, dataset_path: Path):
+        """Return the pyreadstat reader appropriate for an original SAS format."""
+        if dataset_path.suffix.lower() == ".xpt":
+            return pyreadstat.read_xport
+        return pyreadstat.read_sas7bdat
+
+    @staticmethod
+    def _read_options(dataset_path: Path) -> dict[str, object]:
+        """Options shared by direct and chunked reads for the selected format."""
+        options: dict[str, object] = {
+            "output_format": "dict",
+            "disable_datetime_conversion": True,
+        }
+        # read_xport does not accept user_missing; XPT has no SAS special-missing
+        # representation for pyreadstat to preserve in the same way as sas7bdat.
+        if dataset_path.suffix.lower() == ".sas7bdat":
+            options["user_missing"] = True
+        return options
+
     def load(
         self, source_path: Path, progress: ProgressCallback | None = None
     ) -> DatasetHandle:
@@ -115,13 +135,11 @@ class SasDatasetReader:
         connection = sqlite3.connect(handle.database_path)
         try:
             reader = pyreadstat.read_file_in_chunks(
-                pyreadstat.read_sas7bdat,
+                self._read_function(pyreadstat, handle.temporary_path),
                 str(handle.temporary_path),
                 chunksize=self.chunk_size,
                 offset=cached_rows,
-                output_format="dict",
-                user_missing=True,
-                disable_datetime_conversion=True,
+                **self._read_options(handle.temporary_path),
             )
             for chunk, _meta in reader:
                 chunk_length = len(next(iter(chunk.values()), ()))
@@ -159,12 +177,11 @@ class SasDatasetReader:
         self, dataset_path: Path
     ) -> tuple[tuple[VariableMetadata, ...], int | None]:
         pyreadstat = _import_pyreadstat()
-        _data, meta = pyreadstat.read_sas7bdat(
+        reader = self._read_function(pyreadstat, dataset_path)
+        _data, meta = reader(
             str(dataset_path),
             metadataonly=True,
-            output_format="dict",
-            user_missing=True,
-            disable_datetime_conversion=True,
+            **self._read_options(dataset_path),
         )
         names = list(meta.column_names)
         labels = list(meta.column_labels or [])
@@ -193,12 +210,11 @@ class SasDatasetReader:
 
     def _read_first_chunk(self, dataset_path: Path) -> dict[str, object]:
         pyreadstat = _import_pyreadstat()
-        data, _meta = pyreadstat.read_sas7bdat(
+        reader = self._read_function(pyreadstat, dataset_path)
+        data, _meta = reader(
             str(dataset_path),
             row_limit=self.chunk_size,
-            output_format="dict",
-            user_missing=True,
-            disable_datetime_conversion=True,
+            **self._read_options(dataset_path),
         )
         return data
 

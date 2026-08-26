@@ -21,6 +21,7 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
         *,
         include_subject: bool = True,
         dataset_name: str = "ADLB",
+        extension: str = ".sas7bdat",
     ) -> DatasetHandle:
         variables = [
             VariableMetadata("PARAMCD", "Parameter"),
@@ -31,10 +32,10 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
         ]
         if include_subject:
             variables.insert(0, VariableMetadata("USUBJID"))
-        source = root / "original data" / "ADLB.sas7bdat"
+        source = root / "original data" / f"{dataset_name}{extension}"
         source.parent.mkdir()
         source.touch()
-        temporary = root / "viewer-temp" / "ADLB.sas7bdat"
+        temporary = root / "viewer-temp" / f"{dataset_name}{extension}"
         temporary.parent.mkdir()
         temporary.touch()
         return DatasetHandle(
@@ -134,6 +135,19 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             self.assertIn("set analysis.adae;", code)
             self.assertIn("data work.adae_source;", code)
             self.assertNotIn("analysis.adlb", code.casefold())
+
+    def test_xpt_configuration_and_sas_use_xport_engine(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.make_source(Path(directory), extension=".xpt")
+            configuration = build_proc_means_configuration(
+                source, ProcMeansConfig(("AVAL",), statistics=("mean",))
+            )
+            code = SasProcMeansGenerator().generate(configuration)
+            self.assertEqual(configuration["input"]["format"], "xpt")
+            self.assertIn(
+                "libname analysis xport '" + str(source.source_path) + "';", code
+            )
+            self.assertNotIn("libname analysis '" + str(source.source_path.parent), code)
 
     def test_sas_where_is_rendered_from_python_filter_ast(self) -> None:
         cases = {

@@ -28,7 +28,7 @@ def build_proc_means_configuration(
         "type": "proc_means",
         "version": 3,
         "input": {
-            "format": "sas7bdat",
+            "format": source.source_path.suffix.lower().lstrip("."),
             "dataset": source.metadata.name,
             "source_path": str(source.source_path),
             "source_directory": str(source.source_path.parent),

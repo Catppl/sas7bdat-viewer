@@ -347,7 +347,7 @@ class MainWindow(QMainWindow):
             self,
             "Open SAS Dataset",
             initial,
-            "SAS datasets (*.sas7bdat);;All files (*)",
+            "SAS datasets (*.sas7bdat *.xpt);;All files (*)",
         )
         if not files:
             return
@@ -401,7 +401,7 @@ class MainWindow(QMainWindow):
             self,
             f"Choose {side.title()} SAS Dataset",
             initial,
-            "SAS datasets (*.sas7bdat);;All files (*)",
+            "SAS datasets (*.sas7bdat *.xpt);;All files (*)",
         )
         if not filename:
             return

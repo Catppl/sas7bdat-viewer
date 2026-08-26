@@ -128,6 +128,11 @@ class SasProcMeansGenerator:
             raise ValueError("SAS generation requires PROC MEANS configuration v3.")
 
         context = configuration.copy()
+        input_format = str(context["input"].get("format", "")).casefold()
+        if input_format not in {"sas7bdat", "xpt"}:
+            raise ValueError(
+                f"Unsupported input format for SAS generation: {input_format}"
+            )
         statistics = list(context["statistics"])
         unknown_statistics = sorted(
             set(statistics) - set(_PROC_MEANS_KEYWORDS) - {"SUBJECT_N"}
@@ -205,6 +210,8 @@ class SasProcMeansGenerator:
                     "qntldef": 5,
                 },
                 "sas_source_directory": context["input"]["source_directory"],
+                "sas_source_path": context["input"]["source_path"],
+                "sas_input_format": input_format,
                 "sas_source_library": sas_target["source_library"],
                 "sas_source_member": sas_target["source_member"],
                 "sas_output_dataset": sas_target["output_dataset"],

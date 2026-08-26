@@ -12,14 +12,14 @@ class AppArgumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first = root / "clinical data" / "中文 AE.sas7bdat"
-            second = root / "ADSL.SAS7BDAT"
+            second = root / "ADSL.XPT"
             result = dataset_paths_from_arguments(
                 ["--ignored", f'"{first}"', str(second), "notes.txt"]
             )
         self.assertEqual(result, (first.resolve(), second.resolve()))
 
     def test_deduplicates_the_same_path(self) -> None:
-        path = Path("same.sas7bdat").resolve()
+        path = Path("same.xpt").resolve()
         self.assertEqual(dataset_paths_from_arguments([str(path), str(path)]), (path,))
 
 

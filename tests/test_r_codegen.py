@@ -23,7 +23,9 @@ from clinical_data_viewer.temp_manager import TempManager
 
 
 class RProcMeansGeneratorTests(unittest.TestCase):
-    def make_source(self, root: Path, *, dataset_name: str = "ADLB") -> DatasetHandle:
+    def make_source(
+        self, root: Path, *, dataset_name: str = "ADLB", extension: str = ".sas7bdat"
+    ) -> DatasetHandle:
         variables = (
             VariableMetadata("USUBJID"),
             VariableMetadata("PARAMCD", "Parameter"),
@@ -32,10 +34,10 @@ class RProcMeansGeneratorTests(unittest.TestCase):
             VariableMetadata("AVAL", "Analysis Value", "numeric"),
             VariableMetadata("ANL01FL"),
         )
-        source = root / "original data" / f"{dataset_name}.sas7bdat"
+        source = root / "original data" / f"{dataset_name}{extension}"
         source.parent.mkdir()
         source.touch()
-        temporary = root / "viewer-temp" / f"{dataset_name}.sas7bdat"
+        temporary = root / "viewer-temp" / f"{dataset_name}{extension}"
         temporary.parent.mkdir()
         temporary.touch()
         return DatasetHandle(
@@ -122,6 +124,17 @@ class RProcMeansGeneratorTests(unittest.TestCase):
             self.assertIn('haven::read_sas("' + str(source.source_path) + '")', code)
             self.assertIn("proc_means_result <- data.frame", code)
             self.assertNotIn("analysis.adlb", code.casefold())
+
+    def test_xpt_configuration_uses_haven_read_xpt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.make_source(Path(directory), extension=".xpt")
+            configuration = build_proc_means_configuration(
+                source, ProcMeansConfig(("AVAL",), statistics=("mean",))
+            )
+            code = RProcMeansGenerator().generate(configuration)
+            self.assertEqual(configuration["input"]["format"], "xpt")
+            self.assertIn('haven::read_xpt("' + str(source.source_path) + '")', code)
+            self.assertNotIn("haven::read_sas", code)
 
     @unittest.skipUnless(shutil.which("Rscript"), "Rscript is not installed")
     def test_generated_r_matches_python_engine_for_fixture(self) -> None:

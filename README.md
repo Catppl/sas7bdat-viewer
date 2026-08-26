@@ -2,11 +2,11 @@
 
 [中文](README.md) | [English](README.en.md)
 
-独立的 Windows 临床 SAS 数据集浏览器。它只读打开 `.sas7bdat`，采用 PySide6 原生桌面界面、pyreadstat 分块读取和磁盘 SQLite 查询缓存，目标是在日常查看大数据集时保持界面响应。
+独立的 Windows 临床 SAS 数据集浏览器。它只读打开 `.sas7bdat` 和 SAS Transport `.xpt`，采用 PySide6 原生桌面界面、pyreadstat 分块读取和磁盘 SQLite 查询缓存，目标是在日常查看大数据集时保持界面响应。
 
 ## 已实现功能
 
-- 同时打开多个 `.sas7bdat`，使用可关闭、可移动的 Tab 切换。
+- 同时打开多个 `.sas7bdat` / `.xpt`，使用可关闭、可移动的 Tab 切换。
 - 源文件先分块复制到本次会话的临时目录；复制结束后，读取、筛选、排序和导出都只访问临时文件/缓存。
 - 关闭 Tab 清理对应副本；退出清理整个会话；启动时清理超过 24 小时且不属于仍在运行进程的异常退出遗留目录。
 - 大文件复制完成后先读取 metadata 和首批 20,000 行并显示 Tab，其余行继续在后台写入本地缓存；缓存期间仍可浏览首批及随后到达的数据。
@@ -22,7 +22,7 @@
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
-- `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
+- `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
 - `Ctrl+F` 在当前筛选、排序结果的当前显示列中查找文本；`F3`/`Shift+F3` 查找下一个/上一个；`Ctrl+G` 按当前结果行号跳转。
 - Reload 从原始路径生成新副本，并尽量保留显示列、WHERE 输入和已应用筛选；大文件重新缓存完成后再应用 WHERE。
 - 文件复制、SAS 读取、缓存构建、查询筛选、Reload 和 CSV 导出均通过 Qt 线程池运行。
@@ -220,7 +220,7 @@ Builder 在生成结果 SQLite 的同一后台任务中写入 `proc_means_config
 - 使用 `VARDEF=DF`、`QNTLDEF=5` 和设置中的 confidence/alpha。
 - 在 SAS 每次实际运行时，按 `Analysis Variable + 完整 Decimal Group combination` 从最新数据重新推断基础小数位，再应用各统计量 `+0～+4`、最多 4 位的显示规则。
 
-R Generator 只依赖 `haven`，用 `haven::read_sas()` 读取原始 `.sas7bdat`，输出 R 环境中的 `proc_means_result` long-format data frame。它复用 Python 的筛选 AST、BY/CLASS 完整分组、missing 处理、`QNTLDEF=5` 分位数、样本 SD、Student-t CI、固定 `USUBJID` subject n，以及按最新筛选数据动态推断的小数位和 half-up 显示列。它不会引用 Viewer temp copy，也不会执行或写入任何外部文件。首次在 R 环境运行前执行一次 `install.packages("haven")` 即可。
+R Generator 只依赖 `haven`：对 `.sas7bdat` 使用 `haven::read_sas()`，对 `.xpt` 使用 `haven::read_xpt()`；输出 R 环境中的 `proc_means_result` long-format data frame。它复用 Python 的筛选 AST、BY/CLASS 完整分组、missing 处理、`QNTLDEF=5` 分位数、样本 SD、Student-t CI、固定 `USUBJID` subject n，以及按最新筛选数据动态推断的小数位和 half-up 显示列。它不会引用 Viewer temp copy，也不会执行或写入任何外部文件。首次在 R 环境运行前执行一次 `install.packages("haven")` 即可。
 
 预览只生成和保存代码，SASDataViewer 不执行 SAS 或 R 程序。SAS 专用 Jinja2 模板位于 `clinical_data_viewer/codegen/sas/templates/`；R 专用模板位于 `clinical_data_viewer/codegen/r/templates/`，两者读取同一份 JSON v3，不单独维护另一份业务 JSON。
 
@@ -374,8 +374,8 @@ python -m clinical_data_viewer
 
 | 功能 | 操作 | 说明 |
 | --- | --- | --- |
-| 打开数据集 | `Open`；可一次选择多个 `.sas7bdat` | 每个数据集进入一个独立 Tab。 |
-| 直接打开 | 命令行运行 `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`，或双击已关联的文件 | 支持空格、中文路径；当前版本采用多实例方式。 |
+| 打开数据集 | `Open`；可一次选择多个 `.sas7bdat` / `.xpt` | 每个数据集进入一个独立 Tab。 |
+| 直接打开 | 命令行运行 `SASDataViewer.exe "C:\project data\中文\adae.sas7bdat"`，或双击已关联的 `.sas7bdat` / `.xpt` 文件 | 支持空格、中文路径；当前版本采用多实例方式。 |
 | 排序 | 点击列名；再次点击切换升序/降序 | 相同值按源行顺序稳定显示。 |
 | 选择显示列 | Variables 面板勾选变量 | `Select All` 可在全选/全不选之间切换；再次点击可恢复全部变量。 |
 | 查看 metadata | 展开 `All Variables` | 可查看 Variable、Label、Type、Length、Format。 |
@@ -495,7 +495,7 @@ python -m clinical_data_viewer
 11. 按 `Ctrl+F` 查找当前显示文本，并用 `F3`/`Shift+F3` 前后查找；按 `Ctrl+G` 跳到第 1 行、末行和一个远端中间行。
 12. 故意输入未闭合引号、未知变量和错误类型，确认显示清楚的错误且 WHERE 原文仍保留。
 13. 关闭程序再启动，确认成功执行过的 WHERE 能从当前数据集历史和全局历史恢复。
-14. 直接运行 `SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"`，确认程序自动打开该文件；再把 `.sas7bdat` 关联到 EXE 后双击验证。文件名包含空格和中文时也应成功。
+14. 分别直接运行 `.sas7bdat` 和 `.xpt` 路径，确认程序自动打开对应文件；再把两种扩展名关联到 EXE 后双击验证。文件名包含空格和中文时也应成功。
 15. 从 `Tools > Compare Datasets` 选择或 Browse Main/QC；确认后台最多推荐 3 个 value+frequency 完全一致的 Group、Match 默认全选、Key 默认不选。用重复 group、交换顺序、错误 `AVISITN/ASEQ`、数值微小差异、Main/QC 独有记录和单侧变量测试。确认 Main/QC 相邻、差异单元格为黄色、Main/QC only 与 Unmatched 整行为淡红色、单侧变量整列为淡红色、完全相同 observation 不输出。双击黄色/红色数据单元格验证跳回正确源 observation；勾选 Advanced details 验证三个诊断字段出现，但 CSV 始终不导出它们。在结果 Tab 使用 WHERE、表头筛选、显示列、排序和 CSV，并确认任一侧命中筛选都会保留整对。
 
 完整人工检查表也保存在 [docs/windows-acceptance.md](docs/windows-acceptance.md)。
@@ -611,7 +611,7 @@ Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 & .\dist\zip-test\SASDataViewer\SASDataViewer.exe "C:\clinical test\中文\adae.sas7bdat"
 ```
 
-程序本身不会静默修改注册表。请通过 Windows“打开方式 > 选择其他应用 > 始终使用此应用”关联 `.sas7bdat`，或由组织的安装包注册文件关联；关联命令必须包含带引号的 `%1`，典型形式为 `"C:\path\SASDataViewer.exe" "%1"`。当前版本采用多实例行为：双击文件会新开一个 Viewer 窗口，不会转交给已经运行的窗口。
+程序本身不会静默修改注册表。请通过 Windows“打开方式 > 选择其他应用 > 始终使用此应用”分别关联 `.sas7bdat` 和 `.xpt`，或由组织的安装包注册文件关联；关联命令必须包含带引号的 `%1`，典型形式为 `"C:\path\SASDataViewer.exe" "%1"`。当前版本采用多实例行为：双击文件会新开一个 Viewer 窗口，不会转交给已经运行的窗口。
 
 然后使用解压后的 `SASDataViewer.exe` 重复上面的真实数据、源文件占用、历史恢复、筛选导出、Reload 和临时目录清理检查。至少还应把 ZIP 复制到一台没有 Python/项目源码的干净 Windows 机器，完整解压后启动一次，确认程序确实独立运行且 `_internal` 依赖完整。
 

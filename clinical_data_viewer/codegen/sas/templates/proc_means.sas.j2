@@ -3,7 +3,11 @@
    from the data available when this SAS program is run. */
 
 options validvarname=any;
+{% if sas_input_format == "xpt" %}
+libname {{ sas_source_library }} xport {{ sas_source_path | sas_string }};
+{% else %}
 libname {{ sas_source_library }} {{ sas_source_directory | sas_string }};
+{% endif %}
 
 data work.{{ work_source }};
     set {{ sas_source_library }}.{{ sas_source_member | sas_name }};

@@ -218,7 +218,11 @@ cde_display <- function(value, digits) {
   formatC(cde_round_half_up(value, digits), format = "f", digits = digits)
 }
 
+{% if input_format == "xpt" %}
+data <- haven::read_xpt({{ source_path | r_string }})
+{% else %}
 data <- haven::read_sas({{ source_path | r_string }})
+{% endif %}
 cde_column_types <- list(
 {% for item in variables_in_order %}  {{ item.name | r_string }} = {{ item.type | r_string }}{% if not loop.last %},{% endif %}{{ '\n' }}{% endfor %}
 )
