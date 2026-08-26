@@ -139,6 +139,7 @@ class ProcMeansBuilder(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("procMeansBuilder")
         self._metadata: DatasetMetadata | None = None
         self._busy = False
         outer_layout = QVBoxLayout(self)
@@ -147,6 +148,7 @@ class ProcMeansBuilder(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
         content = QWidget()
+        content.setObjectName("procMeansBuilderContent")
         layout = QVBoxLayout(content)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)

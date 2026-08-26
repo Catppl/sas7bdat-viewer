@@ -1084,6 +1084,9 @@ class MainWindow(QMainWindow):
             )
             index = self.tabs.addTab(result_tab, "PROC MEANS Result")
             self.tabs.setCurrentIndex(index)
+            # Ensure the shared Variables panel is bound to the result metadata
+            # before the result model starts requesting its first page.
+            self._sync_active_tab()
             result_tab.start()
 
         def failed(message: str, details: str) -> None:

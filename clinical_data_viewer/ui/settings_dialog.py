@@ -19,6 +19,7 @@ from ..settings import PROC_MEANS_COUNT_STATISTICS, PROC_MEANS_STATISTICS, AppSe
 class SettingsDialog(QDialog):
     def __init__(self, settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("settingsDialog")
         self.settings = settings
         self.setWindowTitle("Settings")
         self.resize(470, 610)

@@ -10,10 +10,10 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
 )
 
@@ -30,7 +30,7 @@ class HistoryDialog(QDialog):
         self.history = history
         self.dataset_path = dataset_path
         self.setWindowTitle("Filter History")
-        self.resize(720, 420)
+        self.resize(900, 460)
         layout = QVBoxLayout(self)
         scope_row = QHBoxLayout()
         scope_row.addWidget(QLabel("Show:"))
@@ -41,10 +41,20 @@ class HistoryDialog(QDialog):
         scope_row.addWidget(self.scope)
         scope_row.addStretch(1)
         layout.addLayout(scope_row)
-        self.list = QListWidget()
-        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.list.itemDoubleClicked.connect(lambda _item: self.use_selected())
-        layout.addWidget(self.list)
+        self.table = QTreeWidget()
+        self.table.setObjectName("historyTable")
+        self.table.setColumnCount(3)
+        self.table.setHeaderLabels(["Date / Time", "Dataset", "Filter"])
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setRootIsDecorated(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setUniformRowHeights(True)
+        self.table.setTextElideMode(Qt.ElideRight)
+        self.table.header().resizeSection(0, 160)
+        self.table.header().resizeSection(1, 170)
+        self.table.header().setStretchLastSection(True)
+        self.table.itemDoubleClicked.connect(lambda _item, _column: self.use_selected())
+        layout.addWidget(self.table)
         action_row = QHBoxLayout()
         use_button = QPushButton("Use Condition")
         use_button.clicked.connect(self.use_selected)
@@ -66,26 +76,28 @@ class HistoryDialog(QDialog):
         return self.dataset_path is not None and self.scope.currentIndex() == 0
 
     def refresh(self) -> None:
-        self.list.clear()
+        self.table.clear()
         entries = self.history.list(self.dataset_path if self._current_only() else None)
         for entry in entries:
-            item = QListWidgetItem(
-                f"{entry.executed_at}  |  {entry.dataset_name}\n{entry.where_text}"
+            item = QTreeWidgetItem(
+                [entry.executed_at, entry.dataset_name, entry.where_text]
             )
-            item.setData(Qt.UserRole, entry)
-            item.setToolTip(entry.dataset_path)
-            self.list.addItem(item)
+            item.setData(0, Qt.UserRole, entry)
+            item.setToolTip(0, entry.executed_at)
+            item.setToolTip(1, entry.dataset_path)
+            item.setToolTip(2, entry.where_text)
+            self.table.addTopLevelItem(item)
 
     def use_selected(self) -> None:
-        item = self.list.currentItem()
+        item = self.table.currentItem()
         if item:
-            self.condition_selected.emit(item.data(Qt.UserRole).where_text)
+            self.condition_selected.emit(item.data(0, Qt.UserRole).where_text)
             self.accept()
 
     def delete_selected(self) -> None:
-        item = self.list.currentItem()
+        item = self.table.currentItem()
         if item:
-            self.history.delete(item.data(Qt.UserRole).id)
+            self.history.delete(item.data(0, Qt.UserRole).id)
             self.refresh()
 
     def clear_history(self) -> None:

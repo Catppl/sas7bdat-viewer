@@ -33,6 +33,7 @@ class UiSmokeTests(unittest.TestCase):
         from clinical_data_viewer.temp_manager import TempManager
         from clinical_data_viewer.ui.column_filter_dialog import ColumnFilterDialog
         from clinical_data_viewer.ui.dataset_tab import DatasetTab
+        from clinical_data_viewer.ui.history_dialog import HistoryDialog
         from clinical_data_viewer.ui.main_window import MainWindow
         from clinical_data_viewer.ui.settings_dialog import SettingsDialog
 
@@ -45,9 +46,8 @@ class UiSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manager = TempManager(root / "temp")
-            window = MainWindow(
-                TestSettings(), manager, FilterHistory(root / "history.sqlite")
-            )
+            history = FilterHistory(root / "history.sqlite")
+            window = MainWindow(TestSettings(), manager, history)
             retained = manager.create_dataset_directory()
             (retained / "sentinel").touch()
             window._retain_directory(retained)
@@ -126,6 +126,47 @@ class UiSmokeTests(unittest.TestCase):
                 window.variables_panel.visible_variables(), ["AESER", "USUBJID"]
             )
             self.assertEqual(dataset_tab.visible_columns, ["AESER", "USUBJID"])
+
+            proc_means_metadata = DatasetMetadata(
+                "PROC MEANS Result - adlb",
+                2,
+                (
+                    VariableMetadata("PARAMCD"),
+                    VariableMetadata("ANALYSIS_VARIABLE"),
+                    VariableMetadata("MEAN", kind="numeric"),
+                ),
+                proc_means_analysis_column="ANALYSIS_VARIABLE",
+                proc_means_statistic_keys=(("MEAN", "mean"),),
+            )
+            proc_means_handle = DatasetHandle(
+                root / "PROC MEANS Result - adlb",
+                root / "proc-means-result.tmp",
+                root / "proc-means-result.sqlite",
+                proc_means_metadata,
+                2,
+                True,
+                kind="proc_means",
+            )
+            proc_means_tab = DatasetTab(proc_means_handle, 500)
+            window.tabs.addTab(proc_means_tab, "PROC MEANS Result")
+            window.tabs.setCurrentWidget(proc_means_tab)
+            application.processEvents()
+            self.assertEqual(
+                window.variables_panel.visible_variables(),
+                ["PARAMCD", "ANALYSIS_VARIABLE", "MEAN"],
+            )
+            proc_means_item = window.variables_panel.displayed_tree.topLevelItem(1)
+            proc_means_item.setCheckState(0, Qt.Unchecked)
+            application.processEvents()
+            self.assertEqual(proc_means_tab.visible_columns, ["PARAMCD", "MEAN"])
+            window.variables_panel.select_all.click()
+            application.processEvents()
+            self.assertEqual(
+                proc_means_tab.visible_columns,
+                ["PARAMCD", "ANALYSIS_VARIABLE", "MEAN"],
+            )
+            window.tabs.setCurrentWidget(dataset_tab)
+            application.processEvents()
 
             dataset_tab.show_find()
             self.assertFalse(dataset_tab.find_frame.isHidden())
@@ -318,6 +359,16 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(
                 settings_dialog.settings.proc_means_decimal_offsets["mean"], 4
             )
+            history.add(
+                root / "adlb.sas7bdat", 'PARAMCD = "ALB"'
+            )
+            history_dialog = HistoryDialog(history, root / "adlb.sas7bdat")
+            self.assertEqual(history_dialog.table.columnCount(), 3)
+            self.assertEqual(history_dialog.table.topLevelItemCount(), 1)
+            self.assertEqual(
+                history_dialog.table.topLevelItem(0).text(2), 'PARAMCD = "ALB"'
+            )
+            history_dialog.close()
             numeric_tab.where_editor.setPlainText("AVAL > 1")
             self.assertTrue(numeric_tab.where_editor_is_dirty())
             numeric_tab.apply_filter(

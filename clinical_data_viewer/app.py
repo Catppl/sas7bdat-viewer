@@ -73,23 +73,58 @@ QHeaderView::section {
     padding: 6px;
     font-weight: 600;
 }
-QTableView, QTreeWidget, QPlainTextEdit { background: #ffffff; }
+QDialog {
+    background: #f4f8fc;
+}
+QDialog QLabel#panelTitle { color: #174b73; }
+QScrollArea { background: transparent; border: 0; }
+QGroupBox {
+    background: #f8fbfe;
+    border: 1px solid #bfd4e8;
+    border-radius: 4px;
+    margin-top: 10px;
+    padding: 8px;
+    padding-top: 14px;
+    color: #174b73;
+    font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 9px;
+    padding: 0 4px;
+}
+QTableView, QTableWidget, QTreeWidget, QListWidget, QPlainTextEdit { background: #ffffff; }
 QTableView {
     alternate-background-color: #f8fbfe;
     gridline-color: #dce6ef;
     selection-background-color: #cfe8ff;
     selection-color: #102a43;
 }
+QTableWidget, QTreeWidget, QListWidget {
+    border: 1px solid #bfd4e8;
+    alternate-background-color: #f1f7fd;
+    gridline-color: #dce6ef;
+    selection-background-color: #cfe8ff;
+    selection-color: #102a43;
+}
+QTableWidget::item:hover, QTreeWidget::item:hover, QListWidget::item:hover {
+    background: #e1f0ff;
+}
+QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
+    background: #cfe8ff;
+    color: #102a43;
+}
 QTreeWidget { border: 0; alternate-background-color: #f1f7fd; }
 QTreeWidget::item:hover { background: #e1f0ff; }
 QTreeWidget::item:selected { background: #cfe8ff; color: #102a43; }
-QLineEdit, QPlainTextEdit {
+QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     border: 1px solid #b8cde0;
     border-radius: 3px;
     padding: 4px;
+    background: #ffffff;
     selection-background-color: #b9ddff;
 }
-QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #1684d8; }
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #1684d8; }
 QPushButton {
     background: #ffffff;
     border: 1px solid #a9c1d8;
@@ -131,6 +166,16 @@ QLabel#filterNotice {
     border: 1px solid #ead491;
     color: #6b5600;
     padding: 5px;
+}
+QWidget#procMeansBuilder, QWidget#procMeansBuilderContent {
+    background: #f7fbff;
+}
+QTreeWidget#historyTable::item {
+    min-height: 28px;
+    padding: 3px 5px;
+}
+QTreeWidget#historyTable {
+    border: 1px solid #bfd4e8;
 }
 QLabel#cacheNotice {
     background: #e6f3ff;
