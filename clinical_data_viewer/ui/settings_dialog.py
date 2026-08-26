@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor, QPainter, QPolygon
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -10,10 +13,36 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QSpinBox,
+    QStyle,
+    QStyleOptionSpinBox,
     QVBoxLayout,
 )
 
 from ..settings import PROC_MEANS_COUNT_STATISTICS, PROC_MEANS_STATISTICS, AppSettings
+
+
+class DecimalSpinBox(QSpinBox):
+    """A spin box whose increment/decrement arrows remain visible with QSS."""
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        option = QStyleOptionSpinBox()
+        self.initStyleOption(option)
+        painter = QPainter(self)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#35698f"))
+        for subcontrol, points in (
+            (QStyle.SC_SpinBoxUp, ((0, 3), (-4, -3), (4, -3))),
+            (QStyle.SC_SpinBoxDown, ((0, -3), (-4, 3), (4, 3))),
+        ):
+            rect = self.style().subControlRect(QStyle.CC_SpinBox, option, subcontrol)
+            center = rect.center()
+            painter.drawPolygon(
+                QPolygon(
+                    [QPoint(center.x() + x, center.y() + y) for x, y in points]
+                )
+            )
+        painter.end()
 
 
 class SettingsDialog(QDialog):
@@ -54,9 +83,11 @@ class SettingsDialog(QDialog):
                 integer.setEnabled(False)
                 box_layout.addWidget(integer, row, 2)
             else:
-                decimals = QSpinBox()
+                decimals = DecimalSpinBox()
                 decimals.setRange(0, 4)
                 decimals.setPrefix("+")
+                decimals.setButtonSymbols(QAbstractSpinBox.UpDownArrows)
+                decimals.setMinimumWidth(72)
                 decimals.setValue(settings.proc_means_decimal_offsets.get(key, 0))
                 self.statistic_decimals[key] = decimals
                 box_layout.addWidget(decimals, row, 2)

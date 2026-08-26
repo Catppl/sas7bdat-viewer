@@ -71,6 +71,7 @@ class DataStoreExportTests(unittest.TestCase):
         )
         self.assertEqual(result.filtered_count, 2)
         self.assertEqual(result.rows, (("101-004", 60.0), ("101-001", 45.0)))
+        self.assertEqual(result.source_rows, (4, 1))
 
     def test_export_contains_only_current_filter_columns_and_sort(self) -> None:
         source = self.root / "adae.sas7bdat"

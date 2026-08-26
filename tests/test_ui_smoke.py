@@ -194,6 +194,11 @@ class UiSmokeTests(unittest.TestCase):
             window.analysis_panel.show_builder_tab()
             self.assertEqual(window.analysis_panel.tabs.count(), 1)
             builder.set_dataset(numeric_metadata, "adlb.sas7bdat", "All rows")
+            self.assertEqual(builder.current_filter_text(), "")
+            builder.set_dataset(numeric_metadata, "adlb.sas7bdat", "AVAL > 1")
+            self.assertEqual(builder.current_filter_text(), "")
+            builder.apply_current_filter("AVAL > 1")
+            self.assertEqual(builder.current_filter_text(), "AVAL > 1")
             builder.analysis_variables.editor.setText("aval")
             builder.analysis_variables._add_from_editor()
             builder.by_variables.editor.setText("PARAMCD")
@@ -354,6 +359,9 @@ class UiSmokeTests(unittest.TestCase):
                 window.analysis_panel.statistics_table.item(2, 1).text(), "0.123"
             )
             settings_dialog = SettingsDialog(TestSettings())
+            self.assertGreaterEqual(
+                settings_dialog.statistic_decimals["mean"].minimumWidth(), 72
+            )
             settings_dialog.statistic_decimals["mean"].setValue(4)
             settings_dialog._save()
             self.assertEqual(

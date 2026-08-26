@@ -38,12 +38,14 @@ class DatasetTableModel(QAbstractTableModel):
         )
         self._page_row_warnings: OrderedDict[int, tuple[bool, ...]] = OrderedDict()
         self._page_decimal_bases: OrderedDict[int, tuple[int, ...]] = OrderedDict()
+        self._page_source_rows: OrderedDict[int, tuple[int, ...]] = OrderedDict()
         self._loading_pages: set[int] = set()
         self._variable_by_name = {
             variable.name: variable for variable in metadata.variables
         }
         self.highlighted_columns: set[str] = set()
         self.highlighted_rows: set[int] = set()
+        self.manual_row_highlights: dict[int, QColor] = {}
 
     def rowCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
         return 0 if parent.isValid() else self.filtered_count
@@ -104,6 +106,9 @@ class DatasetTableModel(QAbstractTableModel):
             and self.columns[index.column()] in self.highlighted_columns
         ):
             return QColor("#fff2b2")
+        manual = self.manual_highlight_color(index.row())
+        if manual is not None:
+            return manual
         return None
 
     def _display_value(
@@ -186,6 +191,7 @@ class DatasetTableModel(QAbstractTableModel):
         self._page_highlights.clear()
         self._page_row_warnings.clear()
         self._page_decimal_bases.clear()
+        self._page_source_rows.clear()
         self._loading_pages.clear()
         self.filtered_count = (
             self.metadata.row_count if filtered_count is None else filtered_count
@@ -202,6 +208,7 @@ class DatasetTableModel(QAbstractTableModel):
         cell_highlights: tuple[frozenset[str], ...] = (),
         row_warnings: tuple[bool, ...] = (),
         row_decimal_bases: tuple[int, ...] = (),
+        source_rows: tuple[int, ...] = (),
     ) -> None:
         self._loading_pages.discard(offset)
         if filtered_count != self.filtered_count:
@@ -211,6 +218,7 @@ class DatasetTableModel(QAbstractTableModel):
             self._page_highlights.clear()
             self._page_row_warnings.clear()
             self._page_decimal_bases.clear()
+            self._page_source_rows.clear()
             self._loading_pages.clear()
             self.endResetModel()
         if not rows:
@@ -223,12 +231,16 @@ class DatasetTableModel(QAbstractTableModel):
         self._page_decimal_bases[offset] = row_decimal_bases or tuple(
             0 for _row in rows
         )
+        self._page_source_rows[offset] = source_rows or tuple(
+            offset + index + 1 for index, _row in enumerate(rows)
+        )
         self._pages.move_to_end(offset)
         while len(self._pages) > self.max_cached_pages:
             expired, _rows = self._pages.popitem(last=False)
             self._page_highlights.pop(expired, None)
             self._page_row_warnings.pop(expired, None)
             self._page_decimal_bases.pop(expired, None)
+            self._page_source_rows.pop(expired, None)
         bottom = min(offset + len(rows), self.filtered_count) - 1
         if bottom >= offset and self.columns:
             self.dataChanged.emit(
@@ -252,6 +264,7 @@ class DatasetTableModel(QAbstractTableModel):
             self._page_highlights.clear()
             self._page_row_warnings.clear()
             self._page_decimal_bases.clear()
+            self._page_source_rows.clear()
             self._loading_pages.clear()
             self.endResetModel()
 
@@ -269,6 +282,75 @@ class DatasetTableModel(QAbstractTableModel):
         values = self._page_row_warnings.get(offset, ())
         local = row - offset
         return local < len(values) and values[local]
+
+    def source_row_id(self, row: int) -> int | None:
+        offset = self._page_offset(row)
+        source_rows = self._page_source_rows.get(offset, ())
+        local = row - offset
+        return int(source_rows[local]) if 0 <= local < len(source_rows) else None
+
+    def manual_highlight_color(self, row: int) -> QColor | None:
+        source_row = self.source_row_id(row)
+        return None if source_row is None else self.manual_row_highlights.get(source_row)
+
+    def set_manual_row_highlight(self, rows: set[int], color: QColor) -> None:
+        source_rows = {
+            source_row
+            for row in rows
+            if (source_row := self.source_row_id(row)) is not None
+        }
+        if not source_rows:
+            return
+        changed = {
+            row
+            for offset, page_source_rows in self._page_source_rows.items()
+            for row, source_row in enumerate(page_source_rows, start=offset)
+            if source_row in source_rows
+        }
+        for source_row in source_rows:
+            self.manual_row_highlights[source_row] = color
+        self._emit_background_changed(changed)
+
+    def clear_manual_row_highlight(self, rows: set[int]) -> None:
+        source_rows = {
+            source_row
+            for row in rows
+            if (source_row := self.source_row_id(row)) is not None
+        }
+        if not source_rows:
+            return
+        changed = {
+            row
+            for offset, page_source_rows in self._page_source_rows.items()
+            for row, source_row in enumerate(page_source_rows, start=offset)
+            if source_row in source_rows and source_row in self.manual_row_highlights
+        }
+        for source_row in source_rows:
+            self.manual_row_highlights.pop(source_row, None)
+        self._emit_background_changed(changed)
+
+    def clear_all_manual_highlights(self) -> None:
+        if not self.manual_row_highlights:
+            return
+        highlighted = set(self.manual_row_highlights)
+        self.manual_row_highlights.clear()
+        changed = {
+            row
+            for offset, page_source_rows in self._page_source_rows.items()
+            for row, source_row in enumerate(page_source_rows, start=offset)
+            if source_row in highlighted
+        }
+        self._emit_background_changed(changed)
+
+    def _emit_background_changed(self, rows: set[int]) -> None:
+        if not self.columns:
+            return
+        for row in sorted(rows):
+            self.dataChanged.emit(
+                self.index(row, 0),
+                self.index(row, len(self.columns) - 1),
+                [Qt.BackgroundRole],
+            )
 
     def set_highlighted_cells(self, rows: set[int], columns: set[str]) -> None:
         rows = {row for row in rows if 0 <= row < self.filtered_count}

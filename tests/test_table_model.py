@@ -148,6 +148,45 @@ class TableModelTests(unittest.TestCase):
         self.assertEqual(model.data(model.index(0, 1)), "1.55")
         self.assertEqual(model.data(model.index(1, 1)), "10.1230")
 
+    def test_manual_row_highlights_follow_source_rows_after_resort(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.table_model import DatasetTableModel
+
+        _application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "source",
+            2,
+            (VariableMetadata("USUBJID"), VariableMetadata("AVAL", kind="numeric")),
+        )
+        model = DatasetTableModel(metadata, ["USUBJID", "AVAL"], page_size=10)
+        purple = QColor("#e8ddff")
+        model.set_page(
+            0,
+            (("S1", 1.0), ("S2", 2.0)),
+            2,
+            source_rows=(11, 22),
+        )
+        model.set_manual_row_highlight({1}, purple)
+        self.assertEqual(
+            model.data(model.index(1, 0), Qt.BackgroundRole).name(), "#e8ddff"
+        )
+        model.set_page(
+            0,
+            (("S2", 2.0), ("S1", 1.0)),
+            2,
+            source_rows=(22, 11),
+        )
+        self.assertEqual(
+            model.data(model.index(0, 0), Qt.BackgroundRole).name(), "#e8ddff"
+        )
+        model.clear_manual_row_highlight({0})
+        self.assertIsNone(model.data(model.index(0, 0), Qt.BackgroundRole))
+
     def test_proc_means_builder_rejects_unknown_and_character_analysis_variables(
         self,
     ) -> None:

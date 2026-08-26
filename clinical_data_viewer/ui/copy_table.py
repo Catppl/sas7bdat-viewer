@@ -13,6 +13,11 @@ from PySide6.QtWidgets import (
 
 COMPARISON_HIGHLIGHT = QColor("#fff2b2")
 WARNING_HIGHLIGHT = QColor("#ffd9d9")
+MANUAL_HIGHLIGHTS = {
+    "purple": QColor("#e8ddff"),
+    "green": QColor("#dff3e5"),
+    "orange": QColor("#ffe4c2"),
+}
 
 
 class ComparisonHighlightDelegate(QStyledItemDelegate):
@@ -57,6 +62,11 @@ class ComparisonHighlightDelegate(QStyledItemDelegate):
             return WARNING_HIGHLIGHT
         if ComparisonHighlightDelegate.is_comparison_cell(index):
             return COMPARISON_HIGHLIGHT
+        manual_color = getattr(model, "manual_highlight_color", lambda _row: None)(
+            index.row()
+        )
+        if manual_color is not None:
+            return manual_color
         return None
 
     def initStyleOption(self, option, index) -> None:
@@ -88,6 +98,9 @@ class CopyTableView(QTableView):
     compare_rows_requested = Signal(object)
     clear_comparison_requested = Signal()
     drilldown_requested = Signal(object)
+    manual_highlight_requested = Signal(object, str)
+    clear_manual_highlight_requested = Signal(object)
+    clear_all_manual_highlights_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -175,6 +188,36 @@ class CopyTableView(QTableView):
         clear_compare = QAction("Clear Row Comparison", self)
         clear_compare.triggered.connect(self.clear_comparison_requested)
         menu.addAction(clear_compare)
+        if bool(self.property("allowManualHighlights")):
+            menu.addSeparator()
+            highlights = QMenu("Highlight Rows", menu)
+            highlights.setEnabled(bool(selected_rows))
+            for key, label in (
+                ("purple", "Light Purple"),
+                ("green", "Light Green"),
+                ("orange", "Light Orange"),
+            ):
+                action = QAction(label, self)
+                action.triggered.connect(
+                    lambda _checked=False, color=key: self.manual_highlight_requested.emit(
+                        self.selected_row_numbers(), color
+                    )
+                )
+                highlights.addAction(action)
+            menu.addMenu(highlights)
+            clear_highlight = QAction("Clear Highlight for Selected Rows", self)
+            clear_highlight.setEnabled(bool(selected_rows))
+            clear_highlight.triggered.connect(
+                lambda: self.clear_manual_highlight_requested.emit(
+                    self.selected_row_numbers()
+                )
+            )
+            menu.addAction(clear_highlight)
+            clear_all_highlights = QAction("Clear All Row Highlights", self)
+            clear_all_highlights.triggered.connect(
+                self.clear_all_manual_highlights_requested
+            )
+            menu.addAction(clear_all_highlights)
         menu.exec(self.viewport().mapToGlobal(position))
 
     def _select_context_row(self) -> None:

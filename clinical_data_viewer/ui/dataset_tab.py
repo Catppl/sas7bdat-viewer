@@ -32,7 +32,7 @@ from ..column_filters import ColumnFilterSpec, combine_filters, compose_where_te
 from ..domain import DatasetHandle, FindResult, SortSpec
 from ..filter_engine import CompiledFilter
 from ..table_model import DatasetTableModel
-from .copy_table import CopyTableView
+from .copy_table import MANUAL_HIGHLIGHTS, CopyTableView
 from .filter_header import FilterHeaderView
 
 
@@ -254,6 +254,7 @@ class DatasetTab(QWidget):
         self.table = CopyTableView()
         self.table.setProperty("pairedDataset", bool(handle.metadata.pair_id_column))
         self.table.setProperty("allowProcMeans", handle.kind == "sas")
+        self.table.setProperty("allowManualHighlights", handle.kind != "compare")
         self.filter_header = FilterHeaderView(self.table)
         self.table.setHorizontalHeader(self.filter_header)
         self.filter_header.setSectionsMovable(False)
@@ -272,6 +273,13 @@ class DatasetTab(QWidget):
         self.table.settings_requested.connect(self.settings_requested)
         self.table.compare_rows_requested.connect(self.compare_rows_requested)
         self.table.clear_comparison_requested.connect(self.clear_comparison_requested)
+        self.table.manual_highlight_requested.connect(self._set_manual_row_highlight)
+        self.table.clear_manual_highlight_requested.connect(
+            self._clear_manual_row_highlight
+        )
+        self.table.clear_all_manual_highlights_requested.connect(
+            lambda: self.model.clear_all_manual_highlights()
+        )
         self.table.doubleClicked.connect(self._cell_double_clicked)
         self.table.drilldown_requested.connect(self._cell_double_clicked)
         layout.addWidget(self.table, 1)
@@ -779,6 +787,14 @@ class DatasetTab(QWidget):
     def clear_comparison_highlights(self) -> None:
         self._compared_rows = None
         self.model.clear_highlights()
+
+    def _set_manual_row_highlight(self, rows: list[int], color_name: str) -> None:
+        color = MANUAL_HIGHLIGHTS.get(color_name)
+        if color is not None:
+            self.model.set_manual_row_highlight(set(rows), color)
+
+    def _clear_manual_row_highlight(self, rows: list[int]) -> None:
+        self.model.clear_manual_row_highlight(set(rows))
 
     def _selection_changed(self) -> None:
         if self._compared_rows is None:

@@ -670,6 +670,7 @@ class MainWindow(QMainWindow):
                 page.cell_highlights,
                 page.row_warnings,
                 page.row_decimal_bases,
+                page.source_rows,
             )
             if offset == 0 and tab.pending_history_text:
                 self.history.add(tab.handle.source_path, tab.pending_history_text)
@@ -989,13 +990,21 @@ class MainWindow(QMainWindow):
                 "Select a fully loaded SAS source dataset before using the Builder.",
             )
             return None
+        filter_text = self.analysis_panel.builder.current_filter_text()
+        try:
+            compiled_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                filter_text
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, action_title, str(error))
+            return None
         config = ProcMeansConfig(
             selection.analysis_variables,
             selection.by_variables,
             selection.class_variables,
             selection.statistics,
-            tab.compiled_filter,
-            tab.current_where_text(),
+            compiled_filter,
+            filter_text,
             selection.decimal_group_variables,
             tuple(self.settings.proc_means_decimal_offsets.items()),
             self.settings.proc_means_confidence,
@@ -1061,6 +1070,21 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _run_proc_means_builder(self, selection) -> None:
+        active_tab = self.current_dataset_tab()
+        if active_tab is None or active_tab.handle.kind != "sas":
+            return
+        current_filter = active_tab.current_where_text()
+        builder_filter = self.analysis_panel.builder.current_filter_text()
+        if not builder_filter or builder_filter != current_filter:
+            response = QMessageBox.question(
+                self,
+                "PROC MEANS Builder",
+                "Apply the current dataset filter to PROC MEANS?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if response == QMessageBox.Yes:
+                self.analysis_panel.builder.apply_current_filter(current_filter)
         context = self._proc_means_builder_context(selection, "PROC MEANS Builder")
         if context is None:
             return
@@ -1523,7 +1547,7 @@ class MainWindow(QMainWindow):
         self.analysis_panel.builder.set_dataset(
             builder_source.handle.metadata if builder_source else None,
             str(builder_source.handle.source_path) if builder_source else "",
-            builder_source.filter_description() if builder_source else "",
+            builder_source.current_where_text() if builder_source else "",
         )
         self._refresh_compare_datasets()
         self._refresh_status(tab)
@@ -1580,7 +1604,7 @@ class MainWindow(QMainWindow):
             self.analysis_panel.builder.set_dataset(
                 tab.handle.metadata,
                 str(tab.handle.source_path),
-                tab.filter_description(),
+                tab.current_where_text(),
             )
 
     def _submit(

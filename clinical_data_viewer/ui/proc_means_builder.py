@@ -141,6 +141,7 @@ class ProcMeansBuilder(QWidget):
         super().__init__(parent)
         self.setObjectName("procMeansBuilder")
         self._metadata: DatasetMetadata | None = None
+        self._filter_text = ""
         self._busy = False
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -233,6 +234,7 @@ class ProcMeansBuilder(QWidget):
     ) -> None:
         if metadata is not None and metadata is not self._metadata:
             self._metadata = metadata
+            self._filter_text = self._normalized_filter_text(filter_text)
             for editor in (
                 self.analysis_variables,
                 self.by_variables,
@@ -244,7 +246,9 @@ class ProcMeansBuilder(QWidget):
             if metadata
             else "Select a fully loaded source dataset."
         )
-        self.filter_label.setText(filter_text or "All rows")
+        self.filter_label.setText(
+            f"WHERE {self._filter_text}" if self._filter_text else "All rows"
+        )
         available = metadata is not None and not self._busy
         self.run_button.setEnabled(available)
         self.sas_code_button.setEnabled(available)
@@ -256,6 +260,22 @@ class ProcMeansBuilder(QWidget):
         ):
             editor.setEnabled(available)
         self.decimal_groups.setEnabled(available)
+
+    def current_filter_text(self) -> str:
+        """Return the Builder's saved source-filter snapshot."""
+        return self._filter_text
+
+    def apply_current_filter(self, filter_text: str) -> None:
+        """Replace the saved snapshot after the user explicitly confirms it."""
+        self._filter_text = self._normalized_filter_text(filter_text)
+        self.filter_label.setText(
+            f"WHERE {self._filter_text}" if self._filter_text else "All rows"
+        )
+
+    @staticmethod
+    def _normalized_filter_text(filter_text: str) -> str:
+        text = filter_text.strip()
+        return "" if text.casefold() == "all rows" else text
 
     def set_default_statistics(self, statistics: list[str]) -> None:
         selected = set(statistics)

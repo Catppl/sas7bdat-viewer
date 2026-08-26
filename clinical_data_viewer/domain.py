@@ -60,6 +60,7 @@ class PageResult:
     cell_highlights: tuple[frozenset[str], ...] = ()
     row_warnings: tuple[bool, ...] = ()
     row_decimal_bases: tuple[int, ...] = ()
+    source_rows: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

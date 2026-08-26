@@ -98,7 +98,9 @@ class DataStore:
                         compiled_filter.parameters,
                     ).fetchone()[0]
                 )
-            select = ", ".join(quote_identifier(column) for column in selected)
+            select = "_source_row, " + ", ".join(
+                quote_identifier(column) for column in selected
+            )
             include_highlights = bool(metadata.diff_columns_column)
             if include_highlights:
                 select += ", " + quote_identifier(metadata.diff_columns_column or "")
@@ -113,15 +115,17 @@ class DataStore:
                 sql, (*compiled_filter.parameters, int(limit), int(offset))
             ).fetchall()
         highlights: tuple[frozenset[str], ...] = ()
+        source_rows = tuple(int(row[0]) for row in raw_rows)
+        data_rows = tuple(tuple(row[1:]) for row in raw_rows)
         hidden_count = (
             int(include_highlights)
             + int(include_row_warnings)
             + int(include_decimal_bases)
         )
         if hidden_count:
-            rows = tuple(tuple(row[:-hidden_count]) for row in raw_rows)
+            rows = tuple(tuple(row[:-hidden_count]) for row in data_rows)
         else:
-            rows = tuple(tuple(row) for row in raw_rows)
+            rows = data_rows
         if include_highlights:
             highlight_index = -(
                 1 + int(include_row_warnings) + int(include_decimal_bases)
@@ -140,7 +144,12 @@ class DataStore:
             else ()
         )
         return PageResult(
-            rows, filtered_count, highlights, row_warnings, row_decimal_bases
+            rows,
+            filtered_count,
+            highlights,
+            row_warnings,
+            row_decimal_bases,
+            source_rows,
         )
 
     def source_row_view_index(

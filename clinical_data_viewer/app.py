@@ -125,6 +125,26 @@ QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     selection-background-color: #b9ddff;
 }
 QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #1684d8; }
+QSpinBox, QDoubleSpinBox { min-height: 24px; padding-right: 22px; }
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    border-left: 1px solid #b8cde0;
+    border-bottom: 1px solid #b8cde0;
+    background: #edf5fc;
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    border-left: 1px solid #b8cde0;
+    background: #edf5fc;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #dceeff;
+}
 QPushButton {
     background: #ffffff;
     border: 1px solid #a9c1d8;
