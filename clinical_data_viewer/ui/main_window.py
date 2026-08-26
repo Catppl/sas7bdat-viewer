@@ -1482,7 +1482,7 @@ class MainWindow(QMainWindow):
         self._ae_table_input_tabs = {source_tab}
         if population_tab is not None:
             self._ae_table_input_tabs.add(population_tab)
-        builder.set_busy(True, "Resolving AE treatment levels…")
+        builder.set_busy(True, "Generating AE SAS code…")
 
         def completed(code: str) -> None:
             self._ae_table_input_tabs.clear()
@@ -1499,11 +1499,8 @@ class MainWindow(QMainWindow):
             self._show_error("AE SAS Code Generator Failed", message, details)
 
         def generate(_worker: Worker) -> str:
-            levels = self.ae_table_engine.resolve_treatment_levels(
-                source_handle, config, population_handle
-            )
             configuration = build_ae_table_configuration(
-                source_handle, config, population_handle, levels
+                source_handle, config, population_handle, ()
             )
             return self.sas_ae_table_generator.generate(configuration)
 

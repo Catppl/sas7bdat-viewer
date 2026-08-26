@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import copy
 import unittest
+from pathlib import Path
 
 from clinical_data_viewer.codegen.sas import SasAeTableGenerator
 
@@ -56,11 +56,13 @@ class AeSasGeneratorTests(unittest.TestCase):
     def test_runtime_sort_and_dynamic_columns(self):
         code = SasAeTableGenerator().generate(configuration())
         self.assertIn("proc sort data=soc_total out=soc_order", code)
-        self.assertIn("descending freq soc", code)
-        self.assertIn("descending p.freq, p.pt", code)
+        self.assertIn("descending freq soc_key soc", code)
+        self.assertIn("descending p.freq, p.pt_key, p.pt", code)
         self.assertIn("as col&_i", code)
         self.assertNotIn("resolved_hierarchy", code)
         self.assertIn("count(distinct a._subjid)", code)
+        self.assertNotIn("vvalue(", code)
+        self.assertIn("select cats('\"'", code)
 
     def test_population_filter_is_independent(self):
         code = SasAeTableGenerator().generate(configuration(denominator="population"))
@@ -84,6 +86,26 @@ class AeSasGeneratorTests(unittest.TestCase):
         code = SasAeTableGenerator().generate(cfg)
         self.assertIn("libname analysis xport", code)
         self.assertIn("_soc = 'Uncoded'", code)
+
+    def test_numeric_treatment_uses_raw_best_format_and_case_keys(self):
+        cfg = configuration(treatment_type="numeric")
+        code = SasAeTableGenerator().generate(cfg)
+        self.assertIn("_trt = strip(put(TRT01A, best32.));", code)
+        self.assertIn("if missing(TRT01A) then do;", code)
+        self.assertIn("_trt_key = lowcase(_trt);", code)
+        self.assertNotIn("vvalue(TRT01A)", code)
+
+    def test_runtime_labels_and_total_column(self):
+        code = SasAeTableGenerator().generate(configuration())
+        self.assertIn("into :col_label1-", code)
+        self.assertIn("label col&_i = &&col_label&_i;", code)
+        self.assertIn("label col%eval(&ntrt + 1) = 'Total n (%)';", code)
+
+    def test_codegen_path_does_not_resolve_python_treatment_levels(self):
+        main_window = Path(__file__).parents[1] / "clinical_data_viewer" / "ui" / "main_window.py"
+        source = main_window.read_text(encoding="utf-8")
+        section = source.split("def _generate_ae_table_sas_code", 1)[1].split("def _rule_based_builder_context", 1)[0]
+        self.assertNotIn("resolve_treatment_levels", section)
 
     def test_rejects_merge_and_invalid_numerator(self):
         cfg = configuration(); cfg["input"]["kind"] = "merge"
