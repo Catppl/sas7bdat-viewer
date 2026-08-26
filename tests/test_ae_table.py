@@ -58,6 +58,24 @@ class AeTableTests(unittest.TestCase):
             self.assertEqual(configuration["hierarchy"]["missing"], {"policy": "uncoded", "label": "Uncoded"})
             self.assertEqual(configuration["resolved_hierarchy"][1]["soc"], "GI")
 
+    def test_uncoded_numerator_drilldown_matches_missing_and_literal(self):
+        variables = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
+        rows = (("S1", "A", None, "Headache"), ("S2", "A", "Uncoded", "Headache"),
+                ("S3", "A", "GI", None), ("S4", "A", "GI", "Uncoded"))
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); source = handle(root, "adae", variables, rows)
+            config = AeTableConfig("SOC", "PT", "TRT", hierarchy_missing_policy="uncoded")
+            for cell, expected_subjects in (
+                (AeTableCell("pt", "Uncoded", "Headache", "A"), {"S1", "S2"}),
+                (AeTableCell("pt", "GI", "Uncoded", "A"), {"S3", "S4"}),
+            ):
+                sql, params = build_cell_filter(source.metadata, config, cell)
+                with closing(sqlite3.connect(source.database_path)) as connection:
+                    found = {row[0] for row in connection.execute(
+                        f'SELECT "USUBJID" FROM dataset WHERE {sql}', params
+                    )}
+                self.assertEqual(found, expected_subjects)
+
     def test_denominator_drilldown_never_contains_soc_pt(self):
         source_vars = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
         pop_vars = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SAFFL"))

@@ -6,10 +6,20 @@ from contextlib import closing
 
 from ..categorical.drilldown import _and, _exact_clause, _missing_sql, _field
 from ..domain import DatasetHandle
+from ..filter_engine import quote_identifier
 
 
 class AeTableCell:
     def __init__(self, row_type, soc, pt, treatment): self.row_type, self.soc, self.pt, self.treatment = row_type, soc, pt, treatment
+
+
+def _hierarchy_clause(metadata, variable_name: str, value: object, config):
+    """Match the engine's merged Uncoded level back to source values."""
+    variable = _field(metadata, variable_name)
+    if config.hierarchy_missing_policy == "uncoded" and value == "Uncoded":
+        # The engine maps missing and the literal value Uncoded to one level.
+        return f"({_missing_sql(variable.name, variable.kind, missing=True)} OR {quote_identifier(variable.name)} = ?)", ("Uncoded",)
+    return _exact_clause(variable, value)
 
 
 def lookup_cell(result: DatasetHandle, result_source_row: int, column_name: str):
@@ -32,9 +42,9 @@ def build_cell_filter(metadata, config, cell, *, denominator=False):
     # those variables).
     if not denominator:
         if cell.soc is not None:
-            clauses.append(_exact_clause(_field(metadata, config.soc_variable), cell.soc))
+            clauses.append(_hierarchy_clause(metadata, config.soc_variable, cell.soc, config))
         if cell.pt is not None:
-            clauses.append(_exact_clause(_field(metadata, config.pt_variable), cell.pt))
+            clauses.append(_hierarchy_clause(metadata, config.pt_variable, cell.pt, config))
     return _and(*clauses)
 
 
