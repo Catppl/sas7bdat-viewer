@@ -274,7 +274,7 @@ Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以�
 
 支持 `Population N (ADSL)` 和 `Same-universe N` 两种分母，Population WHERE 与 AE Dataset Filter 独立；可选择 Total、Any AE 行和 0–4 位百分比。SOC/PT 按 Total 频数降序、同频时按字母序排列。Subject 计数变量固定为 `USUBJID`。缺失 SOC/PT 默认排除，也可以选择映射为 `Uncoded`；缺失 treatment 会阻止计算。
 
-成功运行后会生成宽表 `AE Table Result` Tab，并在同一临时目录保存 `dataset.sqlite`、`ae_table_config.json` v1 和权威 long result。JSON 中的 `sort` 是可复用的业务 contract：未来生成器应对新数据重新计算 SOC/PT 频数并按该规则排序；`resolved_hierarchy` 只记录本次 Python reference run 的行快照，用于审计、调试和验证，不是未来生成器的固定排序输入。Long Result 保存显式 `TRT_ORDER`，并按 `ROW_ORDER, TRT_ORDER` 展示，避免依赖 SQLite 插入顺序。可用 `View > Open AE Table Long Result` 打开长表；双击 Any AE、SOC 或 PT 的 `n (%)` 单元格可钻取 Numerator Records、Numerator Subjects 或 Denominator Subjects。AE 结果支持现有分页、WHERE、排序、变量选择、复制和 CSV 导出，Merge Result 可以作为 Python AE source；本阶段暂不提供 AE SAS/R Generator。
+成功运行后会生成宽表 `AE Table Result` Tab，并在同一临时目录保存 `dataset.sqlite`、`ae_table_config.json` v1 和权威 long result。JSON 中的 `sort` 是可复用的业务 contract：生成的 AE SAS code 会在每次运行时重新计算 SOC/PT 频数并按该规则排序；`resolved_hierarchy` 只记录本次 Python reference run 的行快照，用于审计、调试和验证，不是生成器的固定排序输入。Long Result 保存显式 `TRT_ORDER`，并按 `ROW_ORDER, TRT_ORDER` 展示，避免依赖 SQLite 插入顺序。可用 `View > Open AE Table Long Result` 打开长表；双击 Any AE、SOC 或 PT 的 `n (%)` 单元格可钻取 Numerator Records、Numerator Subjects 或 Denominator Subjects。AE 结果支持现有分页、WHERE、排序、变量选择、复制和 CSV 导出，Merge Result 可以作为 Python AE source；真实 SAS source 可在 Builder 中使用 `SAS Code Generator…`，Merge source 暂不支持 AE SAS code generation。
 
 ## Rule-based Table 模块
 

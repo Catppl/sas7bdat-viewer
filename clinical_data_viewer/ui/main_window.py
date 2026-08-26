@@ -31,7 +31,7 @@ from ..categorical import (
     CategoricalLongResultBuilder,
     DenominatorConfig,
 )
-from ..ae_table import AeTableConfig, AeTableDenominator, AeTableEngine, AeTableLongResultBuilder
+from ..ae_table import AeTableConfig, AeTableDenominator, AeTableEngine, AeTableLongResultBuilder, build_ae_table_configuration
 from ..ae_table.drilldown import build_cell_filter as build_ae_cell_filter, lookup_cell as lookup_ae_cell
 from ..categorical.drilldown import (
     CategoricalQueryBuilder,
@@ -41,7 +41,7 @@ from ..categorical.drilldown import (
 )
 from ..codegen import build_proc_means_configuration
 from ..codegen.r import RProcMeansGenerator
-from ..codegen.sas import SasProcMeansGenerator, SasRuleBasedGenerator
+from ..codegen.sas import SasAeTableGenerator, SasProcMeansGenerator, SasRuleBasedGenerator
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
@@ -170,6 +170,7 @@ class MainWindow(QMainWindow):
         self.proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
         self.sas_proc_means_generator = SasProcMeansGenerator()
         self.sas_rule_based_generator = SasRuleBasedGenerator()
+        self.sas_ae_table_generator = SasAeTableGenerator()
         self.r_proc_means_generator = RProcMeansGenerator()
         self.store = DataStore()
         self.exporter = CsvExporter()
@@ -430,6 +431,9 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.ae_table_builder.run_requested.connect(
             self._run_ae_table_builder
+        )
+        self.analysis_panel.ae_table_builder.sas_code_requested.connect(
+            self._generate_ae_table_sas_code
         )
         self.analysis_panel.ae_table_builder.validation_error.connect(
             lambda message: QMessageBox.warning(self, "AE Table", message)
@@ -1463,6 +1467,47 @@ class MainWindow(QMainWindow):
         def failed(message, details):
             self._ae_table_input_tabs.clear(); builder.set_busy(False, "AE Table failed."); self._show_error("AE Table Failed", message, details)
         self._submit(builder, lambda worker: self.ae_table_engine.run(source_handle, config, pop_handle, worker.report), completed, failed)
+
+    def _generate_ae_table_sas_code(self, selection: AeTableBuilderSelection) -> None:
+        """Generate AE SAS from the current Builder snapshot without running a table."""
+        context = self._ae_table_context(selection)
+        if context is None:
+            return
+        source_tab, population_tab, config = context
+        if source_tab.handle.kind != "sas":
+            return
+        source_handle = source_tab.handle
+        population_handle = population_tab.handle if population_tab else None
+        builder = self.analysis_panel.ae_table_builder
+        self._ae_table_input_tabs = {source_tab}
+        if population_tab is not None:
+            self._ae_table_input_tabs.add(population_tab)
+        builder.set_busy(True, "Resolving AE treatment levels…")
+
+        def completed(code: str) -> None:
+            self._ae_table_input_tabs.clear()
+            builder.set_busy(False, "SAS code generated.")
+            safe_name = "".join(
+                character if character.isalnum() or character in {"-", "_"} else "_"
+                for character in source_handle.metadata.name
+            ).strip("_").lower() or "dataset"
+            SasCodeDialog(code, str(source_handle.source_path), f"{safe_name}_ae_soc_pt.sas", self).exec()
+
+        def failed(message: str, details: str) -> None:
+            self._ae_table_input_tabs.clear()
+            builder.set_busy(False, "SAS Code Generator failed.")
+            self._show_error("AE SAS Code Generator Failed", message, details)
+
+        def generate(_worker: Worker) -> str:
+            levels = self.ae_table_engine.resolve_treatment_levels(
+                source_handle, config, population_handle
+            )
+            configuration = build_ae_table_configuration(
+                source_handle, config, population_handle, levels
+            )
+            return self.sas_ae_table_generator.generate(configuration)
+
+        self._submit(builder, generate, completed, failed)
 
     def _rule_based_builder_context(
         self, selection: RuleBasedBuilderSelection

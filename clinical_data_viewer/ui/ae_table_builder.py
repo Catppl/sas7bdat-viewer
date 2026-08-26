@@ -29,6 +29,7 @@ class AeTableBuilderSelection:
 
 class AeTableBuilder(QWidget):
     run_requested = Signal(object)
+    sas_code_requested = Signal(object)
     validation_error = Signal(str)
     browse_adsl_requested = Signal()
 
@@ -38,6 +39,7 @@ class AeTableBuilder(QWidget):
         self._source_filter_snapshot = ""
         self._filter_text = ""
         self._busy = False
+        self._source_kind = "sas"
         layout = QVBoxLayout(self); layout.setContentsMargins(6, 6, 6, 6)
         source = QGroupBox("Source"); form = QFormLayout(source)
         self.source_label = QLabel("Select a fully loaded source dataset."); self.source_label.setWordWrap(True)
@@ -65,10 +67,13 @@ class AeTableBuilder(QWidget):
         self.percent_digits = QSpinBox(); self.percent_digits.setRange(0, 4); self.percent_digits.setValue(1); of.addRow("Percent digits", self.percent_digits)
         layout.addWidget(options); layout.addStretch(1)
         self.status = QLabel(""); self.status.setWordWrap(True); layout.addWidget(self.status)
-        buttons = QHBoxLayout(); clear = QPushButton("Clear"); clear.clicked.connect(self.clear); buttons.addWidget(clear); self.run_button = QPushButton("Run AE Table"); self.run_button.setDefault(True); self.run_button.clicked.connect(self._run); buttons.addWidget(self.run_button, 1); layout.addLayout(buttons)
+        buttons = QHBoxLayout(); clear = QPushButton("Clear"); clear.clicked.connect(self.clear); buttons.addWidget(clear)
+        self.sas_code_button = QPushButton("SAS Code Generator…"); self.sas_code_button.clicked.connect(self._generate_sas_code); buttons.addWidget(self.sas_code_button)
+        self.run_button = QPushButton("Run AE Table"); self.run_button.setDefault(True); self.run_button.clicked.connect(self._run); buttons.addWidget(self.run_button, 1); layout.addLayout(buttons)
         self._sync_denominator(); self.set_dataset(None, "")
 
     def set_dataset(self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = "", source_kind: str = "sas"):
+        self._source_kind = source_kind
         if metadata is not None and metadata is not self._metadata:
             self._metadata = metadata; self._filter_text = filter_text.strip(); self._source_filter_snapshot = self._filter_text
             self.dataset_filter.setPlainText(self._filter_text)
@@ -80,6 +85,8 @@ class AeTableBuilder(QWidget):
                     if index >= 0: combo.setCurrentIndex(index); break
         self.source_label.setText(f"Source: {source_text}" if metadata else "Select a fully loaded source dataset.")
         enabled = metadata is not None and not self._busy; self.setEnabled(enabled or self._busy); self.run_button.setEnabled(enabled)
+        self.sas_code_button.setEnabled(enabled and source_kind == "sas")
+        self.sas_code_button.setToolTip("SAS code generation for merged AE sources is not available yet." if source_kind == "merge" else "Generate reusable SAS code from the current AE configuration.")
 
     def inherit_current_filter(self, text: str):
         if self._filter_text == self._source_filter_snapshot:
@@ -104,10 +111,19 @@ class AeTableBuilder(QWidget):
     def _sync_denominator(self):
         population = self.denominator_type.currentData() == "population"; self.adsl.setEnabled(population and not self._busy); self.population_where.setEnabled(population and not self._busy)
     def set_busy(self, busy: bool, message: str = ""):
-        self._busy = busy; self.run_button.setEnabled(not busy and self._metadata is not None); self._sync_denominator(); self.status.setText(message)
+        self._busy = busy; available = not busy and self._metadata is not None; self.run_button.setEnabled(available); self.sas_code_button.setEnabled(available and self._source_kind == "sas"); self._sync_denominator(); self.status.setText(message)
     def clear(self):
         self.dataset_filter.clear(); self.population_where.clear(); self.status.clear()
-    def _run(self):
+    def _selection(self):
         if self._metadata is None: return
         population = self.adsl.currentData() if self.denominator_type.currentData() == "population" else None
-        self.run_requested.emit(AeTableBuilderSelection(self._filter_text, self.treatment.currentText(), self.soc.currentText(), self.pt.currentText(), self.denominator_type.currentData(), population, self.population_where.text().strip(), self.include_any.isChecked(), self.any_label.text().strip() or "Any AE", self.include_total.isChecked(), self.percent_digits.value(), self.missing_policy.currentData()))
+        return AeTableBuilderSelection(self._filter_text, self.treatment.currentText(), self.soc.currentText(), self.pt.currentText(), self.denominator_type.currentData(), population, self.population_where.text().strip(), self.include_any.isChecked(), self.any_label.text().strip() or "Any AE", self.include_total.isChecked(), self.percent_digits.value(), self.missing_policy.currentData())
+
+    def _run(self):
+        selection = self._selection()
+        if selection is not None: self.run_requested.emit(selection)
+
+    def _generate_sas_code(self):
+        selection = self._selection()
+        if selection is not None and self._source_kind == "sas" and not self._busy:
+            self.sas_code_requested.emit(selection)
