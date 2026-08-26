@@ -39,7 +39,7 @@ from ..categorical.drilldown import (
 )
 from ..codegen import build_proc_means_configuration
 from ..codegen.r import RProcMeansGenerator
-from ..codegen.sas import SasProcMeansGenerator
+from ..codegen.sas import SasProcMeansGenerator, SasRuleBasedGenerator
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
@@ -61,10 +61,15 @@ from ..rule_based import (
     RuleBasedEngine,
     RuleBasedLongResultBuilder,
     RuleBasedRow,
+    build_rule_based_configuration,
 )
 from ..rule_based.drilldown import (
     build_cell_filter as build_rule_cell_filter,
+)
+from ..rule_based.drilldown import (
     build_population_cell_filter,
+)
+from ..rule_based.drilldown import (
     lookup_cell as lookup_rule_cell,
 )
 from ..sas_reader import SasDatasetReader
@@ -144,12 +149,15 @@ class MainWindow(QMainWindow):
         self.merge_engine = MergeDatasetsEngine(temp_manager)
         self.proc_means_engine = ProcMeansEngine(temp_manager)
         self.categorical_engine = CategoricalEngine(temp_manager)
-        self.categorical_long_result_builder = CategoricalLongResultBuilder(temp_manager)
+        self.categorical_long_result_builder = CategoricalLongResultBuilder(
+            temp_manager
+        )
         self.categorical_query_builder = CategoricalQueryBuilder(temp_manager)
         self.rule_based_engine = RuleBasedEngine(temp_manager)
         self.rule_based_long_result_builder = RuleBasedLongResultBuilder(temp_manager)
         self.proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
         self.sas_proc_means_generator = SasProcMeansGenerator()
+        self.sas_rule_based_generator = SasRuleBasedGenerator()
         self.r_proc_means_generator = RProcMeansGenerator()
         self.store = DataStore()
         self.exporter = CsvExporter()
@@ -229,9 +237,7 @@ class MainWindow(QMainWindow):
         self.open_categorical_long_action.triggered.connect(
             self._open_categorical_long_result
         )
-        self.open_rule_based_long_action = QAction(
-            "Open Rule-based Long Result", self
-        )
+        self.open_rule_based_long_action = QAction("Open Rule-based Long Result", self)
         self.open_rule_based_long_action.triggered.connect(
             self._open_rule_based_long_result
         )
@@ -393,6 +399,9 @@ class MainWindow(QMainWindow):
         self.analysis_panel.rule_based_builder.run_requested.connect(
             self._run_rule_based_builder
         )
+        self.analysis_panel.rule_based_builder.sas_code_requested.connect(
+            self._generate_rule_based_sas_code
+        )
         self.analysis_panel.rule_based_builder.validation_error.connect(
             lambda message: QMessageBox.warning(self, "Rule-based Table", message)
         )
@@ -430,9 +439,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.merge_dock)
         self.merge_dock.hide()
         self.merge_datasets_action.toggled.connect(self.merge_dock.setVisible)
-        self.merge_dock.visibilityChanged.connect(
-            self.merge_datasets_action.setChecked
-        )
+        self.merge_dock.visibilityChanged.connect(self.merge_datasets_action.setChecked)
         self.merge_panel.merge_requested.connect(self._run_dataset_merge)
 
     def _sync_top_search(self, text: str) -> None:
@@ -629,7 +636,9 @@ class MainWindow(QMainWindow):
 
         self._open_path(source, ready)
 
-    def _run_dataset_merge(self, left_tab: DatasetTab, right_tab: DatasetTab, config) -> None:
+    def _run_dataset_merge(
+        self, left_tab: DatasetTab, right_tab: DatasetTab, config
+    ) -> None:
         if (
             self.tabs.indexOf(left_tab) < 0
             or self.tabs.indexOf(right_tab) < 0
@@ -655,7 +664,9 @@ class MainWindow(QMainWindow):
         right_handle = right_tab.handle
 
         def execute_merge() -> None:
-            self.merge_panel.set_busy(True, "Merging source datasets in the background…")
+            self.merge_panel.set_busy(
+                True, "Merging source datasets in the background…"
+            )
 
             def completed(result) -> None:
                 self._merge_input_tabs.clear()
@@ -674,8 +685,7 @@ class MainWindow(QMainWindow):
                     f"Created {handle.metadata.row_count:,} result rows: "
                     f"{summary.matched_rows:,} matched result rows, "
                     f"{summary.left_only_rows:,} left-only rows, "
-                    f"{summary.right_only_rows:,} right-only rows."
-                    + sort_clause,
+                    f"{summary.right_only_rows:,} right-only rows." + sort_clause,
                 )
                 result_tab = self._make_dataset_tab(handle)
                 self._retain_directory(left_handle.temporary_path.parent)
@@ -1334,6 +1344,7 @@ class MainWindow(QMainWindow):
                 active_tab.handle.metadata,
                 str(active_tab.handle.source_path),
                 active_tab.current_where_text(),
+                active_tab.handle.kind,
             )
             self.analysis_panel.rule_based_builder.inherit_current_filter(
                 active_tab.current_where_text()
@@ -1354,14 +1365,16 @@ class MainWindow(QMainWindow):
             )
             return None
         population_tab = selection.population_tab
-        if selection.denominator_type == "population":
-            if not isinstance(population_tab, DatasetTab) or not population_tab.cache_complete:
-                QMessageBox.warning(
-                    self,
-                    "Rule-based Table",
-                    "Open or browse a fully loaded ADSL dataset for Population N.",
-                )
-                return None
+        if selection.denominator_type == "population" and (
+            not isinstance(population_tab, DatasetTab)
+            or not population_tab.cache_complete
+        ):
+            QMessageBox.warning(
+                self,
+                "Rule-based Table",
+                "Open or browse a fully loaded ADSL dataset for Population N.",
+            )
+            return None
         try:
             dataset_filter = FilterEngine(tab.handle.metadata.variables).compile(
                 selection.dataset_filter_text
@@ -1409,7 +1422,11 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.warning(self, "Rule-based Table", str(error))
             return None
-        return tab, population_tab if isinstance(population_tab, DatasetTab) else None, config
+        return (
+            tab,
+            population_tab if isinstance(population_tab, DatasetTab) else None,
+            config,
+        )
 
     def _run_rule_based_builder(self, selection: RuleBasedBuilderSelection) -> None:
         active_tab = self.current_dataset_tab()
@@ -1429,7 +1446,9 @@ class MainWindow(QMainWindow):
 
         def completed(handle: DatasetHandle) -> None:
             self._rule_based_input_tabs.clear()
-            builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
+            builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
             result_tab = self._make_dataset_tab(handle)
             retained = {source_handle.temporary_path.parent}
             if population_handle is not None:
@@ -1460,6 +1479,68 @@ class MainWindow(QMainWindow):
             failed,
         )
 
+    def _generate_rule_based_sas_code(
+        self, selection: RuleBasedBuilderSelection
+    ) -> None:
+        """Generate Rule-based SAS from the current Builder snapshot.
+
+        Treatment levels are runtime-resolved by the same engine helper used by
+        the calculation.  The full table is not executed merely to preview
+        code, and the generator only receives the frozen JSON-compatible
+        configuration contract.
+        """
+        context = self._rule_based_builder_context(selection)
+        if context is None:
+            return
+        source_tab, population_tab, config = context
+        if source_tab.handle.kind != "sas":
+            # The Builder disables this action for merge inputs, but keep the
+            # guard at the MainWindow boundary as well.
+            return
+        source_handle = source_tab.handle
+        population_handle = population_tab.handle if population_tab else None
+        builder = self.analysis_panel.rule_based_builder
+        self._rule_based_input_tabs = {source_tab}
+        if population_tab is not None:
+            self._rule_based_input_tabs.add(population_tab)
+        builder.set_busy(True, "Resolving Rule-based treatment levels…")
+
+        def completed(code: str) -> None:
+            self._rule_based_input_tabs.clear()
+            builder.set_busy(False, "SAS code generated.")
+            safe_name = (
+                "".join(
+                    character if character.isalnum() or character in {"-", "_"} else "_"
+                    for character in source_handle.metadata.name
+                ).strip("_")
+                or "dataset"
+            ).lower()
+            SasCodeDialog(
+                code,
+                str(source_handle.source_path),
+                f"{safe_name}_rule_based.sas",
+                self,
+            ).exec()
+
+        def failed(message: str, details: str) -> None:
+            self._rule_based_input_tabs.clear()
+            builder.set_busy(False, "SAS Code Generator failed.")
+            self._show_error("Rule-based SAS Code Generator Failed", message, details)
+
+        def generate(_worker: Worker) -> str:
+            levels = self.rule_based_engine.resolve_treatment_levels(
+                source_handle, config, population_handle
+            )
+            configuration = build_rule_based_configuration(
+                source_handle,
+                config,
+                population_handle,
+                levels,
+            )
+            return self.sas_rule_based_generator.generate(configuration)
+
+        self._submit(builder, generate, completed, failed)
+
     def _categorical_builder_context(
         self, selection: CategoricalBuilderSelection
     ) -> tuple[DatasetTab, DatasetTab | None, CategoricalConfig] | None:
@@ -1472,14 +1553,16 @@ class MainWindow(QMainWindow):
             )
             return None
         population_tab = selection.population_tab
-        if selection.denominator_type == "population":
-            if not isinstance(population_tab, DatasetTab) or not population_tab.cache_complete:
-                QMessageBox.warning(
-                    self,
-                    "Categorical Table",
-                    "Open or browse a fully loaded ADSL dataset for Population N.",
-                )
-                return None
+        if selection.denominator_type == "population" and (
+            not isinstance(population_tab, DatasetTab)
+            or not population_tab.cache_complete
+        ):
+            QMessageBox.warning(
+                self,
+                "Categorical Table",
+                "Open or browse a fully loaded ADSL dataset for Population N.",
+            )
+            return None
         try:
             # Keep the Builder's Numerator WHERE independent from the source
             # DatasetTab WHERE.  The selection contains the editable Builder
@@ -1529,7 +1612,11 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.warning(self, "Categorical Table", str(error))
             return None
-        return tab, population_tab if isinstance(population_tab, DatasetTab) else None, config
+        return (
+            tab,
+            population_tab if isinstance(population_tab, DatasetTab) else None,
+            config,
+        )
 
     def _run_categorical_builder(self, selection: CategoricalBuilderSelection) -> None:
         active_tab = self.current_dataset_tab()
@@ -1572,7 +1659,9 @@ class MainWindow(QMainWindow):
 
         def completed(handle: DatasetHandle) -> None:
             self._categorical_input_tabs.clear()
-            builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
+            builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
             result_tab = self._make_dataset_tab(handle)
             retained = {source_handle.temporary_path.parent}
             if population_handle is not None:
@@ -1863,7 +1952,9 @@ class MainWindow(QMainWindow):
         )
         if target is None:
             QMessageBox.warning(
-                self, "Categorical Table Drill-down", "The required source dataset is no longer available."
+                self,
+                "Categorical Table Drill-down",
+                "The required source dataset is no longer available.",
             )
             return
         try:
@@ -1933,9 +2024,20 @@ class MainWindow(QMainWindow):
         cell = lookup_rule_cell(tab.handle, source_row, column_name)
         if cell is None:
             return
-        row = next((candidate for candidate in context.config.rows if candidate.row_id == cell.row_id), None)
+        row = next(
+            (
+                candidate
+                for candidate in context.config.rows
+                if candidate.row_id == cell.row_id
+            ),
+            None,
+        )
         if row is None:
-            QMessageBox.warning(self, "Rule-based Table Drill-down", "The selected rule row is no longer available.")
+            QMessageBox.warning(
+                self,
+                "Rule-based Table Drill-down",
+                "The selected rule row is no longer available.",
+            )
             return
         dialog, records, subjects, denominator = self._categorical_drilldown_dialog()
         dialog.setWindowTitle("Rule-based Table Drill-down")
@@ -2043,9 +2145,7 @@ class MainWindow(QMainWindow):
             return
         context_names = tuple(
             dict.fromkeys(
-                name
-                for item in context.config.items
-                for name in item.context_variables
+                name for item in context.config.items for name in item.context_variables
             )
         )
         fields = {
@@ -2418,7 +2518,9 @@ class MainWindow(QMainWindow):
             if categorical_context is not None:
                 directories = {categorical_context.source.temporary_path.parent}
                 if categorical_context.population is not None:
-                    directories.add(categorical_context.population.temporary_path.parent)
+                    directories.add(
+                        categorical_context.population.temporary_path.parent
+                    )
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )
@@ -2496,6 +2598,7 @@ class MainWindow(QMainWindow):
             builder_source.handle.metadata if builder_source else None,
             str(builder_source.handle.source_path) if builder_source else "",
             builder_source.current_where_text() if builder_source else "",
+            builder_source.handle.kind if builder_source else "sas",
         )
         self._refresh_compare_datasets()
         self._refresh_merge_datasets()

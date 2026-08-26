@@ -87,45 +87,8 @@ class RuleBasedEngine:
         fields = self._fields(source.metadata)
         treatment = fields[config.treatment_variable.casefold()]
         subject = fields[config.subject_id_variable.casefold()]
-        population_fields = self._fields(population.metadata) if population else {}
-        if config.denominator.type == "population" and population is not None:
-            denominator_treatment = population_fields[
-                config.treatment_variable.casefold()
-            ]
-        else:
-            denominator_treatment = treatment
-
-        self._check_missing_treatments(source, config, treatment)
-        if config.denominator.type == "population" and population is not None:
-            self._check_missing_population_treatment(
-                population,
-                config.denominator.population_filter.sql,
-                config.denominator.population_filter.parameters,
-                denominator_treatment,
-            )
         notify("Collecting treatment levels…")
-        treatments: list[tuple[str, object, str]] = []
-        for row in config.rows:
-            row_sql, row_parameters = self._combined_filter(config, row)
-            treatments = self._merge_levels(
-                treatments,
-                self._treatment_levels(
-                    source,
-                    row_sql,
-                    row_parameters,
-                    treatment,
-                ),
-            )
-        if config.denominator.type == "population" and population is not None:
-            treatments = self._merge_levels(
-                treatments,
-                self._treatment_levels(
-                    population,
-                    config.denominator.population_filter.sql,
-                    config.denominator.population_filter.parameters,
-                    denominator_treatment,
-                ),
-            )
+        treatments = self.resolve_treatment_levels(source, config, population)
         directory = self.temp_manager.create_dataset_directory()
         writer = RuleBasedResultWriter(directory / "dataset.sqlite", treatments, config)
         try:
@@ -152,6 +115,52 @@ class RuleBasedEngine:
         except BaseException:
             writer.abort(self.temp_manager, directory)
             raise
+
+    def resolve_treatment_levels(
+        self,
+        source: DatasetHandle,
+        config: RuleBasedConfig,
+        population: DatasetHandle | None = None,
+    ) -> list[tuple[str, object, str]]:
+        """Validate inputs and resolve the exact treatment order for codegen."""
+        if not source.cache_complete:
+            raise ValueError("The source dataset must finish loading first.")
+        if population is not None and not population.cache_complete:
+            raise ValueError("The denominator dataset must finish loading first.")
+        config.validate(source.metadata, population.metadata if population else None)
+        treatment = self._fields(source.metadata)[config.treatment_variable.casefold()]
+        if config.denominator.type == "population" and population is not None:
+            denominator_treatment = self._fields(population.metadata)[
+                config.treatment_variable.casefold()
+            ]
+        else:
+            denominator_treatment = treatment
+        self._check_missing_treatments(source, config, treatment)
+        if config.denominator.type == "population" and population is not None:
+            self._check_missing_population_treatment(
+                population,
+                config.denominator.population_filter.sql,
+                config.denominator.population_filter.parameters,
+                denominator_treatment,
+            )
+        treatments: list[tuple[str, object, str]] = []
+        for row in config.rows:
+            row_sql, row_parameters = self._combined_filter(config, row)
+            treatments = self._merge_levels(
+                treatments,
+                self._treatment_levels(source, row_sql, row_parameters, treatment),
+            )
+        if config.denominator.type == "population" and population is not None:
+            treatments = self._merge_levels(
+                treatments,
+                self._treatment_levels(
+                    population,
+                    config.denominator.population_filter.sql,
+                    config.denominator.population_filter.parameters,
+                    denominator_treatment,
+                ),
+            )
+        return treatments
 
     @staticmethod
     def _fields(metadata: DatasetMetadata) -> dict[str, VariableMetadata]:

@@ -11,7 +11,43 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
-    def test_proc_means_codegen_stays_disabled_for_merge_when_busy_state_changes(self) -> None:
+    def test_rule_based_codegen_stays_disabled_for_merge(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.rule_based_builder import RuleBasedBuilder
+
+        application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "Merge Result",
+            1,
+            (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT01A"),
+            ),
+        )
+        builder = RuleBasedBuilder()
+        builder.set_dataset(metadata, "Merge Result", source_kind="merge")
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        self.assertEqual(
+            builder.sas_code_button.toolTip(),
+            "SAS code generation for merged Rule-based sources is not available yet.",
+        )
+        builder.set_busy(True)
+        builder.set_busy(False)
+        self.assertFalse(builder.sas_code_button.isEnabled())
+
+        builder.set_dataset(metadata, "adae.sas7bdat", source_kind="sas")
+        builder.set_busy(True)
+        builder.set_busy(False)
+        self.assertTrue(builder.sas_code_button.isEnabled())
+        builder.deleteLater()
+        application.processEvents()
+
+    def test_proc_means_codegen_stays_disabled_for_merge_when_busy_state_changes(
+        self,
+    ) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
 
@@ -145,7 +181,9 @@ class UiSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manager = TempManager(root / "temp")
-            window = MainWindow(TestSettings(), manager, FilterHistory(root / "history.sqlite"))
+            window = MainWindow(
+                TestSettings(), manager, FilterHistory(root / "history.sqlite")
+            )
             metadata = DatasetMetadata(
                 "Merge Result - ADAE + ADSL",
                 2,
@@ -245,7 +283,8 @@ class UiSmokeTests(unittest.TestCase):
             self.assertIn("PROC MEANS Builder", tools_actions)
             self.assertIn("Categorical Table Builder", tools_actions)
             view_actions = [
-                action.text() for action in window.menuBar().actions()[2].menu().actions()
+                action.text()
+                for action in window.menuBar().actions()[2].menu().actions()
             ]
             self.assertIn("Open Categorical Long Result", view_actions)
             self.assertFalse(window.open_categorical_long_action.isEnabled())
@@ -414,13 +453,13 @@ class UiSmokeTests(unittest.TestCase):
             categorical = window.analysis_panel.categorical_builder
             window.analysis_panel.show_categorical_tab()
             self.assertEqual(window.analysis_panel.tabs.count(), 1)
-            categorical.set_dataset(numeric_metadata, "adlb.sas7bdat", 'AVAL > 1')
-            self.assertEqual(categorical.current_filter_text(), 'AVAL > 1')
-            self.assertEqual(categorical.numerator_where.toPlainText(), 'AVAL > 1')
-            categorical.numerator_where.setPlainText('AVAL > 2')
-            self.assertEqual(categorical.current_filter_text(), 'AVAL > 2')
-            categorical.inherit_current_filter('AVAL > 3')
-            self.assertEqual(categorical.current_filter_text(), 'AVAL > 2')
+            categorical.set_dataset(numeric_metadata, "adlb.sas7bdat", "AVAL > 1")
+            self.assertEqual(categorical.current_filter_text(), "AVAL > 1")
+            self.assertEqual(categorical.numerator_where.toPlainText(), "AVAL > 1")
+            categorical.numerator_where.setPlainText("AVAL > 2")
+            self.assertEqual(categorical.current_filter_text(), "AVAL > 2")
+            categorical.inherit_current_filter("AVAL > 3")
+            self.assertEqual(categorical.current_filter_text(), "AVAL > 2")
             categorical.items.resize(180, 100)
             categorical.items.show()
             application.processEvents()
@@ -600,9 +639,7 @@ class UiSmokeTests(unittest.TestCase):
                 manual_option.palette.color(QPalette.Text).name(), "#1f2937"
             )
             self.assertIsNone(
-                numeric_tab.model.data(
-                    numeric_tab.model.index(0, 2), Qt.CheckStateRole
-                )
+                numeric_tab.model.data(numeric_tab.model.index(0, 2), Qt.CheckStateRole)
             )
             self.assertFalse(
                 manual_option.features & QStyleOptionViewItem.HasCheckIndicator
@@ -639,9 +676,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(
                 settings_dialog.settings.proc_means_decimal_offsets["mean"], 4
             )
-            history.add(
-                root / "adlb.sas7bdat", 'PARAMCD = "ALB"'
-            )
+            history.add(root / "adlb.sas7bdat", 'PARAMCD = "ALB"')
             history_dialog = HistoryDialog(history, root / "adlb.sas7bdat")
             self.assertEqual(history_dialog.table.columnCount(), 3)
             self.assertEqual(history_dialog.table.topLevelItemCount(), 1)

@@ -18,13 +18,11 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from ..domain import DatasetMetadata
-from .proc_means_builder import VariableTokenEditor
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +47,7 @@ class RuleBasedBuilderSelection:
 
 class RuleBasedBuilder(QWidget):
     run_requested = Signal(object)
+    sas_code_requested = Signal(object)
     validation_error = Signal(str)
     browse_adsl_requested = Signal()
 
@@ -56,6 +55,7 @@ class RuleBasedBuilder(QWidget):
         super().__init__(parent)
         self.setObjectName("ruleBasedBuilder")
         self._metadata: DatasetMetadata | None = None
+        self._source_kind = "sas"
         self._filter_text = ""
         self._source_filter_snapshot = ""
         self._busy = False
@@ -180,6 +180,9 @@ class RuleBasedBuilder(QWidget):
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
         buttons.addWidget(clear)
+        self.sas_code_button = QPushButton("SAS Code Generator…")
+        self.sas_code_button.clicked.connect(self._generate_sas_code)
+        buttons.addWidget(self.sas_code_button)
         self.run_button = QPushButton("Run Rule-based Table")
         self.run_button.setDefault(True)
         self.run_button.clicked.connect(self._run)
@@ -189,8 +192,13 @@ class RuleBasedBuilder(QWidget):
         self.set_dataset(None, "")
 
     def set_dataset(
-        self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = ""
+        self,
+        metadata: DatasetMetadata | None,
+        source_text: str,
+        filter_text: str = "",
+        source_kind: str = "sas",
     ) -> None:
+        self._source_kind = source_kind
         if metadata is not None and metadata is not self._metadata:
             self._metadata = metadata
             self._filter_text = filter_text.strip()
@@ -204,11 +212,20 @@ class RuleBasedBuilder(QWidget):
             self.rows_table.setRowCount(0)
             self._row_counter = 0
         self.source_label.setText(
-            f"Source: {source_text}" if metadata else "Select a fully loaded source dataset."
+            f"Source: {source_text}"
+            if metadata
+            else "Select a fully loaded source dataset."
         )
         enabled = metadata is not None and not self._busy
         self.setEnabled(enabled or self._busy)
         self.run_button.setEnabled(enabled)
+        codegen_available = enabled and source_kind == "sas"
+        self.sas_code_button.setEnabled(codegen_available)
+        self.sas_code_button.setToolTip(
+            "SAS code generation for merged Rule-based sources is not available yet."
+            if source_kind == "merge"
+            else ""
+        )
 
     def current_filter_text(self) -> str:
         return self._filter_text
@@ -245,8 +262,11 @@ class RuleBasedBuilder(QWidget):
                 self.adsl.setCurrentIndex(index)
         if datasets and not self._adsl_user_selected:
             preferred = next(
-                (index for index, (_tab, label) in enumerate(datasets)
-                 if label.split(" — ", 1)[0].casefold() == "adsl"),
+                (
+                    index
+                    for index, (_tab, label) in enumerate(datasets)
+                    if label.split(" — ", 1)[0].casefold() == "adsl"
+                ),
                 0,
             )
             self.adsl.setCurrentIndex(preferred)
@@ -299,7 +319,9 @@ class RuleBasedBuilder(QWidget):
         indent = self.rows_table.cellWidget(row, 3)
         return (
             item.text().strip() if isinstance(item, QLineEdit) else "",
-            filter_editor.text().strip() if isinstance(filter_editor, QLineEdit) else "",
+            filter_editor.text().strip()
+            if isinstance(filter_editor, QLineEdit)
+            else "",
             indent.value() if isinstance(indent, QSpinBox) else 0,
         )
 
@@ -317,6 +339,9 @@ class RuleBasedBuilder(QWidget):
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
         self.run_button.setEnabled(self._metadata is not None and not busy)
+        self.sas_code_button.setEnabled(
+            self._metadata is not None and not busy and self._source_kind == "sas"
+        )
         if message:
             self.status.setText(message)
 
@@ -327,21 +352,23 @@ class RuleBasedBuilder(QWidget):
     def _sync_denominator_page(self) -> None:
         self.denominator_stack.setCurrentIndex(self.denominator_type.currentIndex())
 
-    def _run(self) -> None:
+    def _selection(self) -> RuleBasedBuilderSelection | None:
         if self._metadata is None:
             self.validation_error.emit("Select a fully loaded source dataset.")
-            return
+            return None
         if not self.treatment.currentText():
             self.validation_error.emit("Select a Treatment variable.")
-            return
+            return None
         rows = []
         for index in range(self.rows_table.rowCount()):
             item, filter_text, indent = self._row_values(index)
-            rows.append(RuleBasedRowSelection(f"row_{index + 1:03d}", item, filter_text, indent))
+            rows.append(
+                RuleBasedRowSelection(f"row_{index + 1:03d}", item, filter_text, indent)
+            )
         if not rows:
             self.validation_error.emit("Add at least one Rule-based Table row.")
-            return
-        selection = RuleBasedBuilderSelection(
+            return None
+        return RuleBasedBuilderSelection(
             tuple(rows),
             self.current_filter_text(),
             self.treatment.currentText(),
@@ -351,4 +378,16 @@ class RuleBasedBuilder(QWidget):
             self.nonmissing_value.currentText(),
             self.include_total.isChecked(),
         )
+
+    def _run(self) -> None:
+        selection = self._selection()
+        if selection is None:
+            return
         self.run_requested.emit(selection)
+
+    def _generate_sas_code(self) -> None:
+        if self._source_kind != "sas":
+            return
+        selection = self._selection()
+        if selection is not None:
+            self.sas_code_requested.emit(selection)
