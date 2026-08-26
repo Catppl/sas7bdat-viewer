@@ -24,9 +24,17 @@ def build_cell_filter(metadata, config, cell, *, denominator=False):
     if denominator and config.denominator.type == "population": clauses.append((config.denominator.population_filter.sql, config.denominator.population_filter.parameters))
     else: clauses.append((config.dataset_filter.sql, config.dataset_filter.parameters))
     subject = _field(metadata, config.subject_id_variable); clauses.append((_missing_sql(subject.name, subject.kind, missing=False), ()))
-    if cell.treatment is not None: clauses.append(_exact_clause(_field(metadata, config.treatment_variable), cell.treatment))
-    if cell.soc is not None: clauses.append(_exact_clause(_field(metadata, config.soc_variable), cell.soc))
-    if cell.pt is not None and not denominator: clauses.append(_exact_clause(_field(metadata, config.pt_variable), cell.pt))
+    if cell.treatment is not None:
+        clauses.append(_exact_clause(_field(metadata, config.treatment_variable), cell.treatment))
+    # Denominator subjects represent the denominator universe for the whole
+    # table.  SOC/PT are numerator-only row constraints and must never leak
+    # into denominator drill-downs (the population dataset may not even have
+    # those variables).
+    if not denominator:
+        if cell.soc is not None:
+            clauses.append(_exact_clause(_field(metadata, config.soc_variable), cell.soc))
+        if cell.pt is not None:
+            clauses.append(_exact_clause(_field(metadata, config.pt_variable), cell.pt))
     return _and(*clauses)
 
 

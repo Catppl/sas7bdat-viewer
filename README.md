@@ -272,7 +272,7 @@ Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以�
 
 从 `Tools > AE Table Builder` 打开 AE SOC/PT Builder。选择 source、Dataset Filter、treatment、SOC（默认优先 `AEBODSYS`）和 PT（默认优先 `AEDECOD`），即可生成临床常用的 `Any AE → SOC → PT` 层级表。Subject ID 固定为 `USUBJID`，所有频数均为 distinct subject；SOC 独立计算，不由 PT 频数相加得到。
 
-支持 `Population N (ADSL)` 和 `Same-universe N` 两种分母，Population WHERE 与 AE Dataset Filter 独立；可选择 Total、Any AE 行和 0–4 位百分比。SOC/PT 按 Total 频数降序、同频时按字母序排列。缺失 SOC 不进入层级，缺失 PT 不生成 PT 行但仍可计入非缺失 SOC；缺失 treatment 会阻止计算。
+支持 `Population N (ADSL)` 和 `Same-universe N` 两种分母，Population WHERE 与 AE Dataset Filter 独立；可选择 Total、Any AE 行和 0–4 位百分比。SOC/PT 按 Total 频数降序、同频时按字母序排列。Subject 计数变量固定为 `USUBJID`。缺失 SOC/PT 默认排除，也可以选择映射为 `Uncoded`；缺失 treatment 会阻止计算。
 
 成功运行后会生成宽表 `AE Table Result` Tab，并在同一临时目录保存 `dataset.sqlite`、`ae_table_config.json` v1 和权威 long result。可用 `View > Open AE Table Long Result` 打开长表；双击 Any AE、SOC 或 PT 的 `n (%)` 单元格可钻取 Numerator Records、Numerator Subjects 或 Denominator Subjects。AE 结果支持现有分页、WHERE、排序、变量选择、复制和 CSV 导出，Merge Result 可以作为 Python AE source；本阶段暂不提供 AE SAS/R Generator。
 

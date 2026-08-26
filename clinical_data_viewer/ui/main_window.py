@@ -1428,7 +1428,20 @@ class MainWindow(QMainWindow):
         try:
             source_filter = FilterEngine(tab.handle.metadata.variables).compile(selection.dataset_filter_text)
             pop_filter = FilterEngine(pop.handle.metadata.variables).compile(selection.population_filter_text) if isinstance(pop, DatasetTab) else FilterEngine(tab.handle.metadata.variables).compile("")
-            config = AeTableConfig(selection.soc_variable, selection.pt_variable, selection.treatment_variable, "USUBJID", source_filter, selection.dataset_filter_text, AeTableDenominator(selection.denominator_type, pop_filter, selection.population_filter_text), selection.include_any_ae, selection.any_ae_label, selection.include_total, selection.percent_digits)
+            config = AeTableConfig(
+                selection.soc_variable,
+                selection.pt_variable,
+                selection.treatment_variable,
+                "USUBJID",
+                source_filter,
+                selection.dataset_filter_text,
+                AeTableDenominator(selection.denominator_type, pop_filter, selection.population_filter_text),
+                selection.include_any_ae,
+                selection.any_ae_label,
+                selection.include_total,
+                selection.percent_digits,
+                selection.hierarchy_missing_policy,
+            )
             config.validate(tab.handle.metadata, pop.handle.metadata if isinstance(pop, DatasetTab) else None)
         except ValueError as error:
             QMessageBox.warning(self, "AE Table", str(error)); return None

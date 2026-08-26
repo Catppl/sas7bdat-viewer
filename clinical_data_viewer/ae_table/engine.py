@@ -21,6 +21,12 @@ def _missing(value, variable):
     return value is None or (variable.kind == "character" and (value == "" or value is None))
 
 
+def _hierarchy_value(value, variable, policy):
+    if not _missing(value, variable):
+        return value
+    return "Uncoded" if policy == "uncoded" else None
+
+
 def _canon(value):
     return int(value) if isinstance(value, float) and value.is_integer() else value
 
@@ -81,7 +87,7 @@ class AeTableEngine:
         values.sort(key=lambda item: str(item[2]).casefold())
         return values
 
-    def _aggregate(self, handle, config_filter, soc, pt, treatment, subject):
+    def _aggregate(self, handle, config_filter, soc, pt, treatment, subject, missing_policy):
         where = f" WHERE {config_filter.sql}" if config_filter.sql else ""
         sql = (f"SELECT {quote_identifier(treatment.name)}, {quote_identifier(soc.name)}, {quote_identifier(pt.name)}, {quote_identifier(subject.name)} "
                f"FROM dataset{where}")
@@ -95,11 +101,13 @@ class AeTableEngine:
                     continue
                 tkey = _key(treatment_value)
                 any_counts[tkey].add(subject_value); any_counts[TOTAL_KEY].add(subject_value)
-                if _missing(soc_value, soc):
+                soc_value = _hierarchy_value(soc_value, soc, missing_policy)
+                if soc_value is None:
                     continue
                 skey = _key(soc_value)
                 soc_counts[(skey, tkey)].add(subject_value); soc_counts[(skey, TOTAL_KEY)].add(subject_value)
-                if _missing(pt_value, pt):
+                pt_value = _hierarchy_value(pt_value, pt, missing_policy)
+                if pt_value is None:
                     continue
                 pt_counts[(skey, _key(pt_value), tkey)].add(subject_value); pt_counts[(skey, _key(pt_value), TOTAL_KEY)].add(subject_value)
         return any_counts, soc_counts, pt_counts
@@ -133,7 +141,7 @@ class AeTableEngine:
         treatment, subject = fields[config.treatment_variable.casefold()], fields[config.subject_id_variable.casefold()]
         notify("Resolving treatment levels…")
         levels = self.resolve_treatment_levels(source, config, population)
-        any_counts, soc_counts, pt_counts = self._aggregate(source, config.dataset_filter, soc, pt, treatment, subject)
+        any_counts, soc_counts, pt_counts = self._aggregate(source, config.dataset_filter, soc, pt, treatment, subject, config.hierarchy_missing_policy)
         denom = self._denom(source, population, config, treatment, subject)
         # Derive labels directly from observed values (JSON keys preserve type).
         soc_labels = {skey: _display(json.loads(skey)) for skey, _t in soc_counts}

@@ -26,12 +26,17 @@ class AeTableConfig:
     any_ae_label: str = "Any AE"
     include_total: bool = True
     percent_digits: int = 1
+    hierarchy_missing_policy: str = "exclude"
 
     def validate(self, source: DatasetMetadata, population: DatasetMetadata | None = None) -> None:
         if self.denominator.type not in {"same_universe", "population"}:
             raise ValueError("Select a valid AE Table denominator.")
         if not 0 <= self.percent_digits <= 4:
             raise ValueError("Percent decimal digits must be between 0 and 4.")
+        if self.subject_id_variable != "USUBJID":
+            raise ValueError("AE Table count variable is fixed to USUBJID.")
+        if self.hierarchy_missing_policy not in {"exclude", "uncoded"}:
+            raise ValueError("Missing SOC / PT policy must be Exclude or Uncoded.")
         fields = {v.name.casefold(): v for v in source.variables}
         for name, label in ((self.soc_variable, "SOC variable"), (self.pt_variable, "PT variable"),
                             (self.treatment_variable, "Treatment variable"),

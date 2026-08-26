@@ -24,6 +24,7 @@ class AeTableBuilderSelection:
     any_ae_label: str
     include_total: bool
     percent_digits: int
+    hierarchy_missing_policy: str
 
 
 class AeTableBuilder(QWidget):
@@ -45,6 +46,10 @@ class AeTableBuilder(QWidget):
         subject = QLabel("USUBJID"); subject.setTextInteractionFlags(Qt.TextSelectableByMouse); form.addRow("Subject ID", subject)
         self.soc = QComboBox(); form.addRow("SOC variable", self.soc)
         self.pt = QComboBox(); form.addRow("PT variable", self.pt)
+        self.missing_policy = QComboBox()
+        self.missing_policy.addItem("Exclude", "exclude")
+        self.missing_policy.addItem('Show as "Uncoded"', "uncoded")
+        form.addRow("Missing SOC / PT", self.missing_policy)
         layout.addWidget(source)
         filters = QGroupBox("Dataset Filter"); f = QVBoxLayout(filters)
         self.dataset_filter = QPlainTextEdit(); self.dataset_filter.setPlaceholderText('e.g. TRTEMFL = "Y"'); self.dataset_filter.setMaximumHeight(78); self.dataset_filter.textChanged.connect(lambda: setattr(self, "_filter_text", self.dataset_filter.toPlainText().strip())); f.addWidget(self.dataset_filter); layout.addWidget(filters)
@@ -105,4 +110,4 @@ class AeTableBuilder(QWidget):
     def _run(self):
         if self._metadata is None: return
         population = self.adsl.currentData() if self.denominator_type.currentData() == "population" else None
-        self.run_requested.emit(AeTableBuilderSelection(self._filter_text, self.treatment.currentText(), self.soc.currentText(), self.pt.currentText(), self.denominator_type.currentData(), population, self.population_where.text().strip(), self.include_any.isChecked(), self.any_label.text().strip() or "Any AE", self.include_total.isChecked(), self.percent_digits.value()))
+        self.run_requested.emit(AeTableBuilderSelection(self._filter_text, self.treatment.currentText(), self.soc.currentText(), self.pt.currentText(), self.denominator_type.currentData(), population, self.population_where.text().strip(), self.include_any.isChecked(), self.any_label.text().strip() or "Any AE", self.include_total.isChecked(), self.percent_digits.value(), self.missing_policy.currentData()))
