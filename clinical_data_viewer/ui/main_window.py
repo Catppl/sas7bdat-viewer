@@ -37,6 +37,7 @@ from ..proc_means import (
     ProcMeansEngine,
     ProcMeansQueryBuilder,
     build_drilldown_filter,
+    build_drilldown_where_text,
 )
 from ..sas_reader import SasDatasetReader
 from ..settings import PROC_MEANS_STATISTICS, AppSettings
@@ -1145,18 +1146,30 @@ class MainWindow(QMainWindow):
                 analysis_variable,
                 statistic_key,
             )
+            where_text = build_drilldown_where_text(
+                context.source.metadata,
+                context.config,
+                group_values,
+                analysis_variable,
+                statistic_key,
+            )
             handle = self.proc_means_query_builder.run(
                 context.source, compiled, base_title, worker.report
             )
-            return handle, analysis_variable
+            return handle, analysis_variable, where_text
 
         def completed(result) -> None:
-            handle, analysis_variable = result
+            handle, analysis_variable, where_text = result
             if self.tabs.indexOf(tab) < 0 or generation != tab.generation:
                 self._remove_dataset_directory(handle.temporary_path.parent)
                 return
             title = self._unique_dataset_tab_title(base_title)
             query_tab = self._make_dataset_tab(handle)
+            query_tab.apply_filter(
+                FilterEngine(handle.metadata.variables).compile(where_text),
+                where_text,
+                add_history=False,
+            )
             index = self.tabs.addTab(query_tab, title)
             self.tabs.setCurrentIndex(index)
             query_tab.start()

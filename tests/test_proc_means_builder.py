@@ -21,6 +21,7 @@ from clinical_data_viewer.proc_means import (
     ProcMeansEngine,
     ProcMeansQueryBuilder,
     build_drilldown_filter,
+    build_drilldown_where_text,
 )
 from clinical_data_viewer.temp_manager import TempManager
 
@@ -293,6 +294,18 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 "AVAL",
                 "mean",
             )
+            mean_where = build_drilldown_where_text(
+                source.metadata,
+                config,
+                {"PARAMCD": "ALB", "AVISITN": 1.0, "TRT01AN": 1.0},
+                "AVAL",
+                "mean",
+            )
+            self.assertEqual(
+                mean_where,
+                '(ANL01FL = "Y") and PARAMCD = "ALB" and AVISITN = 1 '
+                'and TRT01AN = 1 and not missing(AVAL)',
+            )
             query = ProcMeansQueryBuilder(manager).run(
                 source, mean_filter, "Query: Mean: 1.55"
             )
@@ -312,6 +325,15 @@ class ProcMeansBuilderTests(unittest.TestCase):
                 "AVAL",
                 "nmiss",
             )
+            missing_where = build_drilldown_where_text(
+                source.metadata,
+                config,
+                {"PARAMCD": "ALB", "AVISITN": 1.0, "TRT01AN": None},
+                "AVAL",
+                "nmiss",
+            )
+            self.assertIn("missing(TRT01AN)", missing_where)
+            self.assertTrue(missing_where.endswith("missing(AVAL)"))
             missing_query = ProcMeansQueryBuilder(manager).run(
                 source, missing_filter, "Query: NMISS: 1"
             )

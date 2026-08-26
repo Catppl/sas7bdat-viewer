@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -19,6 +20,46 @@ def _missing_sql(name: str, kind: str, *, missing: bool) -> str:
     else:
         expression = f"{column} IS NULL"
     return expression if missing else f"NOT ({expression})"
+
+
+def _where_literal(value: object, kind: str) -> str:
+    if kind == "character":
+        return '"' + str(value).replace('"', '""') + '"'
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("A numeric drill-down group value must be numeric.")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise ValueError("A numeric drill-down group value must be finite.")
+    return format(numeric, ".15g")
+
+
+def build_drilldown_where_text(
+    metadata: DatasetMetadata,
+    config: ProcMeansConfig,
+    group_values: dict[str, object],
+    analysis_variable: str,
+    statistic_key: str,
+) -> str:
+    """Render the exact source-row selection as copyable SAS-like WHERE text."""
+    by_fold = {variable.name.casefold(): variable for variable in metadata.variables}
+    analysis = by_fold[analysis_variable.casefold()]
+    clauses: list[str] = []
+    if config.filter_text.strip():
+        clauses.append(f"({config.filter_text.strip()})")
+    for requested in config.group_variables:
+        variable = by_fold[requested.casefold()]
+        value = group_values[variable.name]
+        if value is None or (variable.kind == "character" and value == ""):
+            clauses.append(f"missing({variable.name})")
+        else:
+            clauses.append(f"{variable.name} = {_where_literal(value, variable.kind)}")
+    condition = "missing" if statistic_key == "nmiss" else "not missing"
+    clauses.append(f"{condition}({analysis.name})")
+    if statistic_key == "subjects":
+        subject = by_fold.get("usubjid")
+        if subject is not None:
+            clauses.append(f"not missing({subject.name})")
+    return " and ".join(clauses)
 
 
 def build_drilldown_filter(
