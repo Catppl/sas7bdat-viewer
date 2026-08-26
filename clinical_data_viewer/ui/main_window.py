@@ -31,6 +31,8 @@ from ..categorical import (
     CategoricalLongResultBuilder,
     DenominatorConfig,
 )
+from ..ae_table import AeTableConfig, AeTableDenominator, AeTableEngine, AeTableLongResultBuilder
+from ..ae_table.drilldown import build_cell_filter as build_ae_cell_filter, lookup_cell as lookup_ae_cell
 from ..categorical.drilldown import (
     CategoricalQueryBuilder,
     build_cell_filter,
@@ -79,6 +81,7 @@ from ..temp_manager import TempManager
 from ..workers import Worker
 from .analysis_panel import AnalysisPanel
 from .categorical_builder import CategoricalBuilderSelection
+from .ae_table_builder import AeTableBuilderSelection
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
 from .dataset_merge_panel import DatasetMergePanel
@@ -132,6 +135,13 @@ class MergeResultContext:
     right: DatasetHandle
 
 
+@dataclass(frozen=True, slots=True)
+class AeTableResultContext:
+    source: DatasetHandle
+    population: DatasetHandle | None
+    config: AeTableConfig
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -149,6 +159,8 @@ class MainWindow(QMainWindow):
         self.merge_engine = MergeDatasetsEngine(temp_manager)
         self.proc_means_engine = ProcMeansEngine(temp_manager)
         self.categorical_engine = CategoricalEngine(temp_manager)
+        self.ae_table_engine = AeTableEngine(temp_manager)
+        self.ae_table_long_result_builder = AeTableLongResultBuilder(temp_manager)
         self.categorical_long_result_builder = CategoricalLongResultBuilder(
             temp_manager
         )
@@ -171,10 +183,12 @@ class MainWindow(QMainWindow):
         self._proc_means_input_tabs: set[DatasetTab] = set()
         self._categorical_input_tabs: set[DatasetTab] = set()
         self._rule_based_input_tabs: set[DatasetTab] = set()
+        self._ae_table_input_tabs: set[DatasetTab] = set()
         self._merge_input_tabs: set[DatasetTab] = set()
         self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
         self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
         self._rule_based_sources: dict[DatasetTab, RuleBasedResultContext] = {}
+        self._ae_table_sources: dict[DatasetTab, AeTableResultContext] = {}
         self._merge_sources: dict[DatasetTab, MergeResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
         self._deferred_directory_removals: set[Path] = set()
@@ -241,6 +255,8 @@ class MainWindow(QMainWindow):
         self.open_rule_based_long_action.triggered.connect(
             self._open_rule_based_long_result
         )
+        self.open_ae_table_long_action = QAction("Open AE Table Long Result", self)
+        self.open_ae_table_long_action.triggered.connect(self._open_ae_table_long_result)
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
@@ -250,6 +266,8 @@ class MainWindow(QMainWindow):
         self.categorical_builder_action.triggered.connect(self.show_categorical_builder)
         self.rule_based_builder_action = QAction("Rule-based Table Builder", self)
         self.rule_based_builder_action.triggered.connect(self.show_rule_based_builder)
+        self.ae_table_builder_action = QAction("AE Table Builder", self)
+        self.ae_table_builder_action.triggered.connect(self.show_ae_table_builder)
         self.compare_datasets_action = QAction("Compare Datasets", self)
         self.compare_datasets_action.setCheckable(True)
         self.compare_datasets_action.setChecked(False)
@@ -274,11 +292,13 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.variables_action)
         view_menu.addAction(self.open_categorical_long_action)
         view_menu.addAction(self.open_rule_based_long_action)
+        view_menu.addAction(self.open_ae_table_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
         tools_menu.addAction(self.categorical_builder_action)
         tools_menu.addAction(self.rule_based_builder_action)
+        tools_menu.addAction(self.ae_table_builder_action)
         tools_menu.addAction(self.compare_datasets_action)
         tools_menu.addAction(self.merge_datasets_action)
         tools_menu.addSeparator()
@@ -407,6 +427,15 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.rule_based_builder.browse_adsl_requested.connect(
             self._browse_rule_based_adsl
+        )
+        self.analysis_panel.ae_table_builder.run_requested.connect(
+            self._run_ae_table_builder
+        )
+        self.analysis_panel.ae_table_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(self, "AE Table", message)
+        )
+        self.analysis_panel.ae_table_builder.browse_adsl_requested.connect(
+            self._browse_ae_adsl
         )
 
     def _create_compare_panel(self) -> None:
@@ -595,6 +624,7 @@ class MainWindow(QMainWindow):
                 )
         self.analysis_panel.categorical_builder.set_adsl_sources(datasets)
         self.analysis_panel.rule_based_builder.set_adsl_sources(datasets)
+        self.analysis_panel.ae_table_builder.set_adsl_sources(datasets)
 
     def _browse_categorical_adsl(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
@@ -634,6 +664,22 @@ class MainWindow(QMainWindow):
             self._refresh_categorical_sources()
             self.analysis_panel.rule_based_builder.select_adsl(tab)
 
+        self._open_path(source, ready)
+
+    def _browse_ae_adsl(self) -> None:
+        initial = self.settings.last_open_directory or str(Path.home())
+        filename, _filter = QFileDialog.getOpenFileName(
+            self, "Choose ADSL Dataset", initial,
+            "SAS datasets (*.sas7bdat *.xpt);;All files (*)",
+        )
+        if not filename:
+            return
+        source = Path(filename)
+        self.settings.last_open_directory = str(source.parent)
+        self.settings.save()
+        def ready(tab: DatasetTab) -> None:
+            self._refresh_categorical_sources()
+            self.analysis_panel.ae_table_builder.select_adsl(tab)
         self._open_path(source, ready)
 
     def _run_dataset_merge(
@@ -895,6 +941,11 @@ class MainWindow(QMainWindow):
         )
         tab.rule_based_drilldown_requested.connect(
             lambda row, column, display, owner=tab: self._drilldown_rule_based(
+                owner, row, column, display
+            )
+        )
+        tab.ae_table_drilldown_requested.connect(
+            lambda row, column, display, owner=tab: self._drilldown_ae_table(
                 owner, row, column, display
             )
         )
@@ -1352,6 +1403,53 @@ class MainWindow(QMainWindow):
         self._refresh_categorical_sources()
         self.analysis_panel.show_rule_based_tab()
         self.analysis_dock.show()
+
+    def show_ae_table_builder(self) -> None:
+        active_tab = self.current_dataset_tab()
+        if active_tab is not None and is_analysis_dataset(active_tab.handle) and active_tab.cache_complete:
+            self.analysis_panel.ae_table_builder.set_dataset(
+                active_tab.handle.metadata, str(active_tab.handle.source_path),
+                active_tab.current_where_text(), active_tab.handle.kind,
+            )
+            self.analysis_panel.ae_table_builder.inherit_current_filter(active_tab.current_where_text())
+        self._refresh_categorical_sources()
+        self.analysis_panel.show_ae_table_tab()
+        self.analysis_dock.show()
+
+    def _ae_table_context(self, selection: AeTableBuilderSelection):
+        tab = self.current_dataset_tab()
+        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            QMessageBox.warning(self, "AE Table", "Select a fully loaded source dataset before using the Builder.")
+            return None
+        pop = selection.population_tab
+        if selection.denominator_type == "population" and (not isinstance(pop, DatasetTab) or not pop.cache_complete):
+            QMessageBox.warning(self, "AE Table", "Open or browse a fully loaded ADSL dataset for Population N.")
+            return None
+        try:
+            source_filter = FilterEngine(tab.handle.metadata.variables).compile(selection.dataset_filter_text)
+            pop_filter = FilterEngine(pop.handle.metadata.variables).compile(selection.population_filter_text) if isinstance(pop, DatasetTab) else FilterEngine(tab.handle.metadata.variables).compile("")
+            config = AeTableConfig(selection.soc_variable, selection.pt_variable, selection.treatment_variable, "USUBJID", source_filter, selection.dataset_filter_text, AeTableDenominator(selection.denominator_type, pop_filter, selection.population_filter_text), selection.include_any_ae, selection.any_ae_label, selection.include_total, selection.percent_digits)
+            config.validate(tab.handle.metadata, pop.handle.metadata if isinstance(pop, DatasetTab) else None)
+        except ValueError as error:
+            QMessageBox.warning(self, "AE Table", str(error)); return None
+        return tab, pop if isinstance(pop, DatasetTab) else None, config
+
+    def _run_ae_table_builder(self, selection: AeTableBuilderSelection) -> None:
+        context = self._ae_table_context(selection)
+        if context is None: return
+        source_tab, pop_tab, config = context; source_handle = source_tab.handle; pop_handle = pop_tab.handle if pop_tab else None
+        builder = self.analysis_panel.ae_table_builder; self._ae_table_input_tabs = {source_tab}
+        if pop_tab: self._ae_table_input_tabs.add(pop_tab)
+        builder.set_busy(True, "Calculating AE Table in the background…")
+        def completed(handle):
+            self._ae_table_input_tabs.clear(); builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
+            result_tab = self._make_dataset_tab(handle)
+            for directory in {source_handle.temporary_path.parent, *( [pop_handle.temporary_path.parent] if pop_handle else [])}: self._retain_directory(directory)
+            self._ae_table_sources[result_tab] = AeTableResultContext(source_handle, pop_handle, config)
+            index = self.tabs.addTab(result_tab, "AE Table Result"); self.tabs.setCurrentIndex(index); self._sync_active_tab(); result_tab.start()
+        def failed(message, details):
+            self._ae_table_input_tabs.clear(); builder.set_busy(False, "AE Table failed."); self._show_error("AE Table Failed", message, details)
+        self._submit(builder, lambda worker: self.ae_table_engine.run(source_handle, config, pop_handle, worker.report), completed, failed)
 
     def _rule_based_builder_context(
         self, selection: RuleBasedBuilderSelection
@@ -2201,6 +2299,43 @@ class MainWindow(QMainWindow):
             ),
         )
 
+    def _open_ae_table_long_result(self) -> None:
+        tab = self.current_dataset_tab()
+        if tab is None or tab.handle.kind != "ae_table":
+            return
+        title = self._unique_dataset_tab_title("AE Table Long Result")
+        def completed(handle):
+            if self.tabs.indexOf(tab) < 0:
+                self._remove_dataset_directory(handle.temporary_path.parent); return
+            long_tab = self._make_dataset_tab(handle)
+            index = self.tabs.addTab(long_tab, title); self.tabs.setCurrentIndex(index); long_tab.start()
+        self._submit(tab, lambda _worker: self.ae_table_long_result_builder.run(tab.handle, self._ae_table_sources[tab].source), completed,
+                     lambda message, details: self._show_error("AE Table Long Result Failed", message, details))
+
+    def _drilldown_ae_table(self, tab: DatasetTab, view_row: int, column_name: str, display: str) -> None:
+        context = self._ae_table_sources.get(tab); source_row = tab.model.source_row_id(view_row)
+        if context is None or source_row is None or not display: return
+        cell = lookup_ae_cell(tab.handle, source_row, column_name)
+        if cell is None: return
+        dialog, records, subjects, denominator = self._categorical_drilldown_dialog()
+        dialog.setWindowTitle("AE Table Drill-down"); dialog.exec(); selected = dialog.selected_button
+        if selected not in {records, subjects, denominator}: return
+        is_denominator = selected is denominator
+        target = context.population if is_denominator and context.config.denominator.type == "population" else context.source
+        if target is None: return
+        try:
+            where_sql, parameters = build_ae_cell_filter(target.metadata, context.config, cell, denominator=is_denominator)
+        except (KeyError, ValueError, StopIteration) as error:
+            QMessageBox.warning(self, "AE Table Drill-down", str(error)); return
+        mode = "Denominator Subjects" if is_denominator else "Numerator Subjects" if selected is subjects else "Numerator Records"
+        title = self._unique_dataset_tab_title(f"Query: {mode}")
+        self._submit(tab, lambda _worker: self.categorical_query_builder.run(target, where_sql, parameters, title, subject_id_variable=context.config.subject_id_variable if selected is subjects or is_denominator else None),
+                     lambda handle: self._add_query_tab(handle, title),
+                     lambda message, details: self._show_error("AE Table Drill-down Failed", message, details))
+
+    def _add_query_tab(self, handle, title):
+        query_tab = self._make_dataset_tab(handle); index = self.tabs.addTab(query_tab, title); self.tabs.setCurrentIndex(index); query_tab.start()
+
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if (
             self.tabs.indexOf(tab) < 0
@@ -2532,6 +2667,12 @@ class MainWindow(QMainWindow):
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )
+            ae_context = self._ae_table_sources.pop(widget, None)
+            if ae_context is not None:
+                directories = {ae_context.source.temporary_path.parent}
+                if ae_context.population is not None:
+                    directories.add(ae_context.population.temporary_path.parent)
+                self._pending_directory_releases.setdefault(widget, []).extend(directories)
             merge_context = self._merge_sources.pop(widget, None)
             if merge_context is not None:
                 self._pending_directory_releases.setdefault(widget, []).extend(
@@ -2600,6 +2741,12 @@ class MainWindow(QMainWindow):
             builder_source.current_where_text() if builder_source else "",
             builder_source.handle.kind if builder_source else "sas",
         )
+        self.analysis_panel.ae_table_builder.set_dataset(
+            builder_source.handle.metadata if builder_source else None,
+            str(builder_source.handle.source_path) if builder_source else "",
+            builder_source.current_where_text() if builder_source else "",
+            builder_source.handle.kind if builder_source else "sas",
+        )
         self._refresh_compare_datasets()
         self._refresh_merge_datasets()
         self._refresh_categorical_sources()
@@ -2623,6 +2770,9 @@ class MainWindow(QMainWindow):
         )
         self.open_rule_based_long_action.setEnabled(
             tab is not None and tab.handle.kind == "rule_based"
+        )
+        self.open_ae_table_long_action.setEnabled(
+            tab is not None and tab.handle.kind == "ae_table"
         )
 
     @staticmethod

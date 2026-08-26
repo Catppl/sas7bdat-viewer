@@ -14,7 +14,7 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
 | Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, and missing-value conditions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
-| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
+| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, AE Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
 | Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used; manual row highlights are recorded in an additional `HIGHLIGHT` column because CSV cannot store cell background colors. |
 | Code generation | SAS and R PROC MEANS code generators based on the same language-neutral JSON v3 configuration. |
 
@@ -70,6 +70,7 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 | PROC MEANS Simple | Right-click a numeric column → `PROC MEANS (Simple)` | Statistics for the current filtered result. `n (Subjects)` is distinct nonmissing `USUBJID`; `N (Values)` is the number of nonmissing analysis values. |
 | PROC MEANS Builder | `Tools > PROC MEANS Builder` | Multiple Analysis/BY/CLASS variables, Decimal Group Variables, statistics, a long-format temporary result tab, and configuration JSON. |
 | Categorical Table | `Tools > Categorical Table Builder` | Multiple categorical items, treatment `n (%)`, denominator strategies, Total, and temporary result tabs. |
+| AE Table | `Tools > AE Table Builder` | Automatically discovers Any AE → SOC → PT rows, counts distinct `USUBJID`, supports Population/Same-universe denominators, long result, drill-down, and JSON v1. |
 | SAS/R code | `SAS Code Generator…` or `R Code Generator…` in Builder | Read-only code preview and Save As; SAS/R is not executed by the viewer. |
 | Row comparison | Select multiple row numbers with `Ctrl`, then right-click Compare | Highlights only different columns in the selected rows. |
 | Dataset Compare | `Tools > Compare Datasets` | Main/QC matching, difference output, warning rows, source-row navigation, filtering, sorting, and CSV export. |
@@ -143,6 +144,14 @@ Open `Tools > Categorical Table Builder` to configure one or more categorical It
 | Baseline + Postbaseline n1 | The current analysis dataset + Numerator WHERE, with the required baseline and postbaseline WHERE predicates layered on top. A postbaseline record is eligible only when the same treatment/context/subject has an eligible baseline record. Record-count mode does not deduplicate. |
 
 Each Item can have its own context variables, such as `PARAMCD + AVISIT`, and may opt into a `(Missing)` level. The same session SQLite retains an authoritative long table with `ITEM`, `ITEM_LABEL`, context variables, `LEVEL`, `TRT`, `FREQ`, `DENOM`, and `PCT`. With the default Result tab active, select `View > Open Categorical Long Result` to open it as an independent normal Viewer tab with WHERE, sorting, visible-column selection, and CSV export. Double-clicking a populated `n (%)` cell offers Numerator Records, Numerator Subjects, and Denominator Subjects as independent temporary query tabs. Closing the Categorical Result tab does not clear the Builder configuration; only the Builder's bottom `Clear` button clears its Items, WHERE, denominator, and table settings. Categorical configuration JSON save/load is intentionally deferred; only the session result/configuration is retained while the result tab remains open.
+
+## AE Table Builder module
+
+Open `Tools > AE Table Builder` to create the standard clinical Adverse Events by System Organ Class and Preferred Term table. Select the source, independent Dataset Filter, treatment variable, SOC variable (AEBODSYS is preferred when present), and PT variable (AEDECOD is preferred when present). Subject ID is fixed to `USUBJID`; every frequency is a distinct-subject count, and SOC frequencies are calculated independently rather than summed from PT rows.
+
+Version 1 supports Population N (ADSL) and Same-universe N. The Population WHERE is independent from the AE Dataset Filter. Any AE and Total rows can be enabled, and percentages support 0–4 digits. SOC and PT rows are sorted by descending Total frequency with case-insensitive alphabetical tie-breaking. Missing SOC values are excluded from the hierarchy; missing PT values do not create PT rows but can still contribute to a non-missing SOC. Missing treatment values block calculation.
+
+Each successful run creates a paged `AE Table Result` tab and stores `dataset.sqlite`, `ae_table_config.json` v1, and the authoritative long result in the same session-temporary directory. Use `View > Open AE Table Long Result` to open the long table. Double-click an Any AE, SOC, or PT `n (%)` cell to drill down to numerator records, numerator subjects, or denominator subjects. AE results reuse normal paging, WHERE filtering, sorting, visible-column selection, copying, and CSV export. Merge Results are accepted as Python AE sources; AE SAS/R code generation is not implemented in this phase.
 
 ## Rule-based Table module
 

@@ -22,6 +22,7 @@
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
 - `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（固定 ADSL）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total 和单元格 drill-down。
 - `Tools > Rule-based Table Builder` 可按多条 Item/Row Filter 生成 distinct `USUBJID` 的临床 `n (%)` 宽表，第一版支持 Population N、Non-missing N 和 Same-universe 三种独立分母，并可从 `View > Open Rule-based Long Result` 打开长表。
+- `Tools > AE Table Builder` 可按 SOC/PT 自动生成 Any AE、System Organ Class 和 Preferred Term 的 distinct `USUBJID` `n (%)` 宽表，同时保存长表、钻取结果和 `ae_table_config.json` v1。
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
@@ -266,6 +267,14 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以及是否展示 `(Missing)` level。Population N 使用 distinct subject 是临床表格的默认选择；若改为 record count 且 ADSL 并非每受试者一条记录，百分比可能超过 100%，Builder 会明确显示该计数口径。
 
 同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。关闭 Categorical Result Tab 不会清空 Builder 配置；只有点击 Builder 底部 `Clear` 才会清除 Item、WHERE、分母和表格设置。所有结果、Query 和 ADSL/source 缓存仅在会话中保留；关闭结果 Tab 会清理对应临时 SQLite。当前版本不提供 Categorical JSON 保存/加载，后续会在配置界面稳定后补充。
+
+## AE Table Builder 模块
+
+从 `Tools > AE Table Builder` 打开 AE SOC/PT Builder。选择 source、Dataset Filter、treatment、SOC（默认优先 `AEBODSYS`）和 PT（默认优先 `AEDECOD`），即可生成临床常用的 `Any AE → SOC → PT` 层级表。Subject ID 固定为 `USUBJID`，所有频数均为 distinct subject；SOC 独立计算，不由 PT 频数相加得到。
+
+支持 `Population N (ADSL)` 和 `Same-universe N` 两种分母，Population WHERE 与 AE Dataset Filter 独立；可选择 Total、Any AE 行和 0–4 位百分比。SOC/PT 按 Total 频数降序、同频时按字母序排列。缺失 SOC 不进入层级，缺失 PT 不生成 PT 行但仍可计入非缺失 SOC；缺失 treatment 会阻止计算。
+
+成功运行后会生成宽表 `AE Table Result` Tab，并在同一临时目录保存 `dataset.sqlite`、`ae_table_config.json` v1 和权威 long result。可用 `View > Open AE Table Long Result` 打开长表；双击 Any AE、SOC 或 PT 的 `n (%)` 单元格可钻取 Numerator Records、Numerator Subjects 或 Denominator Subjects。AE 结果支持现有分页、WHERE、排序、变量选择、复制和 CSV 导出，Merge Result 可以作为 Python AE source；本阶段暂不提供 AE SAS/R Generator。
 
 ## Rule-based Table 模块
 

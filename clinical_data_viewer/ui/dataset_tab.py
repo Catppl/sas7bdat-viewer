@@ -172,6 +172,7 @@ class DatasetTab(QWidget):
     proc_means_drilldown_requested = Signal(int, str, str)
     categorical_drilldown_requested = Signal(int, str, str)
     rule_based_drilldown_requested = Signal(int, str, str)
+    ae_table_drilldown_requested = Signal(int, str, str)
 
     def __init__(self, handle: DatasetHandle, page_size: int, parent=None) -> None:
         super().__init__(parent)
@@ -439,6 +440,11 @@ class DatasetTab(QWidget):
             return
         if self.handle.kind == "rule_based":
             self.rule_based_drilldown_requested.emit(
+                index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
+            )
+            return
+        if self.handle.kind == "ae_table":
+            self.ae_table_drilldown_requested.emit(
                 index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
             )
             return
