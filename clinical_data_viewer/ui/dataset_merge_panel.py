@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -13,7 +14,44 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..merge_datasets import MergeDatasetsConfig
+from ..merge_datasets import MergeDatasetsConfig, MergeSortItem
+from ..merge_datasets.result_store import build_result_schema
+
+
+class _SortRow(QWidget):
+    def __init__(self, variable: str, direction: str, parent=None) -> None:
+        super().__init__(parent)
+        self.variable = variable
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 1, 2, 1)
+        layout.addWidget(QLabel(variable), 1)
+        self.direction = QComboBox()
+        self.direction.addItem("ASC", "ASC")
+        self.direction.addItem("DESC", "DESC")
+        self.direction.setCurrentIndex(0 if direction == "ASC" else 1)
+        self.direction.currentIndexChanged.connect(lambda _index: self.changed.emit())
+        layout.addWidget(self.direction)
+        self.up = QPushButton("↑")
+        self.up.setToolTip("Move up")
+        self.up.setFixedWidth(28)
+        self.up.clicked.connect(lambda: self.move_requested.emit(-1))
+        layout.addWidget(self.up)
+        self.down = QPushButton("↓")
+        self.down.setToolTip("Move down")
+        self.down.setFixedWidth(28)
+        self.down.clicked.connect(lambda: self.move_requested.emit(1))
+        layout.addWidget(self.down)
+        self.remove = QPushButton("Remove")
+        self.remove.setFixedWidth(64)
+        self.remove.clicked.connect(self.remove_requested)
+        layout.addWidget(self.remove)
+
+    changed = Signal()
+    move_requested = Signal(int)
+    remove_requested = Signal()
+
+    def sort_item(self) -> MergeSortItem:
+        return MergeSortItem(self.variable, self.direction.currentData())
 
 
 class DatasetMergePanel(QWidget):
@@ -26,6 +64,7 @@ class DatasetMergePanel(QWidget):
         self.setObjectName("datasetMergePanel")
         self._datasets: list[tuple[object, str, bool]] = []
         self._previous_by: tuple[str, ...] = ()
+        self._sort_items: tuple[MergeSortItem, ...] = ()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         title = QLabel("Merge Datasets")
@@ -43,7 +82,9 @@ class DatasetMergePanel(QWidget):
         self.right_dataset = QComboBox()
         for combo in (self.left_dataset, self.right_dataset):
             combo.currentIndexChanged.connect(self._datasets_changed)
-            form.addRow("Left Dataset" if combo is self.left_dataset else "Right Dataset", combo)
+            form.addRow(
+                "Left Dataset" if combo is self.left_dataset else "Right Dataset", combo
+            )
         layout.addLayout(form)
 
         layout.addWidget(QLabel("BY Variables (common variables only)"))
@@ -52,6 +93,25 @@ class DatasetMergePanel(QWidget):
         self.by_variables.itemChanged.connect(self._by_changed)
         self.by_variables.setMinimumHeight(130)
         layout.addWidget(self.by_variables, 1)
+
+        layout.addWidget(QLabel("Sort by (optional; output order)"))
+        sort_input = QHBoxLayout()
+        self.sort_editor = QLineEdit()
+        self.sort_editor.setPlaceholderText("Result variable, then press Enter")
+        self.sort_editor.returnPressed.connect(self._add_sort_from_editor)
+        sort_input.addWidget(self.sort_editor, 1)
+        self.sort_direction = QComboBox()
+        self.sort_direction.addItem("ASC", "ASC")
+        self.sort_direction.addItem("DESC", "DESC")
+        sort_input.addWidget(self.sort_direction)
+        add_sort = QPushButton("Add")
+        add_sort.clicked.connect(self._add_sort_from_editor)
+        sort_input.addWidget(add_sort)
+        layout.addLayout(sort_input)
+        self.sort_variables = QListWidget()
+        self.sort_variables.setSelectionMode(QListWidget.NoSelection)
+        self.sort_variables.setMaximumHeight(150)
+        layout.addWidget(self.sort_variables)
 
         join_row = QHBoxLayout()
         join_row.addWidget(QLabel("Join Type"))
@@ -111,9 +171,11 @@ class DatasetMergePanel(QWidget):
         self.by_variables.clear()
         if left is None or right is None or left is right:
             self.by_variables.blockSignals(False)
+            self._set_sort_items(())
             return
         right_by_name = {
-            variable.name.casefold(): variable for variable in right.handle.metadata.variables
+            variable.name.casefold(): variable
+            for variable in right.handle.metadata.variables
         }
         common = []
         for variable in left.handle.metadata.variables:
@@ -128,7 +190,9 @@ class DatasetMergePanel(QWidget):
                 f"Left: {variable.kind}; Right: {other.kind}"
                 + (" (incompatible type)" if variable.kind != other.kind else "")
             )
-            if variable.kind == other.kind and variable.name.casefold() in {name.casefold() for name in selected}:
+            if variable.kind == other.kind and variable.name.casefold() in {
+                name.casefold() for name in selected
+            }:
                 item.setCheckState(Qt.Checked)
             else:
                 item.setCheckState(Qt.Unchecked)
@@ -141,6 +205,7 @@ class DatasetMergePanel(QWidget):
             for index in range(self.by_variables.count())
             if (item := self.by_variables.item(index)).checkState() == Qt.Checked
         )
+        self._prune_sort_items()
 
     def _by_changed(self, _item: QListWidgetItem) -> None:
         self._previous_by = tuple(
@@ -152,6 +217,109 @@ class DatasetMergePanel(QWidget):
 
     def _selected_by(self) -> tuple[str, ...]:
         return self._previous_by
+
+    def _available_output_variables(self) -> tuple[str, ...]:
+        left = self.left_dataset.currentData()
+        right = self.right_dataset.currentData()
+        if left is None or right is None or not self._selected_by():
+            return ()
+        try:
+            schema, _mapping = build_result_schema(
+                left.handle.metadata,
+                right.handle.metadata,
+                self._selected_by(),
+            )
+        except (KeyError, ValueError):
+            return ()
+        return tuple(variable.name for variable in schema.all_variables)
+
+    def _prune_sort_items(self) -> None:
+        available = {
+            name.casefold(): name for name in self._available_output_variables()
+        }
+        preserved = tuple(
+            MergeSortItem(available[item.variable.casefold()], item.direction)
+            for item in self._sort_items
+            if item.variable.casefold() in available
+        )
+        self._set_sort_items(preserved)
+
+    def _set_sort_items(self, items: tuple[MergeSortItem, ...]) -> None:
+        self._sort_items = items
+        self.sort_variables.clear()
+        for item in items:
+            list_item = QListWidgetItem()
+            row = _SortRow(item.variable, item.direction)
+            row.changed.connect(self._sort_changed)
+            row.move_requested.connect(
+                lambda delta, variable=item.variable: self._move_sort(variable, delta)
+            )
+            row.remove_requested.connect(
+                lambda variable=item.variable: self._remove_sort(variable)
+            )
+            list_item.setSizeHint(row.sizeHint())
+            self.sort_variables.addItem(list_item)
+            self.sort_variables.setItemWidget(list_item, row)
+
+    def _sort_changed(self) -> None:
+        self._sort_items = self._read_sort_items()
+        self._update_enabled()
+
+    def _read_sort_items(self) -> tuple[MergeSortItem, ...]:
+        items: list[MergeSortItem] = []
+        for index in range(self.sort_variables.count()):
+            row = self.sort_variables.itemWidget(self.sort_variables.item(index))
+            if isinstance(row, _SortRow):
+                items.append(row.sort_item())
+        return tuple(items)
+
+    def _remove_sort(self, variable: str) -> None:
+        self._set_sort_items(
+            tuple(item for item in self._read_sort_items() if item.variable != variable)
+        )
+        self._update_enabled()
+
+    def _move_sort(self, variable: str, delta: int) -> None:
+        items = list(self._read_sort_items())
+        try:
+            index = next(
+                index for index, item in enumerate(items) if item.variable == variable
+            )
+        except StopIteration:
+            return
+        target = index + delta
+        if not 0 <= target < len(items):
+            return
+        items[index], items[target] = items[target], items[index]
+        self._set_sort_items(tuple(items))
+        self._update_enabled()
+
+    def _add_sort_from_editor(self) -> None:
+        text = self.sort_editor.text().strip()
+        if not text:
+            return
+        available = {
+            name.casefold(): name for name in self._available_output_variables()
+        }
+        variable = available.get(text.casefold())
+        if variable is None:
+            self.status.setText(
+                f'Sort variable "{text}" does not exist in the Merge Result output.'
+            )
+            return
+        if any(
+            item.variable.casefold() == variable.casefold()
+            for item in self._read_sort_items()
+        ):
+            self.status.setText(f'Sort variable "{variable}" is already present.')
+            return
+        direction = self.sort_direction.currentData() or "ASC"
+        self._set_sort_items(
+            (*self._read_sort_items(), MergeSortItem(variable, direction))
+        )
+        self.sort_editor.clear()
+        self.sort_direction.setCurrentIndex(0)
+        self._update_enabled()
 
     def _update_enabled(self) -> None:
         left = self.left_dataset.currentData()
@@ -172,11 +340,16 @@ class DatasetMergePanel(QWidget):
             self.status.setText("Select at least one BY variable.")
         else:
             self.status.setText("")
+        self._sort_items = self._read_sort_items()
         if complete:
+            sort_text = ", ".join(
+                f"{item.variable} {item.direction}" for item in self._sort_items
+            )
             self.summary.setText(
                 f"Left rows: {left.handle.metadata.row_count:,}\n"
                 f"Right rows: {right.handle.metadata.row_count:,}\n"
-                f"BY: {', '.join(self._selected_by()) or '—'}"
+                f"BY: {', '.join(self._selected_by()) or '—'}\n"
+                f"Sort: {sort_text or 'Default stable order'}"
             )
         else:
             self.summary.setText("Select two datasets and at least one BY variable.")
@@ -186,7 +359,11 @@ class DatasetMergePanel(QWidget):
         right = self.right_dataset.currentData()
         if left is None or right is None:
             return
-        config = MergeDatasetsConfig(self._selected_by(), self.join_type.currentData())
+        config = MergeDatasetsConfig(
+            self._selected_by(),
+            self.join_type.currentData(),
+            self._read_sort_items(),
+        )
         try:
             config.validate()
         except ValueError as error:
@@ -198,6 +375,9 @@ class DatasetMergePanel(QWidget):
         self.left_dataset.setEnabled(not busy)
         self.right_dataset.setEnabled(not busy)
         self.by_variables.setEnabled(not busy)
+        self.sort_editor.setEnabled(not busy)
+        self.sort_direction.setEnabled(not busy)
+        self.sort_variables.setEnabled(not busy)
         self.join_type.setEnabled(not busy)
         self.run_button.setEnabled(not busy and bool(self._selected_by()))
         if message:

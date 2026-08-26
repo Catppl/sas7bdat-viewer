@@ -43,6 +43,7 @@ from ..codegen.sas import SasProcMeansGenerator
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
+from ..dataset_utils import is_analysis_dataset
 from ..domain import CacheProgress, DatasetHandle
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
@@ -562,7 +563,7 @@ class MainWindow(QMainWindow):
         datasets: list[tuple[object, str, bool]] = []
         for index in range(self.tabs.count()):
             tab = self.tabs.widget(index)
-            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+            if isinstance(tab, DatasetTab) and is_analysis_dataset(tab.handle):
                 datasets.append(
                     (
                         tab,
@@ -660,12 +661,21 @@ class MainWindow(QMainWindow):
                 self._merge_input_tabs.clear()
                 handle = result.handle
                 summary = result.summary
+                sort_text = ", ".join(
+                    f"{item.variable} {item.direction}" for item in config.sort_by
+                )
+                sort_clause = (
+                    f" Sort order: {sort_text}."
+                    if sort_text
+                    else " Sort order: Default stable order."
+                )
                 self.merge_panel.set_busy(
                     False,
-                    f"Created {handle.metadata.row_count:,} rows: "
-                    f"{summary.matched_rows:,} matched, "
-                    f"{summary.left_only_rows:,} left only, "
-                    f"{summary.right_only_rows:,} right only.",
+                    f"Created {handle.metadata.row_count:,} result rows: "
+                    f"{summary.matched_rows:,} matched result rows, "
+                    f"{summary.left_only_rows:,} left-only rows, "
+                    f"{summary.right_only_rows:,} right-only rows."
+                    + sort_clause,
                 )
                 result_tab = self._make_dataset_tab(handle)
                 self._retain_directory(left_handle.temporary_path.parent)
@@ -1295,7 +1305,7 @@ class MainWindow(QMainWindow):
         active_tab = self.current_dataset_tab()
         if (
             active_tab is not None
-            and active_tab.handle.kind == "sas"
+            and is_analysis_dataset(active_tab.handle)
             and active_tab.cache_complete
         ):
             # Opening the Builder after applying a source-tab WHERE should
@@ -1317,7 +1327,7 @@ class MainWindow(QMainWindow):
         active_tab = self.current_dataset_tab()
         if (
             active_tab is not None
-            and active_tab.handle.kind == "sas"
+            and is_analysis_dataset(active_tab.handle)
             and active_tab.cache_complete
         ):
             self.analysis_panel.rule_based_builder.set_dataset(
@@ -1336,7 +1346,7 @@ class MainWindow(QMainWindow):
         self, selection: RuleBasedBuilderSelection
     ) -> tuple[DatasetTab, DatasetTab | None, RuleBasedConfig] | None:
         tab = self.current_dataset_tab()
-        if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
+        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
             QMessageBox.warning(
                 self,
                 "Rule-based Table",
@@ -1403,7 +1413,7 @@ class MainWindow(QMainWindow):
 
     def _run_rule_based_builder(self, selection: RuleBasedBuilderSelection) -> None:
         active_tab = self.current_dataset_tab()
-        if active_tab is None or active_tab.handle.kind != "sas":
+        if active_tab is None or not is_analysis_dataset(active_tab.handle):
             return
         context = self._rule_based_builder_context(selection)
         if context is None:
@@ -1454,7 +1464,7 @@ class MainWindow(QMainWindow):
         self, selection: CategoricalBuilderSelection
     ) -> tuple[DatasetTab, DatasetTab | None, CategoricalConfig] | None:
         tab = self.current_dataset_tab()
-        if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
+        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
             QMessageBox.warning(
                 self,
                 "Categorical Table",
@@ -1523,7 +1533,7 @@ class MainWindow(QMainWindow):
 
     def _run_categorical_builder(self, selection: CategoricalBuilderSelection) -> None:
         active_tab = self.current_dataset_tab()
-        if active_tab is None or active_tab.handle.kind != "sas":
+        if active_tab is None or not is_analysis_dataset(active_tab.handle):
             return
         builder = self.analysis_panel.categorical_builder
         current_filter = active_tab.current_where_text()
@@ -1593,7 +1603,7 @@ class MainWindow(QMainWindow):
 
     def _proc_means_builder_context(self, selection, action_title: str):
         tab = self.current_dataset_tab()
-        if tab is None or tab.handle.kind != "sas" or not tab.cache_complete:
+        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
             QMessageBox.warning(
                 self,
                 action_title,
@@ -1681,7 +1691,7 @@ class MainWindow(QMainWindow):
 
     def _run_proc_means_builder(self, selection) -> None:
         active_tab = self.current_dataset_tab()
-        if active_tab is None or active_tab.handle.kind != "sas":
+        if active_tab is None or not is_analysis_dataset(active_tab.handle):
             return
         current_filter = active_tab.current_where_text()
         builder_filter = self.analysis_panel.builder.current_filter_text()
@@ -2095,7 +2105,7 @@ class MainWindow(QMainWindow):
         if (
             self.tabs.indexOf(tab) < 0
             or not tab.cache_complete
-            or tab.handle.kind != "sas"
+            or not is_analysis_dataset(tab.handle)
         ):
             return
         variable = next(
@@ -2466,7 +2476,9 @@ class MainWindow(QMainWindow):
             self.compare_panel.set_advanced_checked(tab.advanced_visible)
         builder_source = (
             tab
-            if tab is not None and tab.handle.kind == "sas" and tab.cache_complete
+            if tab is not None
+            and is_analysis_dataset(tab.handle)
+            and tab.cache_complete
             else None
         )
         self.analysis_panel.builder.set_dataset(
@@ -2493,7 +2505,7 @@ class MainWindow(QMainWindow):
         enabled = tab is not None
         self.reload_action.setEnabled(
             enabled
-            and tab.handle.kind == "sas"
+            and is_analysis_dataset(tab.handle)
             and not tab.reload_in_progress
             and (tab.cache_complete or tab.cache_failed)
         )
@@ -2541,7 +2553,7 @@ class MainWindow(QMainWindow):
         self.source_status.setText(f"Source:  {source}")
         if (
             tab is self.current_dataset_tab()
-            and tab.handle.kind == "sas"
+            and is_analysis_dataset(tab.handle)
             and tab.cache_complete
         ):
             self.analysis_panel.builder.set_dataset(

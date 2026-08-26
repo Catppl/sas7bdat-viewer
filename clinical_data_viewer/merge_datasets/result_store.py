@@ -47,7 +47,13 @@ def build_result_schema(
         variable = left_by_name[name.casefold()]
         output_name = _unique_name(variable.name, used)
         result.append(
-            VariableMetadata(output_name, variable.label, variable.kind, variable.length, variable.format)
+            VariableMetadata(
+                output_name,
+                variable.label,
+                variable.kind,
+                variable.length,
+                variable.format,
+            )
         )
     left_non_by: list[tuple[str, str]] = []
     for variable in left.variables:
@@ -56,7 +62,13 @@ def build_result_schema(
         output_name = _unique_name(variable.name, used)
         left_non_by.append((variable.name, output_name))
         result.append(
-            VariableMetadata(output_name, variable.label, variable.kind, variable.length, variable.format)
+            VariableMetadata(
+                output_name,
+                variable.label,
+                variable.kind,
+                variable.length,
+                variable.format,
+            )
         )
     right_mapping: list[tuple[str, str, str]] = []
     for variable in right.variables:
@@ -70,7 +82,13 @@ def build_result_schema(
         output_name = _unique_name(preferred_name, used)
         right_mapping.append((variable.name, output_name, variable.kind))
         result.append(
-            VariableMetadata(output_name, variable.label, variable.kind, variable.length, variable.format)
+            VariableMetadata(
+                output_name,
+                variable.label,
+                variable.kind,
+                variable.length,
+                variable.format,
+            )
         )
     status = _unique_name("_MERGE_STATUS", used)
     left_source = _unique_name("_LEFT_SOURCE_ROW", used)
@@ -82,7 +100,9 @@ def build_result_schema(
             VariableMetadata(right_source, "Right source row", "numeric"),
         )
     )
-    return MergeResultSchema(tuple(result), status, left_source, right_source), tuple(right_mapping)
+    return MergeResultSchema(tuple(result), status, left_source, right_source), tuple(
+        right_mapping
+    )
 
 
 class MergeResultWriter:
@@ -121,7 +141,9 @@ class MergeResultWriter:
             "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, "
             "total_rows INTEGER, complete INTEGER NOT NULL)"
         )
-        self.connection.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (row_count, row_count))
+        self.connection.execute(
+            "INSERT INTO cache_info VALUES (?, ?, 1)", (row_count, row_count)
+        )
         self.connection.commit()
         self.connection.close()
         marker = result_directory / "merge-result.tmp"

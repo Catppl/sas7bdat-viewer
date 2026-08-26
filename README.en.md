@@ -195,6 +195,8 @@ The result opens as `Merge Result - Left + Right` and reuses the normal Viewer V
 
 The result is written only to session-temporary SQLite. Left and Right are never modified and no SAS file is generated. Closing the Merge Result tab releases its result and any retained source-cache directories.
 
+Merge Result keeps `kind="merge"`, but is accepted as an analysis source for PROC MEANS, Categorical Table, Rule-based Table, and another Merge. Other temporary result kinds are not automatically added to those source selectors. The optional `Sort by` editor accepts a result variable on Enter, defaults each new item to `ASC`, supports `DESC`, reordering, and removal. With no user sort, the output uses a stable source-row order; user sort values are followed by source-row tie-breakers.
+
 ## System testing and packaging
 
 ### Test environment

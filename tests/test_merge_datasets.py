@@ -5,8 +5,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from clinical_data_viewer.categorical import (
+    CategoricalConfig,
+    CategoricalItem,
+    DenominatorConfig,
+)
+from clinical_data_viewer.dataset_utils import is_analysis_dataset
 from clinical_data_viewer.domain import DatasetHandle, DatasetMetadata, VariableMetadata
-from clinical_data_viewer.merge_datasets import MergeDatasetsConfig, MergeDatasetsEngine
+from clinical_data_viewer.merge_datasets import (
+    MergeDatasetsConfig,
+    MergeDatasetsEngine,
+    MergeSortItem,
+)
+from clinical_data_viewer.proc_means import ProcMeansConfig, ProcMeansEngine
+from clinical_data_viewer.rule_based import RuleBasedConfig, RuleBasedRow
 from clinical_data_viewer.temp_manager import TempManager
 
 
@@ -28,7 +40,9 @@ def _write_source(path: Path, variables, rows) -> None:
     connection.execute(
         "CREATE TABLE cache_info (cached_rows INTEGER, total_rows INTEGER, complete INTEGER)"
     )
-    connection.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows)))
+    connection.execute(
+        "INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows))
+    )
     connection.commit()
     connection.close()
 
@@ -77,8 +91,12 @@ class MergeDatasetsTests(unittest.TestCase):
     def _rows(self, result):
         connection = sqlite3.connect(result.handle.database_path)
         try:
-            columns = [row[1] for row in connection.execute("PRAGMA table_info(dataset)")]
-            return columns, connection.execute("SELECT * FROM dataset ORDER BY _source_row").fetchall()
+            columns = [
+                row[1] for row in connection.execute("PRAGMA table_info(dataset)")
+            ]
+            return columns, connection.execute(
+                "SELECT * FROM dataset ORDER BY _source_row"
+            ).fetchall()
         finally:
             connection.close()
 
@@ -119,7 +137,9 @@ class MergeDatasetsTests(unittest.TestCase):
     def test_many_to_many_is_detected_without_changing_sources(self) -> None:
         variables = (("USUBJID", "character"), ("VALUE", "numeric"))
         left = _handle(self.root, "many_left", variables, (("A", 1), ("A", 2)))
-        right = _handle(self.root, "many_right", variables, (("A", 3), ("A", 4), ("A", 5)))
+        right = _handle(
+            self.root, "many_right", variables, (("A", 3), ("A", 4), ("A", 5))
+        )
         config = MergeDatasetsConfig(("USUBJID",), "left")
         summary = self.engine.inspect(left, right, config)
         self.assertTrue(summary.many_to_many)
@@ -129,13 +149,20 @@ class MergeDatasetsTests(unittest.TestCase):
         self.assertEqual(result.summary.merged_rows, 6)
         for handle, expected in ((left, 2), (right, 3)):
             connection = sqlite3.connect(handle.database_path)
-            self.assertEqual(connection.execute("SELECT count(*) FROM dataset").fetchone()[0], expected)
+            self.assertEqual(
+                connection.execute("SELECT count(*) FROM dataset").fetchone()[0],
+                expected,
+            )
             connection.close()
 
     def test_missing_character_keys_do_not_match(self) -> None:
         variables = (("KEY", "character"), ("VALUE", "numeric"))
-        left = _handle(self.root, "missing_left", variables, ((None, 1), ("", 2), ("A", 3)))
-        right = _handle(self.root, "missing_right", variables, ((None, 4), ("", 5), ("A", 6)))
+        left = _handle(
+            self.root, "missing_left", variables, ((None, 1), ("", 2), ("A", 3))
+        )
+        right = _handle(
+            self.root, "missing_right", variables, ((None, 4), ("", 5), ("A", 6))
+        )
         result = self.engine.run(left, right, MergeDatasetsConfig(("KEY",), "full"))
         self.assertEqual(result.summary.matched_rows, 1)
         self.assertEqual(result.summary.merged_rows, 5)
@@ -146,9 +173,15 @@ class MergeDatasetsTests(unittest.TestCase):
             ("PARAMCD", "character"),
             ("VALUE", "numeric"),
         )
-        left = _handle(self.root, "multi_left", variables, (("A", "ALT", 1), ("A", "AST", 2)))
-        right = _handle(self.root, "multi_right", variables, (("A", "ALT", 3), ("A", "OTHER", 4)))
-        result = self.engine.run(left, right, MergeDatasetsConfig(("USUBJID", "PARAMCD"), "inner"))
+        left = _handle(
+            self.root, "multi_left", variables, (("A", "ALT", 1), ("A", "AST", 2))
+        )
+        right = _handle(
+            self.root, "multi_right", variables, (("A", "ALT", 3), ("A", "OTHER", 4))
+        )
+        result = self.engine.run(
+            left, right, MergeDatasetsConfig(("USUBJID", "PARAMCD"), "inner")
+        )
         self.assertEqual(result.summary.matched_rows, 1)
         mismatch = _handle(
             self.root,
@@ -158,6 +191,95 @@ class MergeDatasetsTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "incompatible types"):
             self.engine.validate(self.left, mismatch, MergeDatasetsConfig(("USUBJID",)))
+
+    def test_user_sort_and_stable_tie_breaker(self) -> None:
+        result = self.engine.run(
+            self.left,
+            self.right,
+            MergeDatasetsConfig(
+                ("USUBJID",),
+                "left",
+                (MergeSortItem("AGE", "DESC"),),
+            ),
+        )
+        _columns, rows = self._rows(result)
+        age_index = _columns.index("AGE")
+        left_row_index = _columns.index("_LEFT_SOURCE_ROW")
+        ages = [row[age_index] for row in rows]
+        self.assertEqual(ages, sorted(ages, reverse=True))
+        self.assertEqual(
+            [row[left_row_index] for row in rows],
+            [3, 2, 1],
+        )
+
+    def test_sort_validation_and_old_config_compatibility(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Duplicate sort variable"):
+            MergeDatasetsConfig(
+                ("USUBJID",),
+                sort_by=(MergeSortItem("AGE"), MergeSortItem("age", "DESC")),
+            ).validate()
+        with self.assertRaisesRegex(ValueError, "Sort direction"):
+            MergeDatasetsConfig(
+                ("USUBJID",), sort_by=(MergeSortItem("AGE", "DOWN"),)
+            ).validate()
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            self.engine.run(
+                self.left,
+                self.right,
+                MergeDatasetsConfig(
+                    ("USUBJID",), sort_by=(MergeSortItem("NOT_A_COLUMN"),)
+                ),
+            )
+        # A config created before sort_by existed remains valid and uses the
+        # stable source-row order.
+        result = self.engine.run(
+            self.left, self.right, MergeDatasetsConfig(("USUBJID",), "left")
+        )
+        self.assertEqual(result.summary.merged_rows, 3)
+
+    def test_merge_result_is_analysis_source_and_can_be_merged_again(self) -> None:
+        first = self.engine.run(
+            self.left, self.right, MergeDatasetsConfig(("USUBJID",), "left")
+        )
+        self.assertEqual(first.handle.kind, "merge")
+        self.assertTrue(is_analysis_dataset(first.handle))
+        means = ProcMeansEngine(self.temp_manager).run(
+            first.handle,
+            ProcMeansConfig(("AGE",), statistics=("mean",)),
+        )
+        self.assertEqual(means.kind, "proc_means")
+        RuleBasedConfig(
+            (RuleBasedRow("r1", "TRT"),),
+            "TRT",
+        ).validate(first.handle.metadata)
+        CategoricalConfig(
+            (CategoricalItem("TRT"),),
+            "TRT",
+            "USUBJID",
+            count_type="record",
+            denominator=DenominatorConfig(
+                type="nonmissing", analysis_value_variable="AGE"
+            ),
+        ).validate(first.handle.metadata)
+        third = _handle(
+            self.root,
+            "third",
+            (("USUBJID", "character"), ("FLAG", "character")),
+            (("A", "Y"), ("D", "N")),
+        )
+        second = self.engine.run(
+            first.handle,
+            third,
+            MergeDatasetsConfig(("USUBJID",), "left"),
+        )
+        self.assertEqual(second.handle.kind, "merge")
+        self.assertEqual(second.summary.matched_rows, 1)
+
+    def test_non_analysis_result_kinds_are_excluded_by_predicate(self) -> None:
+        self.assertTrue(is_analysis_dataset("sas"))
+        self.assertTrue(is_analysis_dataset("merge"))
+        for kind in ("compare", "proc_means", "categorical", "rule_based", "query"):
+            self.assertFalse(is_analysis_dataset(kind))
 
 
 if __name__ == "__main__":

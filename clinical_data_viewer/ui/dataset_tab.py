@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..column_filters import ColumnFilterSpec, combine_filters, compose_where_text
+from ..dataset_utils import is_analysis_dataset
 from ..domain import DatasetHandle, FindResult, SortSpec
 from ..filter_engine import CompiledFilter
 from ..table_model import DatasetTableModel
@@ -255,7 +256,7 @@ class DatasetTab(QWidget):
 
         self.table = CopyTableView()
         self.table.setProperty("pairedDataset", bool(handle.metadata.pair_id_column))
-        self.table.setProperty("allowProcMeans", handle.kind == "sas")
+        self.table.setProperty("allowProcMeans", is_analysis_dataset(handle))
         self.table.setProperty("allowManualHighlights", handle.kind != "compare")
         self.filter_header = FilterHeaderView(self.table)
         self.table.setHorizontalHeader(self.filter_header)
@@ -665,7 +666,7 @@ class DatasetTab(QWidget):
         means_action.setEnabled(
             self.cache_complete
             and variable.kind == "numeric"
-            and self.handle.kind == "sas"
+            and is_analysis_dataset(self.handle)
         )
         means_action.triggered.connect(
             lambda: self.proc_means_requested.emit(variable_name)

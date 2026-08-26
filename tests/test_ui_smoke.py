@@ -11,6 +11,114 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
+    def test_merge_sort_variables_accept_enter_and_default_ascending(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.dataset_merge_panel import DatasetMergePanel
+
+        class Tab:
+            def __init__(self, name: str) -> None:
+                self.handle = type("Handle", (), {})()
+                self.handle.metadata = DatasetMetadata(
+                    name,
+                    2,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("AESEQ", kind="numeric"),
+                    ),
+                )
+                self.handle.source_path = Path(f"{name}.sas7bdat")
+                self.cache_complete = True
+
+        application = QApplication.instance() or QApplication([])
+        left, right = Tab("left"), Tab("right")
+        panel = DatasetMergePanel()
+        panel.set_datasets([(left, "left", True), (right, "right", True)])
+        panel.left_dataset.setCurrentIndex(1)
+        panel.right_dataset.setCurrentIndex(2)
+        panel.by_variables.item(0).setCheckState(Qt.Checked)
+        panel.sort_editor.setText("USUBJID")
+        panel.sort_editor.returnPressed.emit()
+        self.assertEqual(panel._read_sort_items()[0].variable, "USUBJID")
+        self.assertEqual(panel._read_sort_items()[0].direction, "ASC")
+        self.assertEqual(panel.sort_editor.text(), "")
+        panel.sort_editor.setText("AESEQ")
+        panel.sort_direction.setCurrentIndex(1)
+        panel.sort_editor.returnPressed.emit()
+        self.assertEqual(
+            [(item.variable, item.direction) for item in panel._read_sort_items()],
+            [("USUBJID", "ASC"), ("AESEQ", "DESC")],
+        )
+        panel.deleteLater()
+        application.processEvents()
+
+    def test_merge_result_is_forwarded_to_analysis_builders(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = TempManager(root / "temp")
+            window = MainWindow(TestSettings(), manager, FilterHistory(root / "history.sqlite"))
+            metadata = DatasetMetadata(
+                "Merge Result - ADAE + ADSL",
+                2,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRT01A"),
+                    VariableMetadata("AVAL", kind="numeric"),
+                ),
+            )
+            handle = DatasetHandle(
+                root / "Merge Result - ADAE + ADSL",
+                root / "merge-result.tmp",
+                root / "merge.sqlite",
+                metadata,
+                2,
+                True,
+                kind="merge",
+            )
+            tab = DatasetTab(handle, 500)
+            tab.applied_where = 'TRT01A = "A"'
+            tab.where_editor.setPlainText(tab.applied_where)
+            window.tabs.addTab(tab, "Merge Result")
+            window.tabs.setCurrentWidget(tab)
+            window._sync_active_tab()
+            self.assertTrue(window.merge_panel.left_dataset.count() >= 2)
+            window.show_proc_means_builder()
+            self.assertIs(window.analysis_panel.builder._metadata, metadata)
+            window.show_categorical_builder()
+            self.assertEqual(
+                window.analysis_panel.categorical_builder.current_filter_text(),
+                'TRT01A = "A"',
+            )
+            window.show_rule_based_builder()
+            self.assertEqual(
+                window.analysis_panel.rule_based_builder.current_filter_text(),
+                'TRT01A = "A"',
+            )
+            window.close()
+            application.processEvents()
+
     def test_main_window_constructs_with_reference_layout(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtCore import QPoint, Qt

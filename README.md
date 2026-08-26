@@ -26,6 +26,7 @@
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
 - `Tools > Merge Datasets` 打开两数据集 Merge 面板；从已完成缓存的 Tab 选择 Left/Right，按一个或多个共同 BY Variables 执行 Left/Right/Inner/Full Join。运行前严格检查 BY 类型并检测 many-to-many，结果写入独立会话临时 SQLite，保留 `_MERGE_STATUS`、`_LEFT_SOURCE_ROW`、`_RIGHT_SOURCE_ROW` 来源追踪列，不应用输入 Tab 的 WHERE。
+- Merge Result 保持 `kind="merge"`，但可继续作为 PROC MEANS、Categorical Table、Rule-based Table 和后续 Merge 的 analysis source；其他临时结果不会自动进入这些 source selector。
 - `Ctrl+F` 在当前筛选、排序结果的当前显示列中查找文本；`F3`/`Shift+F3` 查找下一个/上一个；`Ctrl+G` 按当前结果行号跳转。
 - Reload 从原始路径生成新副本，并尽量保留显示列、WHERE 输入和已应用筛选；大文件重新缓存完成后再应用 WHERE。
 - 文件复制、SAS 读取、缓存构建、查询筛选、Reload 和 CSV 导出均通过 Qt 线程池运行。
@@ -469,6 +470,7 @@ Windows 默认目录：
 | --- | --- |
 | Join Type | `Left Join`、`Right Join`、`Inner Join`、`Full Join`。 |
 | BY Variables | 只列出两侧共同变量；多个变量按完整组合匹配。变量类型必须兼容，字符/数值不自动转换。 |
+| Sort by | 可按最终结果列添加多个排序变量；按 Enter 确认后可继续添加，默认 `ASC`，每项可改为 `DESC`，并可调整优先级或删除。未设置时使用稳定 source-row 顺序。 |
 | 同名变量 | BY 变量只保留一份；非 BY 的 Right 同名变量使用稳定的 `_RIGHT` 后缀，必要时追加 `_2`。 |
 | Missing BY | 缺失值不与另一侧缺失值匹配；字符空字符串和空白也按 missing 处理。 |
 | Many-to-many | 运行前统计两侧重复 key；若同一 key 两侧都重复，会弹出警告，用户确认后才继续。 |
@@ -478,7 +480,7 @@ Windows 默认目录：
 - `_MERGE_STATUS`：`MATCHED`、`LEFT_ONLY` 或 `RIGHT_ONLY`。
 - `_LEFT_SOURCE_ROW` / `_RIGHT_SOURCE_ROW`：对应源缓存中的 `_source_row`，没有对应记录时为空。
 
-结果只写入会话临时 SQLite，不修改 Left/Right，也不生成 SAS 文件。关闭 Merge Result Tab 后会释放结果及其为来源追踪而保留的临时缓存。
+结果只写入会话临时 SQLite，不修改 Left/Right，也不生成 SAS 文件。Merge Result 可以继续进入后续分析链路；关闭结果 Tab 后会在所有下游结果释放后清理对应临时缓存。
 
 ## 系统测试与打包
 
