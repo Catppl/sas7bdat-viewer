@@ -21,6 +21,7 @@ class CsvExporter:
         compiled_filter: CompiledFilter,
         sort: SortSpec | None,
         progress: Callable[[str], None] | None = None,
+        highlight_rows: dict[int, str] | None = None,
     ) -> int:
         notify = progress or (lambda _message: None)
         requested = _validated_columns(columns, handle.metadata)
@@ -36,6 +37,8 @@ class CsvExporter:
         decimal_base = handle.metadata.decimal_base_column
         if decimal_base:
             select += ", " + quote_identifier(decimal_base)
+        include_highlights = bool(highlight_rows)
+        select = "_source_row, " + select
         decimal_offsets = dict(handle.metadata.statistic_decimal_offsets)
         sql = (
             f"SELECT {select} FROM dataset{where}{order_clause(sort, handle.metadata)}"
@@ -53,7 +56,7 @@ class CsvExporter:
             ):
                 connection.execute("PRAGMA case_sensitive_like=ON")
                 writer = csv.writer(stream, lineterminator="\n")
-                writer.writerow(selected)
+                writer.writerow([*selected, "HIGHLIGHT"] if include_highlights else selected)
                 cursor = connection.execute(sql, compiled_filter.parameters)
                 while True:
                     rows = cursor.fetchmany(2_000)
@@ -61,11 +64,12 @@ class CsvExporter:
                         break
                     # Keep row structure while converting SQLite NULL to an empty CSV field.
                     writer.writerows(
-                        self._format_row(
+                        self._format_export_row(
                             row,
                             selected,
                             decimal_offsets,
                             bool(decimal_base),
+                            highlight_rows if include_highlights else None,
                         )
                         for row in rows
                     )
@@ -78,14 +82,17 @@ class CsvExporter:
             raise
 
     @staticmethod
-    def _format_row(
+    def _format_export_row(
         row: tuple[object, ...],
         columns: list[str],
         decimal_offsets: dict[str, int],
         has_decimal_base: bool,
+        highlight_rows: dict[int, str] | None = None,
     ) -> tuple[object, ...]:
-        base = int(row[-1] or 0) if has_decimal_base else 0
-        values = row[:-1] if has_decimal_base else row
+        source_row = int(row[0])
+        data = row[1:]
+        base = int(data[-1] or 0) if has_decimal_base else 0
+        values = data[:-1] if has_decimal_base else data
         formatted: list[object] = []
         for column, value in zip(columns, values, strict=True):
             if value is None:
@@ -97,4 +104,6 @@ class CsvExporter:
                 quantum = Decimal(1).scaleb(-decimals)
                 rounded = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)
                 formatted.append(f"{rounded:.{decimals}f}")
+        if highlight_rows is not None:
+            formatted.append(highlight_rows.get(source_row, ""))
         return tuple(formatted)

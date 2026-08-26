@@ -10,6 +10,12 @@ from .domain import DatasetMetadata, SortSpec
 
 INVALID_INDEX = QModelIndex()
 
+MANUAL_HIGHLIGHT_LABELS = {
+    "#e8ddff": "Light Purple",
+    "#dff3e5": "Light Green",
+    "#ffe4c2": "Light Orange",
+}
+
 
 class DatasetTableModel(QAbstractTableModel):
     """Virtual table model that keeps only a bounded number of SQLite pages."""
@@ -114,7 +120,7 @@ class DatasetTableModel(QAbstractTableModel):
         if role == Qt.BackgroundRole and is_categorical_header:
             return QColor("#edf5fc")
         manual = self.manual_highlight_color(index.row())
-        if manual is not None:
+        if role == Qt.BackgroundRole and manual is not None:
             return manual
         return None
 
@@ -311,6 +317,15 @@ class DatasetTableModel(QAbstractTableModel):
     def manual_highlight_color(self, row: int) -> QColor | None:
         source_row = self.source_row_id(row)
         return None if source_row is None else self.manual_row_highlights.get(source_row)
+
+    def manual_highlights_for_export(self) -> dict[int, str]:
+        """Return manual row highlights keyed by the persisted source row ID."""
+        return {
+            source_row: MANUAL_HIGHLIGHT_LABELS.get(
+                color.name().casefold(), color.name()
+            )
+            for source_row, color in self.manual_row_highlights.items()
+        }
 
     def set_manual_row_highlight(self, rows: set[int], color: QColor) -> None:
         source_rows = {

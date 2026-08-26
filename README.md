@@ -17,7 +17,7 @@
 - 逻辑与条件支持 `AND`/`&`、`OR`/`|`/`!`、`NOT`/`^`/`~`、`IN`、`NOT IN`、`BETWEEN ... AND ...`、`CONTAINS`/`?`、`LIKE`、`IS NULL`、`IS MISSING`、`MISSING()` 和括号。
 - `Ctrl+Enter` 或 Apply 执行；语法/类型/变量错误会指出原因和位置，并保留输入。
 - 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。列头互动筛选会同步生成可编辑的 SAS-like WHERE，并与手写条件作为一条完整条件保存。
-- CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。
+- CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。存在手工行高亮时会额外增加 `HIGHLIGHT` 列记录颜色名称，因为 CSV 本身不能保存单元格背景色。
 - 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
 - `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（固定 ADSL）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total 和单元格 drill-down。
@@ -25,6 +25,7 @@
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
+- `Tools > Merge Datasets` 打开两数据集 Merge 面板；从已完成缓存的 Tab 选择 Left/Right，按一个或多个共同 BY Variables 执行 Left/Right/Inner/Full Join。运行前严格检查 BY 类型并检测 many-to-many，结果写入独立会话临时 SQLite，保留 `_MERGE_STATUS`、`_LEFT_SOURCE_ROW`、`_RIGHT_SOURCE_ROW` 来源追踪列，不应用输入 Tab 的 WHERE。
 - `Ctrl+F` 在当前筛选、排序结果的当前显示列中查找文本；`F3`/`Shift+F3` 查找下一个/上一个；`Ctrl+G` 按当前结果行号跳转。
 - Reload 从原始路径生成新副本，并尽量保留显示列、WHERE 输入和已应用筛选；大文件重新缓存完成后再应用 WHERE。
 - 文件复制、SAS 读取、缓存构建、查询筛选、Reload 和 CSV 导出均通过 Qt 线程池运行。
@@ -435,6 +436,7 @@ python -m clinical_data_viewer
 | SAS/R 代码 | Builder 中点击 `SAS Code Generator…` 或 `R Code Generator…` | 生成代码预览，不执行 SAS/R。 |
 | 行比较 | 按住 `Ctrl` 选择多个行号 → 右键 Compare | 只高亮选中行中有差异的列。 |
 | 数据集比较 | `Tools > Compare Datasets` | 选择 Main/QC，生成临时 Compare Result Tab；支持筛选、排序、源行跳转和 CSV。 |
+| 数据集合并 | `Tools > Merge Datasets` | 选择 Left/Right、共同 BY 和四种 Join，检测类型/重复 key，生成带状态与来源行的临时 Merge Result Tab。 |
 | 导出 CSV | `Export CSV` | 导出当前筛选结果、当前显示列和当前排序；使用 UTF-8 BOM。 |
 | 重新加载 | `Reload` | 从原始路径重新生成临时副本，并尽量保留 WHERE 和显示列。 |
 
@@ -458,6 +460,25 @@ Windows 默认目录：
 ```
 
 历史仅保存原始路径、文件名、WHERE 和 UTC 时间，不保存任何数据行。
+
+## Merge Datasets 模块
+
+从 `Tools > Merge Datasets` 打开右侧面板。选择两个已经打开且完成缓存的数据集作为 Left 和 Right，再勾选两侧共同存在的一个或多个 BY Variables。输入数据集的当前 WHERE、列筛选、排序和显示列都会被忽略；Merge 始终使用两个完整缓存。
+
+| 配置 | 说明 |
+| --- | --- |
+| Join Type | `Left Join`、`Right Join`、`Inner Join`、`Full Join`。 |
+| BY Variables | 只列出两侧共同变量；多个变量按完整组合匹配。变量类型必须兼容，字符/数值不自动转换。 |
+| 同名变量 | BY 变量只保留一份；非 BY 的 Right 同名变量使用稳定的 `_RIGHT` 后缀，必要时追加 `_2`。 |
+| Missing BY | 缺失值不与另一侧缺失值匹配；字符空字符串和空白也按 missing 处理。 |
+| Many-to-many | 运行前统计两侧重复 key；若同一 key 两侧都重复，会弹出警告，用户确认后才继续。 |
+
+结果以 `Merge Result - Left + Right` 临时 Tab 打开，复用普通 Viewer 的 Variables、WHERE、表头筛选、排序、复制和 CSV 导出。结果还会保留：
+
+- `_MERGE_STATUS`：`MATCHED`、`LEFT_ONLY` 或 `RIGHT_ONLY`。
+- `_LEFT_SOURCE_ROW` / `_RIGHT_SOURCE_ROW`：对应源缓存中的 `_source_row`，没有对应记录时为空。
+
+结果只写入会话临时 SQLite，不修改 Left/Right，也不生成 SAS 文件。关闭 Merge Result Tab 后会释放结果及其为来源追踪而保留的临时缓存。
 
 ## 系统测试与打包
 

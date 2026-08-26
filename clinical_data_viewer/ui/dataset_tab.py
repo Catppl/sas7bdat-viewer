@@ -808,6 +808,9 @@ class DatasetTab(QWidget):
     def _clear_manual_row_highlight(self, rows: list[int]) -> None:
         self.model.clear_manual_row_highlight(set(rows))
 
+    def manual_highlights_for_export(self) -> dict[int, str]:
+        return self.model.manual_highlights_for_export()
+
     def _selection_changed(self) -> None:
         if self._compared_rows is None:
             return

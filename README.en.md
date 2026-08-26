@@ -14,8 +14,8 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
 | Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, and missing-value conditions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
-| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, row comparison, Dataset Compare, and temporary result tabs. |
-| Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used. |
+| Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
+| Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used; manual row highlights are recorded in an additional `HIGHLIGHT` column because CSV cannot store cell background colors. |
 | Code generation | SAS and R PROC MEANS code generators based on the same language-neutral JSON v3 configuration. |
 
 The interface follows a compact Windows 11 / SAS Studio-style layout: menu bar, toolbar, dataset tabs, Variables panel, data table, WHERE editor, and status bar.
@@ -73,6 +73,7 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 | SAS/R code | `SAS Code Generator…` or `R Code Generator…` in Builder | Read-only code preview and Save As; SAS/R is not executed by the viewer. |
 | Row comparison | Select multiple row numbers with `Ctrl`, then right-click Compare | Highlights only different columns in the selected rows. |
 | Dataset Compare | `Tools > Compare Datasets` | Main/QC matching, difference output, warning rows, source-row navigation, filtering, sorting, and CSV export. |
+| Merge Datasets | `Tools > Merge Datasets` | Select Left/Right datasets and common BY variables, run four join types, detect incompatible or many-to-many keys, and create a lineage-preserving temporary result tab. |
 | CSV export | `Export CSV` | Exports current filtered rows, visible columns, and current sort order in the background. |
 | Reload | `Reload` | Recreates the temporary copy from the original path and attempts to preserve WHERE and visible columns. |
 
@@ -174,6 +175,25 @@ Calculation is blocked when a Rule row contains missing treatment values; the wa
 | Advanced details | `COMPARE_PAIR`, `MATCH_COST`, and `MATCH_MARGIN` are hidden by default. They may be displayed in the result tab, but are never exported to CSV. |
 
 Compare Result does not create a SAS file. Closing the tab removes its temporary SQLite. It cannot be reloaded, re-compared, or used as a PROC MEANS source.
+
+## Merge Datasets module
+
+Open `Tools > Merge Datasets` to show the right-side panel. Select two already-open, fully cached datasets as Left and Right, then check one or more common BY Variables. The input tabs' current WHERE, column filters, sort order, and visible-column selection are ignored: Merge always uses both complete caches.
+
+| Setting | Behavior |
+| --- | --- |
+| Join Type | `Left Join`, `Right Join`, `Inner Join`, or `Full Join`. |
+| BY Variables | Only variables present on both sides are listed; multiple variables form one composite key. Types must match and are never silently cast. |
+| Duplicate names | BY variables are kept once. Non-BY duplicate Right variables use a stable `_RIGHT` suffix, then `_2` if needed. |
+| Missing BY values | Missing values do not match another missing value; empty/whitespace character keys are also treated as missing. |
+| Many-to-many | Duplicate-key counts are checked before execution. If a key is duplicated on both sides, a warning requires explicit confirmation. |
+
+The result opens as `Merge Result - Left + Right` and reuses the normal Viewer Variables panel, WHERE, column filters, sorting, copying, and CSV export. It preserves:
+
+- `_MERGE_STATUS`: `MATCHED`, `LEFT_ONLY`, or `RIGHT_ONLY`.
+- `_LEFT_SOURCE_ROW` / `_RIGHT_SOURCE_ROW`: source-cache `_source_row` values, or blank when one side is absent.
+
+The result is written only to session-temporary SQLite. Left and Right are never modified and no SAS file is generated. Closing the Merge Result tab releases its result and any retained source-cache directories.
 
 ## System testing and packaging
 

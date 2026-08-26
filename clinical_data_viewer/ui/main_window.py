@@ -46,6 +46,7 @@ from ..data_store import DataStore
 from ..domain import CacheProgress, DatasetHandle
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
+from ..merge_datasets import MergeDatasetsEngine
 from ..proc_means import (
     ProcMeansConfig,
     ProcMeansEngine,
@@ -74,12 +75,13 @@ from .analysis_panel import AnalysisPanel
 from .categorical_builder import CategoricalBuilderSelection
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
+from .dataset_merge_panel import DatasetMergePanel
 from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
+from .rule_based_builder import RuleBasedBuilderSelection
 from .sas_code_dialog import RCodeDialog, SasCodeDialog
 from .settings_dialog import SettingsDialog
 from .variables_panel import VariablesPanel
-from .rule_based_builder import RuleBasedBuilderSelection
 
 
 class LoadingPage(QWidget):
@@ -118,6 +120,12 @@ class RuleBasedResultContext:
     config: RuleBasedConfig
 
 
+@dataclass(frozen=True, slots=True)
+class MergeResultContext:
+    left: DatasetHandle
+    right: DatasetHandle
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -132,6 +140,7 @@ class MainWindow(QMainWindow):
         self.history = history
         self.reader = SasDatasetReader(temp_manager)
         self.comparer = DatasetComparer(temp_manager)
+        self.merge_engine = MergeDatasetsEngine(temp_manager)
         self.proc_means_engine = ProcMeansEngine(temp_manager)
         self.categorical_engine = CategoricalEngine(temp_manager)
         self.categorical_long_result_builder = CategoricalLongResultBuilder(temp_manager)
@@ -153,9 +162,11 @@ class MainWindow(QMainWindow):
         self._proc_means_input_tabs: set[DatasetTab] = set()
         self._categorical_input_tabs: set[DatasetTab] = set()
         self._rule_based_input_tabs: set[DatasetTab] = set()
+        self._merge_input_tabs: set[DatasetTab] = set()
         self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
         self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
         self._rule_based_sources: dict[DatasetTab, RuleBasedResultContext] = {}
+        self._merge_sources: dict[DatasetTab, MergeResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
         self._deferred_directory_removals: set[Path] = set()
         self._pending_directory_releases: dict[QWidget, list[Path]] = {}
@@ -171,6 +182,7 @@ class MainWindow(QMainWindow):
         self._create_variables_panel()
         self._create_analysis_panel()
         self._create_compare_panel()
+        self._create_merge_panel()
         self._create_status_bar()
         self._sync_active_tab()
 
@@ -234,6 +246,9 @@ class MainWindow(QMainWindow):
         self.compare_datasets_action = QAction("Compare Datasets", self)
         self.compare_datasets_action.setCheckable(True)
         self.compare_datasets_action.setChecked(False)
+        self.merge_datasets_action = QAction("Merge Datasets", self)
+        self.merge_datasets_action.setCheckable(True)
+        self.merge_datasets_action.setChecked(False)
         self.settings_action = QAction("Settings…", self)
         self.settings_action.triggered.connect(self.show_settings)
 
@@ -258,6 +273,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.categorical_builder_action)
         tools_menu.addAction(self.rule_based_builder_action)
         tools_menu.addAction(self.compare_datasets_action)
+        tools_menu.addAction(self.merge_datasets_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.settings_action)
         help_menu = self.menuBar().addMenu("&Help")
@@ -403,6 +419,21 @@ class MainWindow(QMainWindow):
         )
         self.compare_panel.advanced_toggled.connect(self._set_compare_advanced)
 
+    def _create_merge_panel(self) -> None:
+        self.merge_panel = DatasetMergePanel()
+        self.merge_dock = QDockWidget("Merge Datasets", self)
+        self.merge_dock.setObjectName("mergeDatasetsDock")
+        self.merge_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        self.merge_dock.setWidget(self.merge_panel)
+        self.merge_dock.setMinimumWidth(360)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.merge_dock)
+        self.merge_dock.hide()
+        self.merge_datasets_action.toggled.connect(self.merge_dock.setVisible)
+        self.merge_dock.visibilityChanged.connect(
+            self.merge_datasets_action.setChecked
+        )
+        self.merge_panel.merge_requested.connect(self._run_dataset_merge)
+
     def _sync_top_search(self, text: str) -> None:
         if self.variable_search.text() == text:
             return
@@ -472,6 +503,7 @@ class MainWindow(QMainWindow):
             elif when_ready:
                 when_ready(tab)
             self._refresh_compare_datasets()
+            self._refresh_merge_datasets()
             self._refresh_categorical_sources()
 
         def failed(message: str, details: str) -> None:
@@ -502,6 +534,7 @@ class MainWindow(QMainWindow):
 
         def ready(tab: DatasetTab) -> None:
             self._refresh_compare_datasets()
+            self._refresh_merge_datasets()
             self._refresh_categorical_sources()
             self.compare_panel.select_dataset(side, tab)
 
@@ -522,6 +555,22 @@ class MainWindow(QMainWindow):
                     )
                 )
         self.compare_panel.set_datasets(datasets)
+
+    def _refresh_merge_datasets(self) -> None:
+        if not hasattr(self, "merge_panel"):
+            return
+        datasets: list[tuple[object, str, bool]] = []
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+                datasets.append(
+                    (
+                        tab,
+                        f"{tab.handle.metadata.name} — {tab.handle.source_path.name}",
+                        tab.cache_complete,
+                    )
+                )
+        self.merge_panel.set_datasets(datasets)
 
     def _refresh_categorical_sources(self) -> None:
         if not hasattr(self, "analysis_panel"):
@@ -578,6 +627,109 @@ class MainWindow(QMainWindow):
             self.analysis_panel.rule_based_builder.select_adsl(tab)
 
         self._open_path(source, ready)
+
+    def _run_dataset_merge(self, left_tab: DatasetTab, right_tab: DatasetTab, config) -> None:
+        if (
+            self.tabs.indexOf(left_tab) < 0
+            or self.tabs.indexOf(right_tab) < 0
+            or left_tab is right_tab
+            or not left_tab.cache_complete
+            or not right_tab.cache_complete
+        ):
+            QMessageBox.warning(
+                self,
+                "Merge Datasets",
+                "Select two different, fully loaded datasets.",
+            )
+            return
+        try:
+            self.merge_engine.validate(left_tab.handle, right_tab.handle, config)
+        except ValueError as error:
+            QMessageBox.warning(self, "Merge Datasets", str(error))
+            return
+        self.merge_dock.show()
+        self.merge_panel.set_busy(True, "Checking BY-key multiplicity…")
+        self._merge_input_tabs = {left_tab, right_tab}
+        left_handle = left_tab.handle
+        right_handle = right_tab.handle
+
+        def execute_merge() -> None:
+            self.merge_panel.set_busy(True, "Merging source datasets in the background…")
+
+            def completed(result) -> None:
+                self._merge_input_tabs.clear()
+                handle = result.handle
+                summary = result.summary
+                self.merge_panel.set_busy(
+                    False,
+                    f"Created {handle.metadata.row_count:,} rows: "
+                    f"{summary.matched_rows:,} matched, "
+                    f"{summary.left_only_rows:,} left only, "
+                    f"{summary.right_only_rows:,} right only.",
+                )
+                result_tab = self._make_dataset_tab(handle)
+                self._retain_directory(left_handle.temporary_path.parent)
+                self._retain_directory(right_handle.temporary_path.parent)
+                self._merge_sources[result_tab] = MergeResultContext(
+                    left_handle, right_handle
+                )
+                title = self._unique_dataset_tab_title(
+                    f"Merge Result - {left_handle.metadata.name} + {right_handle.metadata.name}"
+                )
+                index = self.tabs.addTab(result_tab, title)
+                self.tabs.setCurrentIndex(index)
+                result_tab.start()
+
+            def failed(message: str, details: str) -> None:
+                self._merge_input_tabs.clear()
+                self.merge_panel.set_busy(False, "Merge failed.")
+                self._show_error("Merge Datasets Failed", message, details)
+
+            self._submit(
+                self.merge_panel,
+                lambda worker: self.merge_engine.run(
+                    left_handle, right_handle, config, worker.report
+                ),
+                completed,
+                failed,
+            )
+
+        def inspected(summary) -> None:
+            if self.tabs.indexOf(left_tab) < 0 or self.tabs.indexOf(right_tab) < 0:
+                self._merge_input_tabs.clear()
+                self.merge_panel.set_busy(False)
+                return
+            self._merge_input_tabs.clear()
+            if summary.many_to_many:
+                answer = QMessageBox.question(
+                    self,
+                    "Many-to-many join detected",
+                    "Some BY combinations occur multiple times in both datasets.\n\n"
+                    f"Left duplicated keys: {summary.left_duplicate_keys:,}\n"
+                    f"Right duplicated keys: {summary.right_duplicate_keys:,}\n"
+                    f"Many-to-many keys: {summary.many_to_many_keys:,}\n\n"
+                    "The merge may expand the number of records. Continue?",
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+                if answer != QMessageBox.Yes:
+                    self.merge_panel.set_busy(False, "Merge cancelled.")
+                    return
+            execute_merge()
+
+        def failed(message: str, details: str) -> None:
+            self._merge_input_tabs.clear()
+            self.merge_panel.set_busy(False, "Merge pre-check failed.")
+            self._show_error("Merge Datasets Failed", message, details)
+
+        self._submit(
+            self.merge_panel,
+            lambda _worker: self.merge_engine.inspect(
+                left_handle, right_handle, config
+            ),
+            inspected,
+            failed,
+        )
 
     def _run_dataset_compare(
         self, main_tab: DatasetTab, qc_tab: DatasetTab, config
@@ -759,6 +911,7 @@ class MainWindow(QMainWindow):
             self._sync_active_tab()
             self._refresh_status(tab)
             self._refresh_compare_datasets()
+            self._refresh_merge_datasets()
             if when_complete is not None:
                 when_complete(handle)
 
@@ -2177,7 +2330,13 @@ class MainWindow(QMainWindow):
         self._submit(
             tab,
             lambda worker: self.exporter.export(
-                handle, path, columns, compiled, sort, worker.report
+                handle,
+                path,
+                columns,
+                compiled,
+                sort,
+                worker.report,
+                tab.manual_highlights_for_export(),
             ),
             completed,
             lambda message, details: self._show_error(
@@ -2228,6 +2387,14 @@ class MainWindow(QMainWindow):
                 "This dataset is currently used by a Rule-based Table. Wait for the calculation to finish before closing it.",
             )
             return
+        if widget in self._merge_input_tabs:
+            QMessageBox.information(
+                self,
+                "Merge Running",
+                "This dataset is currently used by a Merge. Wait for the merge "
+                "to finish before closing it.",
+            )
+            return
         self.tabs.removeTab(index)
         for worker in self._workers.get(widget, set()):
             worker.cancel()
@@ -2253,6 +2420,14 @@ class MainWindow(QMainWindow):
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )
+            merge_context = self._merge_sources.pop(widget, None)
+            if merge_context is not None:
+                self._pending_directory_releases.setdefault(widget, []).extend(
+                    (
+                        merge_context.left.temporary_path.parent,
+                        merge_context.right.temporary_path.parent,
+                    )
+                )
             self._compare_sources.pop(widget, None)
             if self._comparison_owner is widget:
                 self._clear_row_comparison()
@@ -2266,6 +2441,7 @@ class MainWindow(QMainWindow):
         self._cleanup_pending(widget)
         widget.deleteLater()
         self._refresh_compare_datasets()
+        self._refresh_merge_datasets()
         self._refresh_categorical_sources()
         self._sync_active_tab()
 
@@ -2309,6 +2485,7 @@ class MainWindow(QMainWindow):
             builder_source.current_where_text() if builder_source else "",
         )
         self._refresh_compare_datasets()
+        self._refresh_merge_datasets()
         self._refresh_categorical_sources()
         self._refresh_status(tab)
 

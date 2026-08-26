@@ -83,7 +83,9 @@ class UiSmokeTests(unittest.TestCase):
                 "R Code Generator…",
             )
             self.assertIn("Compare Datasets", tools_actions)
+            self.assertIn("Merge Datasets", tools_actions)
             self.assertFalse(window.compare_dock.isVisible())
+            self.assertFalse(window.merge_dock.isVisible())
             self.assertTrue(window.variables_dock.isVisible() or not window.isVisible())
             metadata = DatasetMetadata(
                 "adae",
@@ -411,6 +413,14 @@ class UiSmokeTests(unittest.TestCase):
             )
             self.assertEqual(
                 manual_option.palette.color(QPalette.Text).name(), "#1f2937"
+            )
+            self.assertIsNone(
+                numeric_tab.model.data(
+                    numeric_tab.model.index(0, 2), Qt.CheckStateRole
+                )
+            )
+            self.assertFalse(
+                manual_option.features & QStyleOptionViewItem.HasCheckIndicator
             )
             window.analysis_panel.show_statistics(
                 StatisticsResult(

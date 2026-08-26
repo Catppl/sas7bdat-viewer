@@ -93,6 +93,31 @@ class DataStoreExportTests(unittest.TestCase):
             rows, [["USUBJID", "AGE"], ["101-004", "60.0"], ["101-001", "45.0"]]
         )
 
+    def test_export_includes_manual_highlight_marker_when_present(self) -> None:
+        source = self.root / "adae.sas7bdat"
+        source.write_bytes(b"fixture")
+        handle = DatasetHandle(source, source, self.database, self.metadata)
+        destination = self.root / "highlighted.csv"
+        exported = CsvExporter().export(
+            handle,
+            destination,
+            ["USUBJID", "AGE"],
+            self.compiled,
+            SortSpec("AGE", ascending=False),
+            highlight_rows={4: "Light Purple"},
+        )
+        self.assertEqual(exported, 2)
+        with destination.open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.reader(stream))
+        self.assertEqual(
+            rows,
+            [
+                ["USUBJID", "AGE", "HIGHLIGHT"],
+                ["101-004", "60.0", "Light Purple"],
+                ["101-001", "45.0", ""],
+            ],
+        )
+
     def test_find_uses_current_filter_sort_and_visible_columns(self) -> None:
         result = DataStore().find_text(
             self.database,
