@@ -207,7 +207,9 @@ class SasAeTableGenerator:
         population_input = ctx["population_input"]
         if population_input is not None:
             pop = _input(population_input, "denominator.population.input")
-            lines += _libname(pop, "population")
+            # LIBREFs are limited to eight characters in Base SAS.  Keep the
+            # population reference short and distinct from the analysis libref.
+            lines += _libname(pop, "pop")
         lines += ["", "/* Prepare AE source */", "data ae0;", f"    set {ctx['source_library']}.{ctx['source_member']};"]
         if ctx["dataset_filter"]:
             lines.append(f"    if not ({ctx['dataset_filter']}) then delete;")
@@ -229,7 +231,7 @@ class SasAeTableGenerator:
         level_source = "ae0"
         if population_input is not None:
             pop = _input(population_input, "denominator.population.input")
-            lines += ["/* Prepare population denominator */", "data pop0;", f"    set population.{pop['dataset']};"]
+            lines += ["/* Prepare population denominator */", "data pop0;", f"    set pop.{pop['dataset']};"]
             if ctx["population_filter"]:
                 lines.append(f"    if not ({ctx['population_filter']}) then delete;")
             lines += [

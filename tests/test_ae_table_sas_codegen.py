@@ -67,7 +67,9 @@ class AeSasGeneratorTests(unittest.TestCase):
     def test_population_filter_is_independent(self):
         code = SasAeTableGenerator().generate(configuration(denominator="population"))
         self.assertIn("set analysis.adae", code)
-        self.assertIn("set population.ADSL", code)
+        self.assertIn("libname pop ", code)
+        self.assertNotIn("libname population ", code)
+        self.assertIn("set pop.ADSL", code)
         self.assertIn("if not (SAFFL = 'Y') then delete;", code)
         self.assertIn("from pop0", code)
         self.assertIn("from ae0", code)
