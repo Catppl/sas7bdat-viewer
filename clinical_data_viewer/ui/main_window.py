@@ -2485,6 +2485,7 @@ class MainWindow(QMainWindow):
             builder_source.handle.metadata if builder_source else None,
             str(builder_source.handle.source_path) if builder_source else "",
             builder_source.current_where_text() if builder_source else "",
+            builder_source.handle.kind if builder_source else "sas",
         )
         self.analysis_panel.categorical_builder.set_dataset(
             builder_source.handle.metadata if builder_source else None,
@@ -2560,6 +2561,7 @@ class MainWindow(QMainWindow):
                 tab.handle.metadata,
                 str(tab.handle.source_path),
                 tab.current_where_text(),
+                tab.handle.kind,
             )
 
     def _submit(

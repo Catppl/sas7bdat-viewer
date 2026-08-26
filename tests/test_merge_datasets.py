@@ -212,6 +212,65 @@ class MergeDatasetsTests(unittest.TestCase):
             [3, 2, 1],
         )
 
+    def test_default_order_is_stable_for_all_join_types_and_many_to_many(self) -> None:
+        expected = {
+            "left": [(1, 1), (2, 2), (3, None)],
+            "right": [(1, 1), (2, 2), (None, 3)],
+            "inner": [(1, 1), (2, 2)],
+            "full": [(1, 1), (2, 2), (3, None), (None, 3)],
+        }
+        for join_type, lineage in expected.items():
+            result = self.engine.run(
+                self.left,
+                self.right,
+                MergeDatasetsConfig(("USUBJID",), join_type),
+            )
+            columns, rows = self._rows(result)
+            pairs = [
+                (
+                    row[columns.index("_LEFT_SOURCE_ROW")],
+                    row[columns.index("_RIGHT_SOURCE_ROW")],
+                )
+                for row in rows
+            ]
+            self.assertEqual(pairs, [(float(a) if a else None, float(b) if b else None)
+                                     for a, b in lineage])
+
+        variables = (("USUBJID", "character"), ("VALUE", "numeric"))
+        many_left = _handle(self.root, "order_many_left", variables, (("A", 1), ("A", 2)))
+        many_right = _handle(self.root, "order_many_right", variables, (("A", 3), ("A", 4)))
+        result = self.engine.run(
+            many_left,
+            many_right,
+            MergeDatasetsConfig(("USUBJID",), "inner"),
+        )
+        columns, rows = self._rows(result)
+        self.assertEqual(
+            [
+                (row[columns.index("_LEFT_SOURCE_ROW")], row[columns.index("_RIGHT_SOURCE_ROW")])
+                for row in rows
+            ],
+            [(1.0, 1.0), (1.0, 2.0), (2.0, 1.0), (2.0, 2.0)],
+        )
+
+    def test_multiple_sort_variables_keep_priority(self) -> None:
+        variables = (("USUBJID", "character"), ("VALUE", "numeric"))
+        left = _handle(self.root, "priority_left", variables, (("A", 1), ("B", 1), ("C", 2)))
+        right = _handle(self.root, "priority_right", variables, (("A", 1), ("B", 1), ("C", 2)))
+        result = self.engine.run(
+            left,
+            right,
+            MergeDatasetsConfig(
+                ("USUBJID",),
+                "inner",
+                (MergeSortItem("VALUE", "DESC"), MergeSortItem("USUBJID", "ASC")),
+            ),
+        )
+        columns, rows = self._rows(result)
+        self.assertEqual(
+            [row[columns.index("USUBJID")] for row in rows], ["C", "A", "B"]
+        )
+
     def test_sort_validation_and_old_config_compatibility(self) -> None:
         with self.assertRaisesRegex(ValueError, "Duplicate sort variable"):
             MergeDatasetsConfig(

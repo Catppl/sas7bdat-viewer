@@ -55,6 +55,43 @@ class UiSmokeTests(unittest.TestCase):
         panel.deleteLater()
         application.processEvents()
 
+    def test_merge_by_change_prunes_invalid_sort_items(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.dataset_merge_panel import DatasetMergePanel
+
+        class Tab:
+            def __init__(self, name: str) -> None:
+                self.handle = type("Handle", (), {})()
+                self.handle.metadata = DatasetMetadata(
+                    name,
+                    2,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("AGE", kind="numeric"),
+                    ),
+                )
+                self.handle.source_path = Path(f"{name}.sas7bdat")
+                self.cache_complete = True
+
+        application = QApplication.instance() or QApplication([])
+        left, right = Tab("left"), Tab("right")
+        panel = DatasetMergePanel()
+        panel.set_datasets([(left, "left", True), (right, "right", True)])
+        panel.left_dataset.setCurrentIndex(1)
+        panel.right_dataset.setCurrentIndex(2)
+        panel.by_variables.item(0).setCheckState(Qt.Checked)  # USUBJID
+        panel.sort_editor.setText("AGE_RIGHT")
+        panel.sort_editor.returnPressed.emit()
+        self.assertEqual(panel._read_sort_items()[0].variable, "AGE_RIGHT")
+        panel.by_variables.item(1).setCheckState(Qt.Checked)  # AGE changes schema
+        self.assertEqual(panel._read_sort_items(), ())
+        panel.deleteLater()
+        application.processEvents()
+
     def test_merge_result_is_forwarded_to_analysis_builders(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
@@ -315,6 +352,16 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(builder.current_filter_text(), "")
             builder.apply_current_filter("AVAL > 1")
             self.assertEqual(builder.current_filter_text(), "AVAL > 1")
+            builder.set_dataset(numeric_metadata, "Merge Result", "", "merge")
+            self.assertFalse(builder.sas_code_button.isEnabled())
+            self.assertFalse(builder.r_code_button.isEnabled())
+            self.assertEqual(
+                builder.sas_code_button.toolTip(),
+                "Code generation for merged results is not available yet.",
+            )
+            builder.set_dataset(numeric_metadata, "adlb.sas7bdat", "")
+            self.assertTrue(builder.sas_code_button.isEnabled())
+            self.assertTrue(builder.r_code_button.isEnabled())
             builder.analysis_variables.editor.setText("aval")
             builder.analysis_variables._add_from_editor()
             builder.by_variables.editor.setText("PARAMCD")

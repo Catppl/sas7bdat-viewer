@@ -213,6 +213,9 @@ class DatasetMergePanel(QWidget):
             for index in range(self.by_variables.count())
             if self.by_variables.item(index).checkState() == Qt.Checked
         )
+        # The BY variables define the result schema.  Prune sort items now so
+        # the editor never carries stale columns until Run is pressed.
+        self._prune_sort_items()
         self._update_enabled()
 
     def _selected_by(self) -> tuple[str, ...]:

@@ -147,6 +147,7 @@ class ProcMeansBuilder(QWidget):
         self.setObjectName("procMeansBuilder")
         self._metadata: DatasetMetadata | None = None
         self._filter_text = ""
+        self._source_kind = "sas"
         self._busy = False
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -235,8 +236,13 @@ class ProcMeansBuilder(QWidget):
         self.set_dataset(None, "")
 
     def set_dataset(
-        self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = ""
+        self,
+        metadata: DatasetMetadata | None,
+        source_text: str,
+        filter_text: str = "",
+        source_kind: str = "sas",
     ) -> None:
+        self._source_kind = source_kind
         if metadata is not None and metadata is not self._metadata:
             self._metadata = metadata
             self._filter_text = self._normalized_filter_text(filter_text)
@@ -256,8 +262,16 @@ class ProcMeansBuilder(QWidget):
         )
         available = metadata is not None and not self._busy
         self.run_button.setEnabled(available)
-        self.sas_code_button.setEnabled(available)
-        self.r_code_button.setEnabled(available)
+        codegen_available = available and source_kind != "merge"
+        self.sas_code_button.setEnabled(codegen_available)
+        self.r_code_button.setEnabled(codegen_available)
+        tooltip = (
+            "Code generation for merged results is not available yet."
+            if source_kind == "merge"
+            else ""
+        )
+        self.sas_code_button.setToolTip(tooltip)
+        self.r_code_button.setToolTip(tooltip)
         for editor in (
             self.analysis_variables,
             self.by_variables,
@@ -357,12 +371,16 @@ class ProcMeansBuilder(QWidget):
         self.run_requested.emit(selection)
 
     def _generate_sas_code(self) -> None:
+        if self._source_kind == "merge":
+            return
         selection = self._selection()
         if selection is None:
             return
         self.sas_code_requested.emit(selection)
 
     def _generate_r_code(self) -> None:
+        if self._source_kind == "merge":
+            return
         selection = self._selection()
         if selection is None:
             return
