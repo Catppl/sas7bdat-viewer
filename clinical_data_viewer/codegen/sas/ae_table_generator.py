@@ -9,12 +9,21 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 from ...resources import resource_path
 from .filter_renderer import sas_filter_expression, sas_name, sas_string
 
-
 _SAS_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _REQUIRED = (
-    "input", "variables", "dataset_filter", "hierarchy", "count",
-    "treatment", "denominator", "rows", "sort", "total", "calculation",
-    "display", "targets",
+    "input",
+    "variables",
+    "dataset_filter",
+    "hierarchy",
+    "count",
+    "treatment",
+    "denominator",
+    "rows",
+    "sort",
+    "total",
+    "calculation",
+    "display",
+    "targets",
 )
 
 
@@ -35,7 +44,9 @@ def _input(value: object, name: str) -> dict[str, str]:
     block = _mapping(value, name)
     kind = block.get("kind")
     if kind == "merge":
-        raise ValueError("SAS code generation for merged AE sources is not available yet.")
+        raise ValueError(
+            "SAS code generation for merged AE sources is not available yet."
+        )
     if kind != "sas":
         raise ValueError(f"{name}.kind must be 'sas'.")
     fmt = str(block.get("format") or "").casefold()
@@ -105,9 +116,13 @@ class SasAeTableGenerator:
         if not isinstance(configuration, Mapping):
             raise ValueError("AE SAS generator requires a JSON object.")
         if configuration.get("type") != "ae_soc_pt_table":
-            raise ValueError("The configuration is not an AE SOC/PT Table configuration.")
+            raise ValueError(
+                "The configuration is not an AE SOC/PT Table configuration."
+            )
         if configuration.get("version") != 1:
-            raise ValueError("SAS generation requires AE SOC/PT Table configuration v1.")
+            raise ValueError(
+                "SAS generation requires AE SOC/PT Table configuration v1."
+            )
         missing = [key for key in _REQUIRED if key not in configuration]
         if missing:
             raise ValueError("AE configuration is missing: " + ", ".join(missing))
@@ -126,24 +141,37 @@ class SasAeTableGenerator:
         soc = _variable(hierarchy.get("soc_variable"), "SOC variable", variables)
         pt = _variable(hierarchy.get("pt_variable"), "PT variable", variables)
         missing_block = _mapping(hierarchy.get("missing"), "hierarchy.missing")
-        if missing_block.get("policy") not in {"exclude", "uncoded"} or missing_block.get("label") != "Uncoded":
+        if (
+            missing_block.get("policy") not in {"exclude", "uncoded"}
+            or missing_block.get("label") != "Uncoded"
+        ):
             raise ValueError("Unsupported AE hierarchy missing policy.")
 
         count = _mapping(configuration["count"], "count")
-        if count.get("type") != "distinct" or str(count.get("variable", "")).casefold() != "usubjid":
+        if (
+            count.get("type") != "distinct"
+            or str(count.get("variable", "")).casefold() != "usubjid"
+        ):
             raise ValueError("AE SAS generation supports only distinct USUBJID counts.")
         subject = _variable(count.get("variable"), "Count variable", variables)
         treatment = _mapping(configuration["treatment"], "treatment")
         trt = _variable(treatment.get("variable"), "Treatment variable", variables)
-        if treatment.get("missing_policy") != "error" or treatment.get("level_order") != "resolved":
+        if (
+            treatment.get("missing_policy") != "error"
+            or treatment.get("level_order") != "resolved"
+        ):
             raise ValueError("Unsupported AE treatment contract.")
 
         calculation = _mapping(configuration["calculation"], "calculation")
         expected = {
-            "reference_engine": "python_ae_soc_pt_v1", "numerator": "distinct_subjects",
-            "soc_count": "recompute_distinct_subjects", "pt_count": "recompute_distinct_subjects",
-            "subject_missing": "exclude", "treatment_missing": "error",
-            "percent_method": "freq_divided_by_denom_times_100", "total_method": "recompute_distinct_subjects",
+            "reference_engine": "python_ae_soc_pt_v1",
+            "numerator": "distinct_subjects",
+            "soc_count": "recompute_distinct_subjects",
+            "pt_count": "recompute_distinct_subjects",
+            "subject_missing": "exclude",
+            "treatment_missing": "error",
+            "percent_method": "freq_divided_by_denom_times_100",
+            "total_method": "recompute_distinct_subjects",
         }
         for key, expected_value in expected.items():
             if calculation.get(key) != expected_value:
@@ -153,18 +181,32 @@ class SasAeTableGenerator:
         if not isinstance(rows.get("include_any_ae"), bool):
             raise ValueError("rows.include_any_ae must be true or false.")
         total = _mapping(configuration["total"], "total")
-        if not isinstance(total.get("enabled"), bool) or total.get("method") != "recompute_distinct_subjects":
+        if (
+            not isinstance(total.get("enabled"), bool)
+            or total.get("method") != "recompute_distinct_subjects"
+        ):
             raise ValueError("Unsupported AE Total contract.")
         sort = _mapping(configuration["sort"], "sort")
         for level in ("soc", "pt"):
             rule = _mapping(sort.get(level), f"sort.{level}")
-            if rule.get("by") != "total_frequency" or rule.get("direction") != "desc" or rule.get("tie_breaker") != "alphabetical":
+            if (
+                rule.get("by") != "total_frequency"
+                or rule.get("direction") != "desc"
+                or rule.get("tie_breaker") != "alphabetical"
+            ):
                 raise ValueError(f"Unsupported AE {level} sorting contract.")
         display = _mapping(configuration["display"], "display")
         digits = display.get("percent_digits")
-        if isinstance(digits, bool) or not isinstance(digits, int) or not 0 <= digits <= 4:
+        if (
+            isinstance(digits, bool)
+            or not isinstance(digits, int)
+            or not 0 <= digits <= 4
+        ):
             raise ValueError("AE percent_digits must be an integer from 0 to 4.")
-        if display.get("rounding") != "half_up" or display.get("zero_denominator_display") != "0 (—)":
+        if (
+            display.get("rounding") != "half_up"
+            or display.get("zero_denominator_display") != "0 (—)"
+        ):
             raise ValueError("Unsupported AE display contract.")
 
         denominator = _mapping(configuration["denominator"], "denominator")
@@ -173,19 +215,57 @@ class SasAeTableGenerator:
         population_source = None
         population_filter = ""
         if dtype == "population":
-            population = _mapping(denominator.get("population"), "denominator.population")
+            population = _mapping(
+                denominator.get("population"), "denominator.population"
+            )
             population_source = _input(
                 population.get("input"), "denominator.population.input"
             )
-            pvars = _mapping(population.get("variables"), "denominator.population.variables")
+            pvars = _mapping(
+                population.get("variables"), "denominator.population.variables"
+            )
             pnames = {str(key).casefold() for key in pvars}
-            if trt.casefold() not in pnames or subject.casefold() not in pnames:
-                raise ValueError("Population metadata must contain treatment and USUBJID.")
-            for key in (trt, subject):
-                metadata = next(value for name, value in pvars.items() if str(name).casefold() == key.casefold())
-                if _mapping(metadata, f"denominator.population.variables.{key}").get("type") != variable_types[key.casefold()]:
-                    raise ValueError(f"Population variable {key} must have the same type as the AE source.")
-            population_filter = _filter(population.get("filter"), "denominator.population.filter")
+            population_treatment = str(population.get("treatment_variable") or trt)
+            if (
+                population_treatment.casefold() not in pnames
+                or subject.casefold() not in pnames
+            ):
+                raise ValueError(
+                    "Population metadata must contain treatment and USUBJID."
+                )
+            population_treatment_metadata = next(
+                value
+                for name, value in pvars.items()
+                if str(name).casefold() == population_treatment.casefold()
+            )
+            if (
+                _mapping(
+                    population_treatment_metadata,
+                    f"denominator.population.variables.{population_treatment}",
+                ).get("type")
+                != variable_types[trt.casefold()]
+            ):
+                raise ValueError(
+                    "Population treatment variable must have the same type as the AE source."
+                )
+            population_subject_metadata = next(
+                value
+                for name, value in pvars.items()
+                if str(name).casefold() == subject.casefold()
+            )
+            if (
+                _mapping(
+                    population_subject_metadata,
+                    f"denominator.population.variables.{subject}",
+                ).get("type")
+                != variable_types[subject.casefold()]
+            ):
+                raise ValueError(
+                    "Population USUBJID must have the same type as the AE source."
+                )
+            population_filter = _filter(
+                population.get("filter"), "denominator.population.filter"
+            )
         elif dtype != "same_universe":
             raise ValueError("Unsupported AE denominator type.")
 
@@ -193,25 +273,56 @@ class SasAeTableGenerator:
         sas_target = _mapping(targets.get("sas"), "targets.sas")
         output = str(sas_target.get("output_dataset") or "")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", output):
-            raise ValueError("targets.sas.output_dataset must be a SAS library.member reference.")
-        source_library = _sas_ref(sas_target.get("source_library"), "targets.sas.source_library")
-        source_member = _sas_ref(sas_target.get("source_member"), "targets.sas.source_member")
+            raise ValueError(
+                "targets.sas.output_dataset must be a SAS library.member reference."
+            )
+        source_library = _sas_ref(
+            sas_target.get("source_library"), "targets.sas.source_library"
+        )
+        source_member = _sas_ref(
+            sas_target.get("source_member"), "targets.sas.source_member"
+        )
         return {
-            "source": source, "variables": variables, "soc": soc, "pt": pt,
-            "types": variable_types, "subject": subject, "treatment": trt,
-            "soc_type": variable_types[soc.casefold()], "pt_type": variable_types[pt.casefold()],
-            "treatment_type": variable_types[trt.casefold()], "subject_type": variable_types[subject.casefold()],
-            "dataset_filter": _filter(configuration["dataset_filter"], "dataset_filter"),
-            "missing_policy": str(missing_block["policy"]), "denominator": dtype,
-            "population": population, "population_input": population.get("input") if population else None,
+            "source": source,
+            "variables": variables,
+            "soc": soc,
+            "pt": pt,
+            "types": variable_types,
+            "subject": subject,
+            "treatment": trt,
+            "soc_type": variable_types[soc.casefold()],
+            "pt_type": variable_types[pt.casefold()],
+            "treatment_type": variable_types[trt.casefold()],
+            "subject_type": variable_types[subject.casefold()],
+            "dataset_filter": _filter(
+                configuration["dataset_filter"], "dataset_filter"
+            ),
+            "missing_policy": str(missing_block["policy"]),
+            "denominator": dtype,
+            "population": population,
+            "population_input": population.get("input") if population else None,
             "population_source": population_source,
-            "population_filter": population_filter, "include_any": bool(rows["include_any_ae"]),
+            "population_treatment": population_treatment if population else "",
+            "population_filter": population_filter,
+            "include_any": bool(rows["include_any_ae"]),
             "any_label": str(rows.get("any_ae_label") or "Any AE"),
-            "include_total": bool(total["enabled"]), "digits": digits, "output": output,
-            "source_library": source_library, "source_member": source_member,
-            "soc_missing_literal": "'Uncoded'" if str(missing_block["policy"]) == "uncoded" else "''",
-            "pt_missing_literal": "'Uncoded'" if str(missing_block["policy"]) == "uncoded" else "''",
+            "include_total": bool(total["enabled"]),
+            "digits": digits,
+            "output": output,
+            "source_library": source_library,
+            "source_member": source_member,
+            "soc_missing_literal": "'Uncoded'"
+            if str(missing_block["policy"]) == "uncoded"
+            else "''",
+            "pt_missing_literal": "'Uncoded'"
+            if str(missing_block["policy"]) == "uncoded"
+            else "''",
             "raw_treatment": _raw_value(trt, variable_types[trt.casefold()]),
+            "population_raw_treatment": (
+                _raw_value(population_treatment, variable_types[trt.casefold()])
+                if population
+                else ""
+            ),
             "raw_subject": _raw_value(subject, variable_types[subject.casefold()]),
             "raw_soc": _raw_value(soc, variable_types[soc.casefold()]),
             "raw_pt": _raw_value(pt, variable_types[pt.casefold()]),
@@ -226,7 +337,9 @@ class SasAeTableGenerator:
         try:
             return self.environment.get_template("ae_table.sas.j2").render(**ctx)
         except (OSError, TemplateError) as error:
-            raise ValueError(f"Unable to render the AE SAS template: {error}") from error
+            raise ValueError(
+                f"Unable to render the AE SAS template: {error}"
+            ) from error
 
 
 __all__ = ["SasAeTableGenerator"]

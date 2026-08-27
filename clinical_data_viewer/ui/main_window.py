@@ -1544,6 +1544,7 @@ class MainWindow(QMainWindow):
                     selection.denominator_type,
                     pop_filter,
                     selection.population_filter_text,
+                    selection.population_treatment_variable,
                 ),
                 selection.include_any_ae,
                 selection.any_ae_label,

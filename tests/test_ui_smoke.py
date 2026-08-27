@@ -497,6 +497,53 @@ class UiSmokeTests(unittest.TestCase):
         builder.deleteLater()
         application.processEvents()
 
+    def test_ae_builder_allows_a_different_population_treatment_variable(
+        self,
+    ) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.ae_table_builder import AeTableBuilder
+
+        class Tab:
+            def __init__(self) -> None:
+                self.handle = type("Handle", (), {})()
+                self.handle.metadata = DatasetMetadata(
+                    "ADSL",
+                    1,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("TRT01AN", kind="numeric"),
+                    ),
+                )
+
+        application = QApplication.instance() or QApplication([])
+        builder = AeTableBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRTAN", kind="numeric"),
+                    VariableMetadata("AEBODSYS"),
+                    VariableMetadata("AEDECOD"),
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        adsl = Tab()
+        builder.set_adsl_sources([(adsl, "ADSL — adsl.sas7bdat")])
+        self.assertEqual(builder.population_treatment.currentText(), "TRT01AN")
+        selection = builder._selection()
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertEqual(selection.treatment_variable, "TRTAN")
+        self.assertEqual(selection.population_treatment_variable, "TRT01AN")
+        builder.deleteLater()
+        application.processEvents()
+
     def test_ae_table_builder_scrolls_when_the_panel_is_short(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication, QScrollArea
