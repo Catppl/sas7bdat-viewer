@@ -51,7 +51,6 @@ from ..codegen.r import RProcMeansGenerator
 from ..codegen.sas import (
     SasAeTableGenerator,
     SasProcMeansGenerator,
-    SasRuleBasedGenerator,
 )
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..controllers import AnalysisController
@@ -69,23 +68,6 @@ from ..proc_means import (
     build_drilldown_filter,
     build_drilldown_where_text,
 )
-from ..rule_based import (
-    RuleBasedConfig,
-    RuleBasedDenominator,
-    RuleBasedEngine,
-    RuleBasedLongResultBuilder,
-    RuleBasedRow,
-    build_rule_based_configuration,
-)
-from ..rule_based.drilldown import (
-    build_cell_filter as build_rule_cell_filter,
-)
-from ..rule_based.drilldown import (
-    build_population_cell_filter,
-)
-from ..rule_based.drilldown import (
-    lookup_cell as lookup_rule_cell,
-)
 from ..sas_reader import SasDatasetReader
 from ..settings import PROC_MEANS_STATISTICS, AppSettings
 from ..statistics import calculate_statistics
@@ -99,7 +81,6 @@ from .dataset_compare_panel import DatasetComparePanel
 from .dataset_merge_panel import DatasetMergePanel
 from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
-from .rule_based_builder import RuleBasedBuilderSelection
 from .sas_code_dialog import RCodeDialog, SasCodeDialog
 from .settings_dialog import SettingsDialog
 from .variables_panel import VariablesPanel
@@ -132,13 +113,6 @@ class CategoricalResultContext:
     source: DatasetHandle
     population: DatasetHandle | None
     config: CategoricalConfig
-
-
-@dataclass(frozen=True, slots=True)
-class RuleBasedResultContext:
-    source: DatasetHandle
-    population: DatasetHandle | None
-    config: RuleBasedConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,11 +151,8 @@ class MainWindow(QMainWindow):
             temp_manager
         )
         self.categorical_query_builder = CategoricalQueryBuilder(temp_manager)
-        self.rule_based_engine = RuleBasedEngine(temp_manager)
-        self.rule_based_long_result_builder = RuleBasedLongResultBuilder(temp_manager)
         self.proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
         self.sas_proc_means_generator = SasProcMeansGenerator()
-        self.sas_rule_based_generator = SasRuleBasedGenerator()
         self.sas_ae_table_generator = SasAeTableGenerator()
         self.r_proc_means_generator = RProcMeansGenerator()
         self.store = DataStore()
@@ -195,7 +166,6 @@ class MainWindow(QMainWindow):
         self._compare_input_tabs: set[DatasetTab] = set()
         self._proc_means_input_tabs: set[DatasetTab] = set()
         self._categorical_input_tabs: set[DatasetTab] = set()
-        self._rule_based_input_tabs: set[DatasetTab] = set()
         self._ae_table_input_tabs: set[DatasetTab] = set()
         self._merge_input_tabs: set[DatasetTab] = set()
         # Each Builder is deliberately bound to the dataset that was active
@@ -204,12 +174,10 @@ class MainWindow(QMainWindow):
         self._builder_sources: dict[str, DatasetTab | None] = {
             "proc_means": None,
             "categorical": None,
-            "rule_based": None,
             "ae_table": None,
         }
         self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
         self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
-        self._rule_based_sources: dict[DatasetTab, RuleBasedResultContext] = {}
         self._ae_table_sources: dict[DatasetTab, AeTableResultContext] = {}
         self._merge_sources: dict[DatasetTab, MergeResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
@@ -286,7 +254,7 @@ class MainWindow(QMainWindow):
         )
         self.open_rule_based_long_action = QAction("Open Rule-based Long Result", self)
         self.open_rule_based_long_action.triggered.connect(
-            self._open_rule_based_long_result
+            lambda: self.analysis_controller.open_rule_based_long_result()
         )
         self.open_ae_table_long_action = QAction("Open AE Table Long Result", self)
         self.open_ae_table_long_action.triggered.connect(
@@ -461,21 +429,6 @@ class MainWindow(QMainWindow):
         self.analysis_panel.categorical_builder.cleared.connect(
             lambda: self._clear_builder_source("categorical")
         )
-        self.analysis_panel.rule_based_builder.run_requested.connect(
-            self._run_rule_based_builder
-        )
-        self.analysis_panel.rule_based_builder.sas_code_requested.connect(
-            self._generate_rule_based_sas_code
-        )
-        self.analysis_panel.rule_based_builder.validation_error.connect(
-            lambda message: QMessageBox.warning(self, "Rule-based Table", message)
-        )
-        self.analysis_panel.rule_based_builder.browse_adsl_requested.connect(
-            self._browse_rule_based_adsl
-        )
-        self.analysis_panel.rule_based_builder.cleared.connect(
-            lambda: self._clear_builder_source("rule_based")
-        )
         self.analysis_panel.ae_table_builder.run_requested.connect(
             self._run_ae_table_builder
         )
@@ -593,6 +546,18 @@ class MainWindow(QMainWindow):
     def browse_listing_adsl_dataset(self) -> None:
         self._browse_listing_adsl()
 
+    def browse_rule_based_adsl_dataset(self) -> None:
+        self._browse_rule_based_adsl()
+
+    def unique_analysis_tab_title(self, base: str) -> str:
+        return self._unique_dataset_tab_title(base)
+
+    def discard_analysis_result(self, handle: DatasetHandle) -> None:
+        self._remove_dataset_directory(handle.temporary_path.parent)
+
+    def set_analysis_task_status(self, text: str) -> None:
+        self.task_status.setText(text)
+
     def open_files(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
         files, _filter = QFileDialog.getOpenFileNames(
@@ -708,10 +673,10 @@ class MainWindow(QMainWindow):
             return
         datasets = self.available_sas_dataset_tabs()
         self.analysis_panel.categorical_builder.set_adsl_sources(datasets)
-        self.analysis_panel.rule_based_builder.set_adsl_sources(datasets)
         self.analysis_panel.ae_table_builder.set_adsl_sources(datasets)
         if hasattr(self, "analysis_controller"):
             self.analysis_controller.refresh_listing_adsl_sources(datasets)
+            self.analysis_controller.refresh_rule_based_adsl_sources(datasets)
 
     def _browse_categorical_adsl(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
@@ -749,7 +714,7 @@ class MainWindow(QMainWindow):
 
         def ready(tab: DatasetTab) -> None:
             self._refresh_categorical_sources()
-            self.analysis_panel.rule_based_builder.select_adsl(tab)
+            self.analysis_controller.select_rule_based_adsl(tab)
 
         self._open_path(source, ready)
 
@@ -1056,7 +1021,7 @@ class MainWindow(QMainWindow):
             )
         )
         tab.rule_based_drilldown_requested.connect(
-            lambda row, column, display, owner=tab: self._drilldown_rule_based(
+            lambda row, column, display, owner=tab: self.analysis_controller.drilldown_rule_based(
                 owner, row, column, display
             )
         )
@@ -1493,7 +1458,6 @@ class MainWindow(QMainWindow):
         return {
             "proc_means": self.analysis_panel.builder,
             "categorical": self.analysis_panel.categorical_builder,
-            "rule_based": self.analysis_panel.rule_based_builder,
             "ae_table": self.analysis_panel.ae_table_builder,
         }[name]
 
@@ -1553,9 +1517,7 @@ class MainWindow(QMainWindow):
         self.analysis_dock.show()
 
     def show_rule_based_builder(self) -> None:
-        self._bind_builder_source("rule_based")
-        self._refresh_categorical_sources()
-        self.analysis_panel.show_rule_based_tab()
+        self.analysis_controller.show_rule_based_builder()
         self.analysis_dock.show()
 
     def show_ae_table_builder(self) -> None:
@@ -1714,192 +1676,6 @@ class MainWindow(QMainWindow):
                 source_handle, config, population_handle, ()
             )
             return self.sas_ae_table_generator.generate(configuration)
-
-        self._submit(builder, generate, completed, failed)
-
-    def _rule_based_builder_context(
-        self, selection: RuleBasedBuilderSelection
-    ) -> tuple[DatasetTab, DatasetTab | None, RuleBasedConfig] | None:
-        tab = self._builder_source("rule_based")
-        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
-            QMessageBox.warning(
-                self,
-                "Rule-based Table",
-                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
-            )
-            return None
-        population_tab = selection.population_tab
-        if selection.denominator_type == "population" and (
-            not isinstance(population_tab, DatasetTab)
-            or not population_tab.cache_complete
-        ):
-            QMessageBox.warning(
-                self,
-                "Rule-based Table",
-                "Open or browse a fully loaded ADSL dataset for Population N.",
-            )
-            return None
-        try:
-            dataset_filter = FilterEngine(tab.handle.metadata.variables).compile(
-                selection.dataset_filter_text
-            )
-            rows = tuple(
-                RuleBasedRow(
-                    draft.row_id,
-                    draft.item,
-                    FilterEngine(tab.handle.metadata.variables).compile(
-                        draft.filter_text
-                    ),
-                    draft.filter_text,
-                    draft.indent,
-                )
-                for draft in selection.rows
-            )
-            population_filter = (
-                FilterEngine(population_tab.handle.metadata.variables).compile(
-                    selection.population_filter_text
-                )
-                if isinstance(population_tab, DatasetTab)
-                else FilterEngine(tab.handle.metadata.variables).compile("")
-            )
-            config = RuleBasedConfig(
-                rows,
-                selection.treatment_variable,
-                "USUBJID",
-                dataset_filter,
-                selection.dataset_filter_text,
-                RuleBasedDenominator(
-                    type=selection.denominator_type,
-                    population_filter=population_filter,
-                    population_filter_text=selection.population_filter_text,
-                    population_treatment_variable=selection.population_treatment_variable,
-                    analysis_value_variable=selection.nonmissing_value_variable,
-                ),
-                selection.include_total,
-                1,
-            )
-            config.validate(
-                tab.handle.metadata,
-                population_tab.handle.metadata
-                if isinstance(population_tab, DatasetTab)
-                else None,
-            )
-        except ValueError as error:
-            QMessageBox.warning(self, "Rule-based Table", str(error))
-            return None
-        return (
-            tab,
-            population_tab if isinstance(population_tab, DatasetTab) else None,
-            config,
-        )
-
-    def _run_rule_based_builder(self, selection: RuleBasedBuilderSelection) -> None:
-        context = self._rule_based_builder_context(selection)
-        if context is None:
-            return
-        source_tab, population_tab, config = context
-        source_handle = source_tab.handle
-        population_handle = population_tab.handle if population_tab else None
-        builder = self.analysis_panel.rule_based_builder
-        self._rule_based_input_tabs = {source_tab}
-        if population_tab:
-            self._rule_based_input_tabs.add(population_tab)
-        builder.set_busy(True, "Calculating Rule-based Table in the background…")
-
-        def completed(handle: DatasetHandle) -> None:
-            self._rule_based_input_tabs.clear()
-            builder.set_busy(
-                False, f"Created {handle.metadata.row_count:,} result rows."
-            )
-            result_tab = self._make_dataset_tab(handle)
-            retained = {source_handle.temporary_path.parent}
-            if population_handle is not None:
-                retained.add(population_handle.temporary_path.parent)
-            for directory in retained:
-                self._retain_directory(directory)
-            self._rule_based_sources[result_tab] = RuleBasedResultContext(
-                source_handle, population_handle, config
-            )
-            index = self.tabs.addTab(result_tab, "Rule-based Table Result")
-            self.tabs.setCurrentIndex(index)
-            result_tab.start()
-
-        def failed(message: str, details: str) -> None:
-            self._rule_based_input_tabs.clear()
-            builder.set_busy(False, "Rule-based Table failed.")
-            if message.startswith("Missing treatment values"):
-                QMessageBox.warning(self, "Rule-based Table", message)
-            else:
-                self._show_error("Rule-based Table Failed", message, details)
-
-        self._submit(
-            builder,
-            lambda worker: self.rule_based_engine.run(
-                source_handle, config, population_handle, worker.report
-            ),
-            completed,
-            failed,
-        )
-
-    def _generate_rule_based_sas_code(
-        self, selection: RuleBasedBuilderSelection
-    ) -> None:
-        """Generate Rule-based SAS from the current Builder snapshot.
-
-        Treatment levels are runtime-resolved by the same engine helper used by
-        the calculation.  The full table is not executed merely to preview
-        code, and the generator only receives the frozen JSON-compatible
-        configuration contract.
-        """
-        context = self._rule_based_builder_context(selection)
-        if context is None:
-            return
-        source_tab, population_tab, config = context
-        if source_tab.handle.kind != "sas":
-            # The Builder disables this action for merge inputs, but keep the
-            # guard at the MainWindow boundary as well.
-            return
-        source_handle = source_tab.handle
-        population_handle = population_tab.handle if population_tab else None
-        builder = self.analysis_panel.rule_based_builder
-        self._rule_based_input_tabs = {source_tab}
-        if population_tab is not None:
-            self._rule_based_input_tabs.add(population_tab)
-        builder.set_busy(True, "Resolving Rule-based treatment levels…")
-
-        def completed(code: str) -> None:
-            self._rule_based_input_tabs.clear()
-            builder.set_busy(False, "SAS code generated.")
-            safe_name = (
-                "".join(
-                    character if character.isalnum() or character in {"-", "_"} else "_"
-                    for character in source_handle.metadata.name
-                ).strip("_")
-                or "dataset"
-            ).lower()
-            SasCodeDialog(
-                code,
-                str(source_handle.source_path),
-                f"{safe_name}_rule_based.sas",
-                self,
-            ).exec()
-
-        def failed(message: str, details: str) -> None:
-            self._rule_based_input_tabs.clear()
-            builder.set_busy(False, "SAS Code Generator failed.")
-            self._show_error("Rule-based SAS Code Generator Failed", message, details)
-
-        def generate(_worker: Worker) -> str:
-            levels = self.rule_based_engine.resolve_treatment_levels(
-                source_handle, config, population_handle
-            )
-            configuration = build_rule_based_configuration(
-                source_handle,
-                config,
-                population_handle,
-                levels,
-            )
-            return self.sas_rule_based_generator.generate(configuration)
 
         self._submit(builder, generate, completed, failed)
 
@@ -2375,104 +2151,6 @@ class MainWindow(QMainWindow):
             ),
         )
 
-    def _drilldown_rule_based(
-        self, tab: DatasetTab, view_row: int, column_name: str, display: str
-    ) -> None:
-        """Open source records/subjects represented by a Rule-based cell."""
-        context = self._rule_based_sources.get(tab)
-        source_row = tab.model.source_row_id(view_row)
-        if context is None or source_row is None or not display:
-            return
-        cell = lookup_rule_cell(tab.handle, source_row, column_name)
-        if cell is None:
-            return
-        row = next(
-            (
-                candidate
-                for candidate in context.config.rows
-                if candidate.row_id == cell.row_id
-            ),
-            None,
-        )
-        if row is None:
-            QMessageBox.warning(
-                self,
-                "Rule-based Table Drill-down",
-                "The selected rule row is no longer available.",
-            )
-            return
-        dialog, records, subjects, denominator = self._categorical_drilldown_dialog()
-        dialog.setWindowTitle("Rule-based Table Drill-down")
-        dialog.exec()
-        selected = dialog.selected_button
-        if selected not in {records, subjects, denominator}:
-            return
-        is_denominator = selected is denominator
-        if is_denominator and context.config.denominator.type == "population":
-            target = context.population
-        else:
-            target = context.source
-        if target is None:
-            QMessageBox.warning(
-                self,
-                "Rule-based Table Drill-down",
-                "The required denominator dataset is no longer available.",
-            )
-            return
-        try:
-            if is_denominator and context.config.denominator.type == "population":
-                where_sql, parameters = build_population_cell_filter(
-                    target.metadata, context.config, row, cell.treatment
-                )
-            else:
-                where_sql, parameters = build_rule_cell_filter(
-                    target.metadata,
-                    context.config,
-                    row,
-                    cell.treatment,
-                    denominator=is_denominator,
-                )
-        except (KeyError, ValueError) as error:
-            QMessageBox.warning(self, "Rule-based Table Drill-down", str(error))
-            return
-        mode = (
-            "Denominator Subjects"
-            if is_denominator
-            else "Numerator Subjects"
-            if selected is subjects
-            else "Numerator Records"
-        )
-        title = self._unique_dataset_tab_title(f"Query: {mode}")
-        self.task_status.setText(f"Building {title}…")
-
-        def completed(handle: DatasetHandle) -> None:
-            if self.tabs.indexOf(tab) < 0:
-                self._remove_dataset_directory(handle.temporary_path.parent)
-                return
-            query_tab = self._make_dataset_tab(handle)
-            index = self.tabs.addTab(query_tab, title)
-            self.tabs.setCurrentIndex(index)
-            query_tab.start()
-
-        self._submit(
-            tab,
-            lambda _worker: self.categorical_query_builder.run(
-                target,
-                where_sql,
-                parameters,
-                title,
-                subject_id_variable=(
-                    context.config.subject_id_variable
-                    if selected is subjects or is_denominator
-                    else None
-                ),
-            ),
-            completed,
-            lambda message, details: self._show_error(
-                "Rule-based Table Drill-down Failed", message, details
-            ),
-        )
-
     def _categorical_drilldown_dialog(self):
         """Create the compact, readable categorical drill-down chooser."""
 
@@ -2535,31 +2213,6 @@ class MainWindow(QMainWindow):
             completed,
             lambda message, details: self._show_error(
                 "Categorical Long Result Failed", message, details
-            ),
-        )
-
-    def _open_rule_based_long_result(self) -> None:
-        tab = self.current_dataset_tab()
-        if tab is None or tab.handle.kind != "rule_based":
-            return
-        title = self._unique_dataset_tab_title("Rule-based Long Result")
-        self.task_status.setText(f"Building {title}…")
-
-        def completed(handle: DatasetHandle) -> None:
-            if self.tabs.indexOf(tab) < 0:
-                self._remove_dataset_directory(handle.temporary_path.parent)
-                return
-            long_tab = self._make_dataset_tab(handle)
-            index = self.tabs.addTab(long_tab, title)
-            self.tabs.setCurrentIndex(index)
-            long_tab.start()
-
-        self._submit(
-            tab,
-            lambda _worker: self.rule_based_long_result_builder.run(tab.handle),
-            completed,
-            lambda message, details: self._show_error(
-                "Rule-based Long Result Failed", message, details
             ),
         )
 
@@ -2955,13 +2608,6 @@ class MainWindow(QMainWindow):
                 "This dataset is currently used by a Categorical Table. Wait for the calculation to finish before closing it.",
             )
             return
-        if widget in self._rule_based_input_tabs:
-            QMessageBox.information(
-                self,
-                "Rule-based Table Running",
-                "This dataset is currently used by a Rule-based Table. Wait for the calculation to finish before closing it.",
-            )
-            return
         if blocker := self.analysis_controller.tab_close_blocker(widget):
             QMessageBox.information(
                 self,
@@ -2993,14 +2639,6 @@ class MainWindow(QMainWindow):
                     directories.add(
                         categorical_context.population.temporary_path.parent
                     )
-                self._pending_directory_releases.setdefault(widget, []).extend(
-                    directories
-                )
-            rule_context = self._rule_based_sources.pop(widget, None)
-            if rule_context is not None:
-                directories = {rule_context.source.temporary_path.parent}
-                if rule_context.population is not None:
-                    directories.add(rule_context.population.temporary_path.parent)
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )
