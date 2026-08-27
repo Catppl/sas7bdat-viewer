@@ -429,6 +429,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertIs(window.analysis_controller.listing_source, source_a)
             self.assertIs(window.analysis_controller.rule_based_source, source_a)
             self.assertIs(window.analysis_controller.ae_table_source, source_a)
+            self.assertIs(window.analysis_controller.proc_means_source, source_a)
             self.assertEqual(
                 window.analysis_panel.builder.analysis_variables.selected_variables(),
                 ("AVAL",),
@@ -471,6 +472,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertIsNone(window.analysis_controller.listing_source)
             self.assertIsNone(window.analysis_controller.rule_based_source)
             self.assertIsNone(window.analysis_controller.ae_table_source)
+            self.assertIsNone(window.analysis_controller.proc_means_source)
 
             # Listing's source binding is now controller-owned.  It must keep
             # the existing source-close guard and release only after Clear.

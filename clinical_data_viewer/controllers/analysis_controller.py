@@ -30,16 +30,27 @@ from ..ae_table.drilldown import (
     lookup_cell as lookup_ae_cell,
 )
 from ..categorical.drilldown import CategoricalQueryBuilder
+from ..codegen import build_proc_means_configuration
+from ..codegen.r import RProcMeansGenerator
 from ..codegen.sas import (
     SasAeTableGenerator,
     SasListingGenerator,
+    SasProcMeansGenerator,
     SasRuleBasedGenerator,
 )
+from ..data_store import DataStore
 from ..dataset_utils import is_analysis_dataset
 from ..domain import DatasetHandle, DatasetMetadata
 from ..filter_engine import FilterEngine
 from ..listing import ListingConfig, ListingEngine
 from ..listing.configuration import build_listing_configuration
+from ..proc_means import (
+    ProcMeansConfig,
+    ProcMeansEngine,
+    ProcMeansQueryBuilder,
+    build_drilldown_filter,
+    build_drilldown_where_text,
+)
 from ..rule_based import (
     RuleBasedConfig,
     RuleBasedDenominator,
@@ -57,13 +68,15 @@ from ..rule_based.drilldown import (
 from ..rule_based.drilldown import (
     lookup_cell as lookup_rule_cell,
 )
+from ..settings import PROC_MEANS_STATISTICS, AppSettings
 from ..temp_manager import TempManager
 from ..ui.ae_table_builder import AeTableBuilderSelection
 from ..ui.analysis_panel import AnalysisPanel
 from ..ui.dataset_tab import DatasetTab
 from ..ui.listing_builder import ListingBuilderSelection
+from ..ui.proc_means_builder import ProcMeansBuilderSelection
 from ..ui.rule_based_builder import RuleBasedBuilderSelection
-from ..ui.sas_code_dialog import SasCodeDialog
+from ..ui.sas_code_dialog import RCodeDialog, SasCodeDialog
 from ..workers import Worker
 
 
@@ -92,6 +105,14 @@ class AeTableResultContext:
     source: DatasetHandle
     population: DatasetHandle | None
     config: AeTableConfig
+
+
+@dataclass(frozen=True, slots=True)
+class ProcMeansResultContext:
+    """Source handle retained while a PROC MEANS result tab remains open."""
+
+    source: DatasetHandle
+    config: ProcMeansConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +158,14 @@ class AnalysisControllerHost(Protocol):
 
     def set_analysis_task_status(self, text: str) -> None: ...
 
+    def show_proc_means_query_result(
+        self,
+        handle: DatasetHandle,
+        title: str,
+        where_text: str,
+        analysis_variable: str,
+    ) -> None: ...
+
 
 class AnalysisController(QObject):
     """Coordinate Analysis UI workflows.
@@ -152,11 +181,13 @@ class AnalysisController(QObject):
         host: AnalysisControllerHost,
         analysis_panel: AnalysisPanel,
         temp_manager: TempManager,
+        settings: AppSettings,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._host = host
         self._panel = analysis_panel
+        self._settings = settings
         self._listing_engine = ListingEngine(temp_manager)
         self._sas_listing_generator = SasListingGenerator()
         self._rule_based_engine = RuleBasedEngine(temp_manager)
@@ -167,6 +198,11 @@ class AnalysisController(QObject):
         self._ae_table_long_result_builder = AeTableLongResultBuilder(temp_manager)
         self._ae_table_query_builder = CategoricalQueryBuilder(temp_manager)
         self._sas_ae_table_generator = SasAeTableGenerator()
+        self._proc_means_engine = ProcMeansEngine(temp_manager)
+        self._proc_means_query_builder = ProcMeansQueryBuilder(temp_manager)
+        self._sas_proc_means_generator = SasProcMeansGenerator()
+        self._r_proc_means_generator = RProcMeansGenerator()
+        self._store = DataStore()
         self._listing_source: DatasetTab | None = None
         self._listing_input_tabs: set[DatasetTab] = set()
         self._listing_results: dict[DatasetTab, ListingResultContext] = {}
@@ -176,6 +212,9 @@ class AnalysisController(QObject):
         self._ae_table_source: DatasetTab | None = None
         self._ae_table_input_tabs: set[DatasetTab] = set()
         self._ae_table_results: dict[DatasetTab, AeTableResultContext] = {}
+        self._proc_means_source: DatasetTab | None = None
+        self._proc_means_input_tabs: set[DatasetTab] = set()
+        self._proc_means_results: dict[DatasetTab, ProcMeansResultContext] = {}
 
         builder = self._panel.listing_builder
         builder.run_requested.connect(self.run_listing)
@@ -202,6 +241,17 @@ class AnalysisController(QObject):
         )
         ae_builder.browse_adsl_requested.connect(host.browse_ae_table_adsl_dataset)
         ae_builder.cleared.connect(self.clear_ae_table_source)
+
+        proc_builder = self._panel.builder
+        proc_builder.run_requested.connect(self.run_proc_means_builder)
+        proc_builder.sas_code_requested.connect(self.generate_proc_means_sas_code)
+        proc_builder.r_code_requested.connect(self.generate_proc_means_r_code)
+        proc_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(
+                self._parent_widget(), "PROC MEANS Builder", message
+            )
+        )
+        proc_builder.cleared.connect(self.clear_proc_means_source)
 
     @property
     def listing_source(self) -> DatasetTab | None:
@@ -250,6 +300,8 @@ class AnalysisController(QObject):
             titles.append("Rule Based")
         if self.ae_table_source is tab:
             titles.append("AE Table")
+        if self.proc_means_source is tab:
+            titles.append("Proc Means")
         return titles
 
     def tab_close_blocker(self, tab: object) -> TabCloseBlocker | None:
@@ -268,6 +320,11 @@ class AnalysisController(QObject):
                 "AE Table Running",
                 "This dataset is currently used by an AE Table. Wait for the calculation to finish before closing it.",
             )
+        if tab in self._proc_means_input_tabs:
+            return TabCloseBlocker(
+                "PROC MEANS Running",
+                "This dataset is currently being analyzed. Wait for PROC MEANS to finish before closing it.",
+            )
         return None
 
     def take_result_release_paths(self, tab: object) -> tuple[Path, ...]:
@@ -281,12 +338,15 @@ class AnalysisController(QObject):
                     paths.add(rule_context.population.temporary_path.parent)
                 return tuple(paths)
             ae_context = self._ae_table_results.pop(tab, None)
-            if ae_context is None:
+            if ae_context is not None:
+                paths = {ae_context.source.temporary_path.parent}
+                if ae_context.population is not None:
+                    paths.add(ae_context.population.temporary_path.parent)
+                return tuple(paths)
+            proc_context = self._proc_means_results.pop(tab, None)
+            if proc_context is None:
                 return ()
-            paths = {ae_context.source.temporary_path.parent}
-            if ae_context.population is not None:
-                paths.add(ae_context.population.temporary_path.parent)
-            return tuple(paths)
+            return (proc_context.source.temporary_path.parent,)
         paths = {context.source.temporary_path.parent}
         if context.adsl is not None:
             paths.add(context.adsl.temporary_path.parent)
@@ -1069,6 +1129,254 @@ class AnalysisController(QObject):
             completed,
             lambda message, details: self._host.show_analysis_error(
                 "AE Table Long Result Failed", message, details
+            ),
+        )
+
+    @property
+    def proc_means_source(self) -> DatasetTab | None:
+        """Return PROC MEANS Builder's fixed source while its tab remains open."""
+        if self._proc_means_source is None:
+            return None
+        if not self._host.is_open_dataset_tab(self._proc_means_source):
+            return None
+        return self._proc_means_source
+
+    def show_proc_means_builder(self) -> None:
+        """Open PROC MEANS Builder with its first eligible source fixed until Clear."""
+        if self.proc_means_source is None:
+            active_tab = self._host.current_dataset_tab()
+            if (
+                active_tab is not None
+                and is_analysis_dataset(active_tab.handle)
+                and active_tab.cache_complete
+            ):
+                self._proc_means_source = active_tab
+                self._set_proc_means_dataset(active_tab)
+        self._panel.show_builder_tab()
+
+    def clear_proc_means_source(self) -> None:
+        """Release PROC MEANS Builder's fixed source only after Clear."""
+        self._proc_means_source = None
+        self._set_proc_means_dataset(None)
+
+    def _set_proc_means_dataset(self, tab: DatasetTab | None) -> None:
+        builder = self._panel.builder
+        if tab is None:
+            builder.set_dataset(None, "", "", "sas")
+            return
+        builder.set_dataset(
+            tab.handle.metadata,
+            str(tab.handle.source_path),
+            tab.current_where_text(),
+            tab.handle.kind,
+        )
+
+    def _proc_means_context(
+        self, selection: ProcMeansBuilderSelection, action_title: str
+    ) -> tuple[DatasetTab, ProcMeansConfig] | None:
+        tab = self.proc_means_source
+        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            QMessageBox.warning(
+                self._parent_widget(),
+                action_title,
+                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
+            )
+            return None
+        filter_text = self._panel.builder.current_filter_text()
+        try:
+            compiled_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                filter_text
+            )
+            config = ProcMeansConfig(
+                selection.analysis_variables,
+                selection.by_variables,
+                selection.class_variables,
+                selection.statistics,
+                compiled_filter,
+                filter_text,
+                selection.decimal_group_variables,
+                tuple(self._settings.proc_means_decimal_offsets.items()),
+                self._settings.proc_means_confidence,
+            )
+            config.validate(tab.handle.metadata)
+        except ValueError as error:
+            QMessageBox.warning(self._parent_widget(), action_title, str(error))
+            return None
+        return tab, config
+
+    def generate_proc_means_sas_code(
+        self, selection: ProcMeansBuilderSelection
+    ) -> None:
+        context = self._proc_means_context(selection, "SAS Code Generator")
+        if context is None:
+            return
+        tab, config = context
+        if tab.handle.kind == "merge":
+            return
+        try:
+            configuration = build_proc_means_configuration(tab.handle, config)
+            code = self._sas_proc_means_generator.generate(configuration)
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.critical(
+                self._parent_widget(), "SAS Code Generator Failed", str(error)
+            )
+            return
+        SasCodeDialog(
+            code,
+            str(tab.handle.source_path),
+            f"{self._safe_source_name(tab.handle)}_proc_means.sas",
+            self._parent_widget(),
+        ).exec()
+
+    def generate_proc_means_r_code(
+        self, selection: ProcMeansBuilderSelection
+    ) -> None:
+        context = self._proc_means_context(selection, "R Code Generator")
+        if context is None:
+            return
+        tab, config = context
+        if tab.handle.kind == "merge":
+            return
+        try:
+            configuration = build_proc_means_configuration(tab.handle, config)
+            code = self._r_proc_means_generator.generate(configuration)
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.critical(
+                self._parent_widget(), "R Code Generator Failed", str(error)
+            )
+            return
+        RCodeDialog(
+            code,
+            str(tab.handle.source_path),
+            f"{self._safe_source_name(tab.handle)}_proc_means.R",
+            self._parent_widget(),
+        ).exec()
+
+    def run_proc_means_builder(self, selection: ProcMeansBuilderSelection) -> None:
+        source_tab = self.proc_means_source
+        if source_tab is None or not is_analysis_dataset(source_tab.handle):
+            return
+        builder = self._panel.builder
+        current_filter = source_tab.current_where_text()
+        builder_filter = builder.current_filter_text()
+        if not builder_filter or builder_filter != current_filter:
+            response = QMessageBox.question(
+                self._parent_widget(),
+                "PROC MEANS Builder",
+                "Apply the current dataset filter to PROC MEANS?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if response == QMessageBox.Yes:
+                builder.apply_current_filter(current_filter)
+        context = self._proc_means_context(selection, "PROC MEANS Builder")
+        if context is None:
+            return
+        tab, config = context
+        source_handle = tab.handle
+        self._proc_means_input_tabs = {tab}
+        builder.set_busy(True, "Calculating PROC MEANS in the background…")
+
+        def completed(handle: DatasetHandle) -> None:
+            self._proc_means_input_tabs.clear()
+            builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
+            result_tab = self._host.create_analysis_result_tab(handle)
+            self._host.retain_analysis_directory(source_handle.temporary_path.parent)
+            self._proc_means_results[result_tab] = ProcMeansResultContext(
+                source_handle, config
+            )
+            self._host.show_analysis_result_tab(result_tab, "PROC MEANS Result")
+
+        def failed(message: str, details: str) -> None:
+            self._proc_means_input_tabs.clear()
+            builder.set_busy(False, "PROC MEANS failed.")
+            self._host.show_analysis_error("PROC MEANS Builder Failed", message, details)
+
+        self._host.submit_analysis_task(
+            builder,
+            lambda worker: self._proc_means_engine.run(
+                source_handle, config, worker.report
+            ),
+            completed,
+            failed,
+        )
+
+    def drilldown_proc_means(
+        self, tab: DatasetTab, view_row: int, statistic_column: str, display: str
+    ) -> None:
+        context = self._proc_means_results.get(tab)
+        metadata = tab.handle.metadata
+        analysis_column = metadata.proc_means_analysis_column
+        statistic_key = dict(metadata.proc_means_statistic_keys).get(statistic_column)
+        if context is None or analysis_column is None or statistic_key is None:
+            return
+        if display in {"", "—"}:
+            QMessageBox.information(
+                self._parent_widget(),
+                "PROC MEANS Drill-down",
+                "This statistic has no calculated value to drill down from.",
+            )
+            return
+        generation = tab.generation
+        result_filter = tab.compiled_filter
+        result_sort = tab.model.sort_spec
+        group_columns = context.config.group_variables
+        lookup_columns = (*group_columns, analysis_column)
+        labels = dict(PROC_MEANS_STATISTICS)
+        statistic_label = labels.get(statistic_key, statistic_column.title())
+        base_title = f"Query: {statistic_label}: {display}"
+        self._host.set_analysis_task_status(f"Building {base_title}…")
+
+        def build(worker: Worker):
+            values = self._store.view_row_values(
+                tab.handle.database_path,
+                metadata,
+                result_filter,
+                result_sort,
+                view_row,
+                lookup_columns,
+            )
+            if values is None:
+                raise ValueError("The selected PROC MEANS result row no longer exists.")
+            group_values = dict(zip(group_columns, values[:-1], strict=True))
+            analysis_variable = str(values[-1])
+            compiled = build_drilldown_filter(
+                context.source.metadata,
+                context.config,
+                group_values,
+                analysis_variable,
+                statistic_key,
+            )
+            where_text = build_drilldown_where_text(
+                context.source.metadata,
+                context.config,
+                group_values,
+                analysis_variable,
+                statistic_key,
+            )
+            handle = self._proc_means_query_builder.run(
+                context.source, compiled, base_title, worker.report
+            )
+            return handle, analysis_variable, where_text
+
+        def completed(result: tuple[DatasetHandle, str, str]) -> None:
+            handle, analysis_variable, where_text = result
+            if not self._host.is_open_dataset_tab(tab) or generation != tab.generation:
+                self._host.discard_analysis_result(handle)
+                return
+            title = self._host.unique_analysis_tab_title(base_title)
+            self._host.show_proc_means_query_result(
+                handle, title, where_text, analysis_variable
+            )
+
+        self._host.submit_analysis_task(
+            tab,
+            build,
+            completed,
+            lambda message, details: self._host.show_analysis_error(
+                "PROC MEANS Drill-down Failed", message, details
             ),
         )
 
