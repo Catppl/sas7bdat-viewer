@@ -12,13 +12,15 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | File safety | Copy the source to a session temporary directory, read only the copy/cache, and clean temporary data on tab close and application exit. |
 | Large data | Show metadata and the first batch quickly, then continue caching in the background. Virtual paging avoids rendering the full dataset at once. |
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
-| Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, and missing-value conditions. |
+| Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, missing-value conditions, SAS temporal literals, and common character functions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
 | Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, AE Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
 | Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used; manual row highlights are recorded in an additional `HIGHLIGHT` column because CSV cannot store cell background colors. |
 | Code generation | SAS and R PROC MEANS code generators based on the same language-neutral JSON v3 configuration. |
 
 The interface follows a compact Windows 11 / SAS Studio-style layout: menu bar, toolbar, dataset tabs, Variables panel, data table, WHERE editor, and status bar.
+
+`View > Apply SAS Date/Time Formats` optionally displays numeric values using each variable's SAS DATE/DATETIME/TIME metadata format; it never changes the raw SQLite value used by WHERE, sorting, comparison, Merge, or analysis. WHERE also accepts metadata-validated SAS literals such as `ADT = '2026-08-03'd`, `ADTM >= '2026-08-03T12:30:00'dt`, and `ATM = '12:30:00't`, plus `INDEX()`, `FIND()`, `UPCASE()`, and `LOWCASE()`.
 
 ![SASDataViewer analysis view](docs/screenshots/SASDataViewer-analysis.png)
 

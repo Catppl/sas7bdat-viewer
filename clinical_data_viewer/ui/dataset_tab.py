@@ -151,7 +151,7 @@ class WhereHighlighter(QSyntaxHighlighter):
         keyword_format.setFontWeight(QFont.DemiBold)
         self.keyword = (
             QRegularExpression(
-                r"\b(?:AND|OR|NOT|IN|CONTAINS|MISSING|IS|NULL|BETWEEN|LIKE|ESCAPE|EQ|NE|GT|LT|GE|LE)\b",
+                r"\b(?:AND|OR|NOT|IN|CONTAINS|MISSING|IS|NULL|BETWEEN|LIKE|ESCAPE|EQ|NE|GT|LT|GE|LE|INDEX|FIND|UPCASE|LOWCASE)\b",
                 QRegularExpression.CaseInsensitiveOption,
             ),
             keyword_format,
@@ -193,7 +193,14 @@ class DatasetTab(QWidget):
     rule_based_drilldown_requested = Signal(int, str, str)
     ae_table_drilldown_requested = Signal(int, str, str)
 
-    def __init__(self, handle: DatasetHandle, page_size: int, parent=None) -> None:
+    def __init__(
+        self,
+        handle: DatasetHandle,
+        page_size: int,
+        parent=None,
+        *,
+        apply_sas_date_time_formats: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.handle = handle
         self.advanced_visible = False
@@ -216,6 +223,7 @@ class DatasetTab(QWidget):
         self._pending_selection: tuple[int, int] | None = None
         self._compared_rows: tuple[int, ...] | None = None
         self._page_size = page_size
+        self.apply_sas_date_time_formats = apply_sas_date_time_formats
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -363,7 +371,10 @@ class DatasetTab(QWidget):
     def _install_model(self) -> None:
         old_model = self.table.model()
         self.model = DatasetTableModel(
-            self.handle.metadata, self.visible_columns, self._page_size
+            self.handle.metadata,
+            self.visible_columns,
+            self._page_size,
+            apply_sas_date_time_formats=self.apply_sas_date_time_formats,
         )
         self.model.page_requested.connect(
             lambda offset, limit: self.page_requested.emit(
@@ -376,6 +387,10 @@ class DatasetTab(QWidget):
         self.table.selectionModel().selectionChanged.connect(self._selection_changed)
         if old_model:
             old_model.deleteLater()
+
+    def set_apply_sas_date_time_formats(self, enabled: bool) -> None:
+        self.apply_sas_date_time_formats = enabled
+        self.model.set_apply_sas_date_time_formats(enabled)
 
     def start(self) -> None:
         initial_count = (

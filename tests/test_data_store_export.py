@@ -27,16 +27,57 @@ class DataStoreExportTests(unittest.TestCase):
             connection.execute(
                 'CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "USUBJID" TEXT, '
                 '"AESER" TEXT, "AGE" REAL, "AESTDTC" TEXT, "AEENDTC" TEXT, '
-                '"ARMCD" TEXT)'
+                '"ARMCD" TEXT, "ADT" REAL, "ADTM" REAL, "ATM" REAL)'
             )
             connection.executemany(
                 'INSERT INTO dataset("USUBJID", "AESER", "AGE", "AESTDTC", '
-                '"AEENDTC", "ARMCD") VALUES (?, ?, ?, ?, ?, ?)',
+                '"AEENDTC", "ARMCD", "ADT", "ADTM", "ATM") '
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    ("101-001", "Y", 45, "2024-01-01", "2024-01-02", "PKO1"),
-                    ("101-002", "N", 51, "2024-02-02", "2024-02-01", "pko"),
-                    ("101-003", "Y", 30, "2024-03-01", "2024-03-01", "PK2"),
-                    ("101-004", "Y", 60, "2024-04-01", "2024-04-03", "XX"),
+                    (
+                        "101-001",
+                        "Y",
+                        45,
+                        "2024-01-01",
+                        "2024-01-02",
+                        "PKO1",
+                        24_345,
+                        24_345 * 86_400 + 45_296,
+                        45_296,
+                    ),
+                    (
+                        "101-002",
+                        "N",
+                        51,
+                        "2024-02-02",
+                        "2024-02-01",
+                        "pko",
+                        24_346,
+                        24_346 * 86_400 + 45_297,
+                        45_297,
+                    ),
+                    (
+                        "101-003",
+                        "Y",
+                        30,
+                        "2024-03-01",
+                        "2024-03-01",
+                        "PK2",
+                        None,
+                        None,
+                        None,
+                    ),
+                    (
+                        "101-004",
+                        "Y",
+                        60,
+                        "2024-04-01",
+                        "2024-04-03",
+                        "XX",
+                        24_349,
+                        24_349 * 86_400,
+                        0,
+                    ),
                 ],
             )
             connection.commit()
@@ -50,6 +91,9 @@ class DataStoreExportTests(unittest.TestCase):
                 VariableMetadata("AESTDTC", kind="character"),
                 VariableMetadata("AEENDTC", kind="character"),
                 VariableMetadata("ARMCD", kind="character"),
+                VariableMetadata("ADT", kind="numeric", format="YYMMDD10."),
+                VariableMetadata("ADTM", kind="numeric", format="DATETIME20."),
+                VariableMetadata("ATM", kind="numeric", format="TIME8."),
             ),
         )
         self.compiled = FilterEngine(self.metadata.variables).compile(
@@ -158,6 +202,56 @@ class DataStoreExportTests(unittest.TestCase):
             500,
         )
         self.assertEqual(result.rows, (("101-001",), ("101-003",)))
+
+    def test_temporal_literals_and_functions_execute_against_raw_sqlite_values(
+        self,
+    ) -> None:
+        date = FilterEngine(self.metadata.variables).compile("ADT = '2026-08-27'd")
+        result = DataStore().query_page(
+            self.database, self.metadata, ["USUBJID"], date, None, 0, 500
+        )
+        self.assertEqual(result.rows, (("101-001",),))
+
+        date_list = FilterEngine(self.metadata.variables).compile(
+            "ADT IN ('27AUG2026'd, '28AUG2026'd)"
+        )
+        result = DataStore().query_page(
+            self.database, self.metadata, ["USUBJID"], date_list, None, 0, 500
+        )
+        self.assertEqual(result.rows, (("101-001",), ("101-002",)))
+
+        nested = FilterEngine(self.metadata.variables).compile(
+            'FIND(LOWCASE(ARMCD), "pko") AND UPCASE(AESER) = "Y"'
+        )
+        result = DataStore().query_page(
+            self.database, self.metadata, ["USUBJID"], nested, None, 0, 500
+        )
+        self.assertEqual(result.rows, (("101-001",),))
+
+        exact_position = FilterEngine(self.metadata.variables).compile(
+            'INDEX(ARMCD, "PK") = 1'
+        )
+        result = DataStore().query_page(
+            self.database,
+            self.metadata,
+            ["USUBJID"],
+            exact_position,
+            None,
+            0,
+            500,
+        )
+        self.assertEqual(result.rows, (("101-001",), ("101-003",)))
+
+    def test_csv_export_keeps_raw_numeric_temporal_values(self) -> None:
+        source = self.root / "adae.sas7bdat"
+        source.write_bytes(b"fixture")
+        handle = DatasetHandle(source, source, self.database, self.metadata)
+        destination = self.root / "raw-temporal.csv"
+        compiled = FilterEngine(self.metadata.variables).compile("ADT = '2026-08-27'd")
+        CsvExporter().export(handle, destination, ["USUBJID", "ADT"], compiled, None)
+        with destination.open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.reader(stream))
+        self.assertEqual(rows, [["USUBJID", "ADT"], ["101-001", "24345.0"]])
 
 
 if __name__ == "__main__":

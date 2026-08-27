@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from .sas_value_formatter import SasTemporalLiteral
+
 
 class WhereSyntaxError(ValueError):
     def __init__(self, message: str, text: str, position: int) -> None:
@@ -18,6 +20,7 @@ class WhereSyntaxError(ValueError):
 class TokenKind(Enum):
     IDENTIFIER = auto()
     STRING = auto()
+    TEMPORAL_LITERAL = auto()
     NUMBER = auto()
     OPERATOR = auto()
     LPAREN = auto()
@@ -43,12 +46,18 @@ class VariableOperand:
     name: str
 
 
-Operand = LiteralOperand | VariableOperand
+@dataclass(frozen=True, slots=True)
+class FunctionOperand:
+    name: str
+    arguments: tuple[Operand, ...]
+
+
+Operand = LiteralOperand | VariableOperand | FunctionOperand
 
 
 @dataclass(frozen=True, slots=True)
 class Comparison:
-    variable: str
+    left: VariableOperand | FunctionOperand
     operator: str
     operand: Operand
     prefix: bool = False
@@ -56,21 +65,21 @@ class Comparison:
 
 @dataclass(frozen=True, slots=True)
 class InPredicate:
-    variable: str
+    left: VariableOperand | FunctionOperand
     values: tuple[LiteralOperand, ...]
     negated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class ContainsPredicate:
-    variable: str
+    left: VariableOperand | FunctionOperand
     operand: Operand
     negated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class BetweenPredicate:
-    variable: str
+    left: VariableOperand | FunctionOperand
     lower: Operand
     upper: Operand
     negated: bool = False
@@ -78,7 +87,7 @@ class BetweenPredicate:
 
 @dataclass(frozen=True, slots=True)
 class LikePredicate:
-    variable: str
+    left: VariableOperand | FunctionOperand
     pattern: LiteralOperand
     escape: str | None = None
     negated: bool = False
@@ -137,7 +146,31 @@ class Lexer:
                 continue
             start = self.position
             if char in "'\"":
-                result.append(Token(TokenKind.STRING, self._string(char), start))
+                value = self._string(char)
+                suffix_start = self.position
+                while (
+                    self.position < len(self.text)
+                    and self.text[self.position].isalpha()
+                ):
+                    self.position += 1
+                suffix = self.text[suffix_start : self.position].casefold()
+                if suffix in {"d", "dt", "t"}:
+                    kind = {"d": "date", "dt": "datetime", "t": "time"}[suffix]
+                    result.append(
+                        Token(
+                            TokenKind.TEMPORAL_LITERAL,
+                            SasTemporalLiteral(value, kind),
+                            start,
+                        )
+                    )
+                elif suffix:
+                    raise WhereSyntaxError(
+                        "Unsupported suffix after quoted literal",
+                        self.text,
+                        suffix_start,
+                    )
+                else:
+                    result.append(Token(TokenKind.STRING, value, start))
             elif char.isalpha() or char == "_":
                 result.append(Token(TokenKind.IDENTIFIER, self._identifier(), start))
             elif (
@@ -340,11 +373,12 @@ class Parser:
             self._expect(TokenKind.RPAREN, "Expected ')' after variable name")
             return MissingPredicate(str(variable))
 
-        variable = str(
-            self._expect(
-                TokenKind.IDENTIFIER, "Expected a variable name or MISSING()"
-            ).value
+        left = self._value_expression(
+            "Expected a variable name, function call, or MISSING()"
         )
+        if isinstance(left, FunctionOperand):
+            return self._function_predicate(left)
+        variable = left.name
 
         if self._consume_keyword("IS"):
             negated = self._consume_keyword("NOT")
@@ -359,14 +393,14 @@ class Parser:
 
         negated = self._consume_keyword("NOT")
         if self._consume_keyword("IN"):
-            return self._in_predicate(variable, negated)
+            return self._in_predicate(left, negated)
         if self._consume_keyword("BETWEEN"):
             lower = self._operand()
             if not self._consume_keyword("AND"):
                 raise WhereSyntaxError(
                     "Expected AND inside BETWEEN", self.text, self.current.position
                 )
-            return BetweenPredicate(variable, lower, self._operand(), negated)
+            return BetweenPredicate(left, lower, self._operand(), negated)
         if self._consume_keyword("LIKE"):
             pattern = self._literal_operand("LIKE requires a quoted string pattern")
             if not isinstance(pattern.value, str):
@@ -390,9 +424,9 @@ class Parser:
                         self.current.position,
                     )
                 escape = escape_operand.value
-            return LikePredicate(variable, pattern, escape, negated)
+            return LikePredicate(left, pattern, escape, negated)
         if self._consume_keyword("CONTAINS") or self._consume_operator({"?"}):
-            return ContainsPredicate(variable, self._operand(), negated)
+            return ContainsPredicate(left, self._operand(), negated)
         if negated:
             raise WhereSyntaxError(
                 "Expected IN, BETWEEN, LIKE, CONTAINS, or ? after NOT",
@@ -401,7 +435,7 @@ class Parser:
             )
 
         operator, prefix = self._comparison_operator()
-        return Comparison(variable, operator, self._operand(), prefix)
+        return Comparison(left, operator, self._operand(), prefix)
 
     def _comparison_operator(self) -> tuple[str, bool]:
         if self.current.kind is TokenKind.IDENTIFIER:
@@ -423,7 +457,52 @@ class Parser:
             self.current.position,
         )
 
-    def _in_predicate(self, variable: str, negated: bool) -> InPredicate:
+    def _function_predicate(self, left: FunctionOperand) -> Expression:
+        """Continue parsing predicates whose left side is a function call."""
+        if left.name.upper() in {"INDEX", "FIND"} and self._predicate_boundary():
+            # SAS WHERE accepts a numeric search result directly: zero is false,
+            # while a positive match position is true.
+            return Comparison(left, "!=", LiteralOperand(0))
+        negated = self._consume_keyword("NOT")
+        if self._consume_keyword("IN"):
+            return self._in_predicate(left, negated)
+        if self._consume_keyword("BETWEEN"):
+            lower = self._operand()
+            if not self._consume_keyword("AND"):
+                raise WhereSyntaxError(
+                    "Expected AND inside BETWEEN", self.text, self.current.position
+                )
+            return BetweenPredicate(left, lower, self._operand(), negated)
+        if self._consume_keyword("LIKE"):
+            pattern = self._literal_operand("LIKE requires a quoted string pattern")
+            if not isinstance(pattern.value, str):
+                raise WhereSyntaxError(
+                    "LIKE requires a quoted string pattern",
+                    self.text,
+                    self.current.position,
+                )
+            return LikePredicate(left, pattern, negated=negated)
+        if self._consume_keyword("CONTAINS") or self._consume_operator({"?"}):
+            return ContainsPredicate(left, self._operand(), negated)
+        if negated:
+            raise WhereSyntaxError(
+                "Expected IN, BETWEEN, LIKE, CONTAINS, or ? after NOT",
+                self.text,
+                self.current.position,
+            )
+        operator, prefix = self._comparison_operator()
+        return Comparison(left, operator, self._operand(), prefix)
+
+    def _predicate_boundary(self) -> bool:
+        return (
+            self.current.kind in {TokenKind.EOF, TokenKind.RPAREN}
+            or self._keyword("AND")
+            or self._keyword("OR")
+        )
+
+    def _in_predicate(
+        self, left: VariableOperand | FunctionOperand, negated: bool
+    ) -> InPredicate:
         self._expect(TokenKind.LPAREN, "Expected '(' after IN")
         values = [self._literal_operand("IN values must be quoted strings or numbers")]
         while self.current.kind is TokenKind.COMMA:
@@ -432,13 +511,19 @@ class Parser:
                 self._literal_operand("IN values must be quoted strings or numbers")
             )
         self._expect(TokenKind.RPAREN, "Expected ')' after IN values")
-        return InPredicate(variable, tuple(values), negated)
+        return InPredicate(left, tuple(values), negated)
 
     def _operand(self) -> Operand:
-        if self.current.kind in {TokenKind.STRING, TokenKind.NUMBER}:
+        if self.current.kind in {
+            TokenKind.STRING,
+            TokenKind.NUMBER,
+            TokenKind.TEMPORAL_LITERAL,
+        }:
             return LiteralOperand(self._advance().value)
         if self.current.kind is TokenKind.IDENTIFIER:
-            return VariableOperand(str(self._advance().value))
+            return self._value_expression(
+                "Expected a quoted string, number, variable name, or function call"
+            )
         raise WhereSyntaxError(
             "Expected a quoted string, number, or variable name",
             self.text,
@@ -446,9 +531,28 @@ class Parser:
         )
 
     def _literal_operand(self, message: str) -> LiteralOperand:
-        if self.current.kind in {TokenKind.STRING, TokenKind.NUMBER}:
+        if self.current.kind in {
+            TokenKind.STRING,
+            TokenKind.NUMBER,
+            TokenKind.TEMPORAL_LITERAL,
+        }:
             return LiteralOperand(self._advance().value)
         raise WhereSyntaxError(message, self.text, self.current.position)
+
+    def _value_expression(self, message: str) -> VariableOperand | FunctionOperand:
+        token = self._expect(TokenKind.IDENTIFIER, message)
+        name = str(token.value)
+        if self.current.kind is not TokenKind.LPAREN:
+            return VariableOperand(name)
+        self._advance()
+        arguments: list[Operand] = []
+        if self.current.kind is not TokenKind.RPAREN:
+            arguments.append(self._operand())
+            while self.current.kind is TokenKind.COMMA:
+                self._advance()
+                arguments.append(self._operand())
+        self._expect(TokenKind.RPAREN, "Expected ')' after function arguments")
+        return FunctionOperand(name, tuple(arguments))
 
 
 def parse_where(text: str) -> Expression:

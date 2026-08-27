@@ -19,8 +19,29 @@ def sas_name(value: object) -> str:
 def sas_filter_operand(operand: dict[str, object]) -> str:
     if operand["type"] == "variable":
         return sas_name(operand["name"])
+    if operand["type"] == "function":
+        name = str(operand["name"]).upper()
+        arguments = ", ".join(
+            sas_filter_operand(argument) for argument in operand["arguments"]
+        )
+        if name not in {"INDEX", "FIND", "UPCASE", "LOWCASE"}:
+            raise ValueError(f"Unsupported SAS WHERE function: {name}")
+        return f"{name}({arguments})"
     value = operand["value"]
+    temporal = {
+        "sas_date": "d",
+        "sas_datetime": "dt",
+        "sas_time": "t",
+    }.get(str(operand.get("value_type", "")))
+    if temporal is not None:
+        return sas_string(value) + temporal
     return sas_string(value) if isinstance(value, str) else repr(value)
+
+
+def _sas_filter_left(expression: dict[str, object]) -> str:
+    if "variable" in expression:
+        return sas_name(expression["variable"])
+    return sas_filter_operand(expression["left"])
 
 
 def sas_filter_expression(expression: dict[str, object] | None) -> str:
@@ -34,7 +55,7 @@ def sas_filter_expression(expression: dict[str, object] | None) -> str:
         return f"({left} {expression['operator']} {right})"
     if expression_type == "not":
         return f"not ({sas_filter_expression(expression['expression'])})"
-    variable = sas_name(expression["variable"])
+    variable = _sas_filter_left(expression)
     if expression_type == "missing":
         return f"missing({variable})"
     if expression_type == "comparison":

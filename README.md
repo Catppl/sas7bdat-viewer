@@ -14,8 +14,10 @@
 - `QTableView + QAbstractTableModel` 虚拟行模型，每页默认 500 行、内存中只保留有限页面；可以直接滚动/跳到远端页面，不需要先加载前面的所有行。
 - 可折叠 Variables 面板、显示列勾选、Select All、变量定位、变量搜索，以及 Variable/Label/Type/Length/Format metadata。
 - 手写 SAS-like WHERE；支持列与常量或列与列比较，例如 `AESTDTC <= AEENDTC`。
+- `View > Apply SAS Date/Time Formats` 可按每个 numeric variable 的 SAS format（而非变量名）显示日期、datetime 和 time；SQLite、WHERE、排序、比较、Merge 与分析始终保留 raw numeric value。默认关闭，设置会记住。
 - 比较符支持 `=`/`EQ`、`!=`/`^=`/`~=`/`<>`/`NE`、`>`/`GT`、`>=`/`GE`、`<`/`LT`、`<=`/`LE`，以及字符前缀修饰符 `=:` 等。
 - 逻辑与条件支持 `AND`/`&`、`OR`/`|`/`!`、`NOT`/`^`/`~`、`IN`、`NOT IN`、`BETWEEN ... AND ...`、`CONTAINS`/`?`、`LIKE`、`IS NULL`、`IS MISSING`、`MISSING()` 和括号。
+- WHERE 支持 metadata 驱动的 SAS temporal literals，例如 `ADT = '2026-08-03'd`、`ADTM >= '2026-08-03T12:30:00'dt`、`ATM = '12:30:00't`；还支持 `INDEX()`、`FIND()`、`UPCASE()`、`LOWCASE()`。日期/时间 literal 仅适用于带匹配 SAS DATE/DATETIME/TIME format 的 numeric variable。
 - `Ctrl+Enter` 或 Apply 执行；语法/类型/变量错误会指出原因和位置，并保留输入。
 - 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。列头互动筛选会同步生成可编辑的 SAS-like WHERE，并与手写条件作为一条完整条件保存。
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。存在手工行高亮时会额外增加 `HIGHLIGHT` 列记录颜色名称，因为 CSV 本身不能保存单元格背景色。

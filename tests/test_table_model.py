@@ -9,6 +9,31 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class TableModelTests(unittest.TestCase):
+    def test_sas_date_time_formatting_is_display_only_and_toggleable(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.table_model import DatasetTableModel
+
+        _application = QApplication.instance() or QApplication([])
+        metadata = DatasetMetadata(
+            "ADSL",
+            1,
+            (
+                VariableMetadata("ADT", kind="numeric", format="YYMMDD10."),
+                VariableMetadata("VALUE", kind="numeric"),
+            ),
+        )
+        model = DatasetTableModel(metadata, ["ADT", "VALUE"], page_size=10)
+        model.set_page(0, ((24_345, 8.5),), 1)
+        self.assertEqual(model.data(model.index(0, 0), Qt.DisplayRole), "24345")
+        self.assertEqual(model.data(model.index(0, 0), Qt.EditRole), 24_345)
+        model.set_apply_sas_date_time_formats(True)
+        self.assertEqual(model.data(model.index(0, 0), Qt.DisplayRole), "2026-08-27")
+        self.assertEqual(model.data(model.index(0, 0), Qt.EditRole), 24_345)
+
     def test_generated_compare_cells_use_page_level_highlights(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtCore import Qt

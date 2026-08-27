@@ -33,6 +33,7 @@ class RProcMeansGeneratorTests(unittest.TestCase):
             VariableMetadata("TRT01AN", kind="numeric"),
             VariableMetadata("AVAL", "Analysis Value", "numeric"),
             VariableMetadata("ANL01FL"),
+            VariableMetadata("ADT", kind="numeric", format="YYMMDD10."),
         )
         source = root / "original data" / f"{dataset_name}{extension}"
         source.parent.mkdir()
@@ -100,6 +101,10 @@ class RProcMeansGeneratorTests(unittest.TestCase):
             'PARAMCD contains "AL"': 'cde_contains(data[["PARAMCD"]], "AL")',
             "AVISITN between 1 and TRT01AN": (
                 'cde_between(data[["AVISITN"]], 1, data[["TRT01AN"]])'
+            ),
+            "ADT = '2026-08-27'd": ('cde_compare(data[["ADT"]], 24345, "=")'),
+            'find(lowcase(PARAMCD), "alb") > 0': (
+                'cde_compare(cde_find(tolower(data[["PARAMCD"]]), "alb"), 0, ">")'
             ),
         }
         with tempfile.TemporaryDirectory() as directory:

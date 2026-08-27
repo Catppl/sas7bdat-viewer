@@ -266,6 +266,14 @@ class MainWindow(QMainWindow):
         self.variables_action = QAction("Variables Panel", self)
         self.variables_action.setCheckable(True)
         self.variables_action.setChecked(True)
+        self.sas_date_time_formats_action = QAction("Apply SAS Date/Time Formats", self)
+        self.sas_date_time_formats_action.setCheckable(True)
+        self.sas_date_time_formats_action.setChecked(
+            self.settings.apply_sas_date_time_formats
+        )
+        self.sas_date_time_formats_action.triggered.connect(
+            self._set_apply_sas_date_time_formats
+        )
         self.open_categorical_long_action = QAction(
             "Open Categorical Long Result", self
         )
@@ -313,6 +321,7 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.history_action)
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.variables_action)
+        view_menu.addAction(self.sas_date_time_formats_action)
         view_menu.addAction(self.open_categorical_long_action)
         view_menu.addAction(self.open_rule_based_long_action)
         view_menu.addAction(self.open_ae_table_long_action)
@@ -932,7 +941,11 @@ class MainWindow(QMainWindow):
         self._sync_dataset_actions(tab)
 
     def _make_dataset_tab(self, handle: DatasetHandle) -> DatasetTab:
-        tab = DatasetTab(handle, self.settings.page_size)
+        tab = DatasetTab(
+            handle,
+            self.settings.page_size,
+            apply_sas_date_time_formats=self.settings.apply_sas_date_time_formats,
+        )
         tab.page_requested.connect(
             lambda generation, offset, limit, owner=tab: self._load_page(
                 owner, generation, offset, limit
@@ -992,6 +1005,14 @@ class MainWindow(QMainWindow):
             )
         )
         return tab
+
+    def _set_apply_sas_date_time_formats(self, enabled: bool) -> None:
+        self.settings.apply_sas_date_time_formats = enabled
+        self.settings.save()
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if isinstance(tab, DatasetTab):
+                tab.set_apply_sas_date_time_formats(enabled)
 
     def _continue_cache(self, tab: DatasetTab, when_complete=None) -> None:
         initial_handle = tab.handle

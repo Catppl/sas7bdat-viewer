@@ -12,6 +12,74 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
+    def test_sas_temporal_display_setting_updates_open_new_and_reloaded_tabs(
+        self,
+    ) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_engine import CompiledFilter
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        def make_handle(root: Path, name: str) -> DatasetHandle:
+            metadata = DatasetMetadata(
+                name.upper(),
+                1,
+                (VariableMetadata("ADT", kind="numeric", format="YYMMDD10."),),
+            )
+            return DatasetHandle(
+                root / f"{name}.sas7bdat",
+                root / f"{name}.tmp",
+                root / f"{name}.sqlite",
+                metadata,
+                1,
+                True,
+            )
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+            )
+            first = window._make_dataset_tab(make_handle(root, "adsl"))
+            second = window._make_dataset_tab(make_handle(root, "adae"))
+            window.tabs.addTab(first, "ADSL")
+            window.tabs.addTab(second, "ADAE")
+            self.assertFalse(first.model.apply_sas_date_time_formats)
+            self.assertFalse(second.model.apply_sas_date_time_formats)
+
+            window.sas_date_time_formats_action.trigger()
+            self.assertTrue(first.model.apply_sas_date_time_formats)
+            self.assertTrue(second.model.apply_sas_date_time_formats)
+
+            third = window._make_dataset_tab(make_handle(root, "adlb"))
+            self.assertTrue(third.model.apply_sas_date_time_formats)
+
+            first.replace_handle(
+                make_handle(root, "adsl_reload"),
+                ["ADT"],
+                CompiledFilter("", ()),
+            )
+            self.assertTrue(first.model.apply_sas_date_time_formats)
+            third.deleteLater()
+            window.close()
+            application.processEvents()
+
     def test_large_xpt_submission_warning_is_english_and_persists_on_reload(
         self,
     ) -> None:
@@ -565,6 +633,10 @@ class UiSmokeTests(unittest.TestCase):
                 action.text()
                 for action in window.menuBar().actions()[2].menu().actions()
             ]
+            self.assertIn("Apply SAS Date/Time Formats", view_actions)
+            self.assertFalse(window.sas_date_time_formats_action.isChecked())
+            window.sas_date_time_formats_action.trigger()
+            self.assertTrue(window.settings.apply_sas_date_time_formats)
             self.assertIn("Open Categorical Long Result", view_actions)
             self.assertFalse(window.open_categorical_long_action.isEnabled())
             self.assertEqual(

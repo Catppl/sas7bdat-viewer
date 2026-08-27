@@ -15,6 +15,7 @@ class SettingsTests(unittest.TestCase):
             value = AppSettings(
                 page_size=700,
                 last_open_directory="C:/clinical",
+                apply_sas_date_time_formats=True,
                 proc_means_decimals=4,
                 proc_means_decimal_places={"mean": 2, "q1": 1, "max": 12},
                 proc_means_decimal_offsets={"mean": 1, "q1": 3, "max": 9},
@@ -25,6 +26,7 @@ class SettingsTests(unittest.TestCase):
             restored = AppSettings.load(path)
             self.assertEqual(restored.page_size, 700)
             self.assertEqual(restored.last_open_directory, "C:/clinical")
+            self.assertTrue(restored.apply_sas_date_time_formats)
             self.assertEqual(restored.proc_means_decimals, 4)
             self.assertEqual(restored.proc_means_decimal_places["mean"], 2)
             self.assertEqual(restored.proc_means_decimal_places["q1"], 1)

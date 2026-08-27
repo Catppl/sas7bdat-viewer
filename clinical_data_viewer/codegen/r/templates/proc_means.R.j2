@@ -44,6 +44,20 @@ cde_contains <- function(left, right) {
   mapply(grepl, right_text, left_text, fixed = TRUE, USE.NAMES = FALSE)
 }
 
+cde_find <- function(left, right) {
+  left_text <- ifelse(is.na(left), "", as.character(left))
+  right_text <- ifelse(is.na(right), "", as.character(right))
+  mapply(
+    function(text, needle) {
+      match <- regexpr(needle, text, fixed = TRUE)[[1]]
+      if (match < 0L) 0L else match
+    },
+    left_text,
+    right_text,
+    USE.NAMES = FALSE
+  )
+}
+
 cde_between <- function(value, lower, upper) {
   value >= lower & value <= upper
 }

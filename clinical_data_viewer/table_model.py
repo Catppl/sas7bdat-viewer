@@ -7,6 +7,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont
 
 from .domain import DatasetMetadata, SortSpec
+from .sas_value_formatter import format_sas_value
 
 INVALID_INDEX = QModelIndex()
 
@@ -30,6 +31,7 @@ class DatasetTableModel(QAbstractTableModel):
         columns: list[str],
         page_size: int = 500,
         max_cached_pages: int = 12,
+        apply_sas_date_time_formats: bool = False,
     ) -> None:
         super().__init__()
         self.metadata = metadata
@@ -52,6 +54,7 @@ class DatasetTableModel(QAbstractTableModel):
         self.highlighted_columns: set[str] = set()
         self.highlighted_rows: set[int] = set()
         self.manual_row_highlights: dict[int, QColor] = {}
+        self.apply_sas_date_time_formats = apply_sas_date_time_formats
 
     def rowCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
         return 0 if parent.isValid() else self.filtered_count
@@ -78,10 +81,12 @@ class DatasetTableModel(QAbstractTableModel):
             return None
         value = page[local_row][index.column()]
         is_categorical_header = self._is_categorical_header(page[local_row])
-        if role in {Qt.DisplayRole, Qt.EditRole}:
+        if role == Qt.DisplayRole:
             return self._display_value(
                 value, self.columns[index.column()], offset, local_row
             )
+        if role == Qt.EditRole:
+            return value
         if role == Qt.TextAlignmentRole and isinstance(value, (int, float)):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.FontRole and is_categorical_header and index.column() == 0:
@@ -139,6 +144,11 @@ class DatasetTableModel(QAbstractTableModel):
     ) -> str:
         if value is None:
             return ""
+        variable = self._variable_by_name.get(column_name)
+        if self.apply_sas_date_time_formats and variable is not None:
+            formatted = format_sas_value(value, variable)
+            if formatted is not None:
+                return formatted
         offsets = dict(self.metadata.statistic_decimal_offsets)
         if column_name not in offsets or not isinstance(value, (int, float)):
             return str(value)
@@ -148,6 +158,18 @@ class DatasetTableModel(QAbstractTableModel):
         quantum = Decimal(1).scaleb(-decimals)
         rounded = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)
         return f"{rounded:.{decimals}f}"
+
+    def set_apply_sas_date_time_formats(self, enabled: bool) -> None:
+        if self.apply_sas_date_time_formats == enabled:
+            return
+        self.apply_sas_date_time_formats = enabled
+        for offset, rows in self._pages.items():
+            if rows and self.columns:
+                self.dataChanged.emit(
+                    self.index(offset, 0),
+                    self.index(offset + len(rows) - 1, len(self.columns) - 1),
+                    [Qt.DisplayRole, Qt.ToolTipRole],
+                )
 
     def headerData(
         self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole
@@ -316,7 +338,9 @@ class DatasetTableModel(QAbstractTableModel):
 
     def manual_highlight_color(self, row: int) -> QColor | None:
         source_row = self.source_row_id(row)
-        return None if source_row is None else self.manual_row_highlights.get(source_row)
+        return (
+            None if source_row is None else self.manual_row_highlights.get(source_row)
+        )
 
     def manual_highlights_for_export(self) -> dict[int, str]:
         """Return manual row highlights keyed by the persisted source row ID."""

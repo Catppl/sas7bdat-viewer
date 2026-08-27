@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from .domain import VariableMetadata
+from .sas_value_formatter import SasTemporalLiteral
 from .where_parser import (
     BetweenPredicate,
     BooleanExpression,
     Comparison,
     ContainsPredicate,
     Expression,
+    FunctionOperand,
     InPredicate,
     LikePredicate,
     MissingPredicate,
@@ -39,7 +41,21 @@ class FilterAstSerializer:
                 "type": "variable",
                 "name": self._variable(operand.name),
             }
+        if isinstance(operand, FunctionOperand):
+            return {
+                "type": "function",
+                "name": operand.name.casefold(),
+                "arguments": [
+                    self._operand(argument) for argument in operand.arguments
+                ],
+            }
         value = operand.value
+        if isinstance(value, SasTemporalLiteral):
+            return {
+                "type": "literal",
+                "value_type": f"sas_{value.kind}",
+                "value": value.text,
+            }
         return {
             "type": "literal",
             "value_type": "character" if isinstance(value, str) else "numeric",
@@ -65,46 +81,60 @@ class FilterAstSerializer:
                 "variable": self._variable(expression.variable),
             }
         if isinstance(expression, Comparison):
-            return {
+            output: dict[str, object] = {
                 "type": "comparison",
-                "variable": self._variable(expression.variable),
                 "operator": expression.operator,
                 "operand": self._operand(expression.operand),
                 "prefix": expression.prefix,
             }
+            self._write_left(output, expression.left)
+            return output
         if isinstance(expression, ContainsPredicate):
-            return {
+            output = {
                 "type": "contains",
-                "variable": self._variable(expression.variable),
                 "operand": self._operand(expression.operand),
                 "negated": expression.negated,
             }
+            self._write_left(output, expression.left)
+            return output
         if isinstance(expression, BetweenPredicate):
-            return {
+            output = {
                 "type": "between",
-                "variable": self._variable(expression.variable),
                 "lower": self._operand(expression.lower),
                 "upper": self._operand(expression.upper),
                 "negated": expression.negated,
             }
+            self._write_left(output, expression.left)
+            return output
         if isinstance(expression, LikePredicate):
-            return {
+            output = {
                 "type": "like",
-                "variable": self._variable(expression.variable),
                 "pattern": self._operand(expression.pattern),
                 "escape": expression.escape,
                 "negated": expression.negated,
             }
+            self._write_left(output, expression.left)
+            return output
         if isinstance(expression, InPredicate):
-            return {
+            output = {
                 "type": "in",
-                "variable": self._variable(expression.variable),
                 "values": [self._operand(value) for value in expression.values],
                 "negated": expression.negated,
             }
+            self._write_left(output, expression.left)
+            return output
         raise TypeError(
             f"Unsupported WHERE expression for JSON: {type(expression).__name__}"
         )
+
+    def _write_left(
+        self, output: dict[str, object], left: VariableOperand | FunctionOperand
+    ) -> None:
+        """Keep v1 variable predicates stable; functions use an explicit node."""
+        if isinstance(left, VariableOperand):
+            output["variable"] = self._variable(left.name)
+        else:
+            output["left"] = self._operand(left)
 
 
 def serialize_filter_ast(

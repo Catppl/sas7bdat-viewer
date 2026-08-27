@@ -14,6 +14,7 @@ from clinical_data_viewer.data_store import DataStore
 from clinical_data_viewer.domain import VariableMetadata
 from clinical_data_viewer.filter_engine import FilterEngine
 from clinical_data_viewer.sas_reader import SasDatasetReader
+from clinical_data_viewer.sas_value_formatter import format_sas_value
 from clinical_data_viewer.temp_manager import TempManager
 from clinical_data_viewer.xpt_reader import XptSequentialReader
 
@@ -105,6 +106,34 @@ def write_xpt(path: Path, rows: int, *, version: int = 5) -> None:
 
 
 class SasReaderTests(unittest.TestCase):
+    def test_sas7bdat_metadata_preserves_original_variable_format(self) -> None:
+        class MetadataPyreadstat:
+            @staticmethod
+            def read_sas7bdat(_dataset, **kwargs):
+                self.assertTrue(kwargs.get("metadataonly"))
+                return {}, SimpleNamespace(
+                    column_names=["ADT"],
+                    column_labels=["Analysis Date"],
+                    readstat_variable_types={"ADT": "double"},
+                    variable_storage_width={"ADT": 8},
+                    original_variable_types={"ADT": "YYMMDD10."},
+                    number_rows=1,
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "adsl.sas7bdat"
+            source.write_bytes(b"metadata fixture")
+            reader = SasDatasetReader(TempManager(root / "temp"))
+            with patch(
+                "clinical_data_viewer.sas_reader._import_pyreadstat",
+                return_value=MetadataPyreadstat(),
+            ):
+                variables, rows = reader._read_sas_metadata(source)
+        self.assertEqual(rows, 1)
+        self.assertEqual(variables[0].format, "YYMMDD10.")
+        self.assertEqual(format_sas_value(24_345, variables[0]), "2026-08-27")
+
     def test_sas7bdat_keeps_pyreadstat_and_uses_smaller_initial_chunk(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -183,6 +212,23 @@ class SasReaderTests(unittest.TestCase):
                 self.assertEqual(len(reader.read_chunk(2)), 2)
                 self.assertEqual(len(reader.read_chunk(2)), 1)
                 self.assertIsNone(reader.read_chunk(2))
+
+    def test_xpt_metadata_format_drives_temporal_display(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "adsl.xpt"
+            pyreadstat.write_xport(
+                pd.DataFrame({"ADT": [24_345.0]}),
+                source,
+                file_format_version=5,
+                variable_format={"ADT": "DATE9."},
+            )
+            with XptSequentialReader(source) as reader:
+                variable = reader.variables[0]
+                row = reader.read_chunk(1)
+        self.assertTrue(variable.format.startswith("DATE9."))
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(format_sas_value(row.iloc[0]["ADT"], variable), "27AUG2026")
 
     def test_xpt_unknown_total_uses_bounded_sequential_skip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

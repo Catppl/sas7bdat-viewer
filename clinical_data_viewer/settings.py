@@ -76,6 +76,7 @@ class AppSettings:
     temp_max_age_hours: int = 24
     last_open_directory: str = ""
     last_export_directory: str = ""
+    apply_sas_date_time_formats: bool = False
     proc_means_decimals: int = 2
     proc_means_decimal_places: dict[str, int] = field(
         default_factory=lambda: dict(DEFAULT_PROC_MEANS_DECIMAL_PLACES)
@@ -100,6 +101,7 @@ class AppSettings:
         value.page_size = min(5_000, max(50, int(value.page_size)))
         value.history_limit = min(10_000, max(10, int(value.history_limit)))
         value.temp_max_age_hours = min(720, max(1, int(value.temp_max_age_hours)))
+        value.apply_sas_date_time_formats = bool(value.apply_sas_date_time_formats)
         value.proc_means_decimals = min(10, max(0, int(value.proc_means_decimals)))
         raw_decimal_places = raw.get("proc_means_decimal_places", {})
         if not isinstance(raw_decimal_places, dict):

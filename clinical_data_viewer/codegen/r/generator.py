@@ -5,7 +5,9 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
+from ...domain import VariableMetadata
 from ...resources import resource_path
+from ...sas_value_formatter import SasTemporalLiteral, sas_temporal_literal_value
 
 _STATISTIC_KEYS = {
     "SUBJECT_N": "subjects",
@@ -46,6 +48,33 @@ def _r_column(name: object) -> str:
 def _r_filter_operand(operand: dict[str, object]) -> str:
     if operand["type"] == "variable":
         return _r_column(operand["name"])
+    if operand["type"] == "function":
+        name = str(operand["name"]).casefold()
+        arguments = ", ".join(
+            _r_filter_operand(argument) for argument in operand["arguments"]
+        )
+        functions = {
+            "upcase": "toupper",
+            "lowcase": "tolower",
+            "index": "cde_find",
+            "find": "cde_find",
+        }
+        if name not in functions:
+            raise ValueError(f"Unsupported R WHERE function: {name}")
+        return f"{functions[name]}({arguments})"
+    temporal = str(operand.get("value_type", ""))
+    literal_formats = {
+        "sas_date": ("date", "DATE9."),
+        "sas_datetime": ("datetime", "DATETIME20."),
+        "sas_time": ("time", "TIME8."),
+    }
+    if temporal in literal_formats:
+        kind, sas_format = literal_formats[temporal]
+        value = sas_temporal_literal_value(
+            SasTemporalLiteral(str(operand["value"]), kind),
+            VariableMetadata("_literal", kind="numeric", format=sas_format),
+        )
+        return _r_literal(value)
     return _r_literal(operand["value"])
 
 
@@ -65,10 +94,16 @@ def _r_filter_expression(
     if expression_type == "not":
         return f"(!({_r_filter_expression(expression['expression'], variable_types)}))"
 
-    variable = str(expression["variable"])
-    variable_type = variable_types[variable]
-    column = _r_column(variable)
+    variable = expression.get("variable")
+    variable_type = variable_types[str(variable)] if variable is not None else None
+    column = (
+        _r_column(variable)
+        if variable is not None
+        else _r_filter_operand(expression["left"])
+    )
     if expression_type == "missing":
+        if variable is None:
+            raise ValueError("MISSING() currently requires a variable argument.")
         return f"cde_missing({column}, {_r_string(variable_type)})"
     if expression_type == "comparison":
         operand = _r_filter_operand(expression["operand"])
@@ -128,7 +163,9 @@ class RProcMeansGenerator:
         context = configuration.copy()
         input_format = str(context["input"].get("format", "")).casefold()
         if input_format not in {"sas7bdat", "xpt"}:
-            raise ValueError(f"Unsupported input format for R generation: {input_format}")
+            raise ValueError(
+                f"Unsupported input format for R generation: {input_format}"
+            )
         statistics = list(context["statistics"])
         unknown_statistics = sorted(set(statistics) - set(_STATISTIC_KEYS))
         if unknown_statistics:
