@@ -423,10 +423,9 @@ class UiSmokeTests(unittest.TestCase):
             window.tabs.setCurrentWidget(source_b)
             application.processEvents()
 
-            self.assertTrue(
-                all(source is source_a for source in window._builder_sources.values())
-            )
+            self.assertEqual(window._builder_sources, {})
             self.assertIs(window.analysis_controller.listing_source, source_a)
+            self.assertIs(window.analysis_controller.categorical_source, source_a)
             self.assertIs(window.analysis_controller.rule_based_source, source_a)
             self.assertIs(window.analysis_controller.ae_table_source, source_a)
             self.assertIs(window.analysis_controller.proc_means_source, source_a)
@@ -466,10 +465,9 @@ class UiSmokeTests(unittest.TestCase):
                 window.analysis_panel.listing_builder,
             ):
                 builder.clear()
-            self.assertTrue(
-                all(source is None for source in window._builder_sources.values())
-            )
+            self.assertEqual(window._builder_sources, {})
             self.assertIsNone(window.analysis_controller.listing_source)
+            self.assertIsNone(window.analysis_controller.categorical_source)
             self.assertIsNone(window.analysis_controller.rule_based_source)
             self.assertIsNone(window.analysis_controller.ae_table_source)
             self.assertIsNone(window.analysis_controller.proc_means_source)

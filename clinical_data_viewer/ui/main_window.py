@@ -27,12 +27,9 @@ from PySide6.QtWidgets import (
 
 from ..categorical import (
     CategoricalConfig,
-    CategoricalEngine,
-    CategoricalLongResultBuilder,
     DenominatorConfig,
 )
 from ..categorical.drilldown import (
-    CategoricalQueryBuilder,
     build_cell_filter,
     build_n1_cell_filter,
     lookup_cell,
@@ -106,11 +103,6 @@ class MainWindow(QMainWindow):
         self.reader = SasDatasetReader(temp_manager)
         self.comparer = DatasetComparer(temp_manager)
         self.merge_engine = MergeDatasetsEngine(temp_manager)
-        self.categorical_engine = CategoricalEngine(temp_manager)
-        self.categorical_long_result_builder = CategoricalLongResultBuilder(
-            temp_manager
-        )
-        self.categorical_query_builder = CategoricalQueryBuilder(temp_manager)
         self.store = DataStore()
         self.exporter = CsvExporter()
         self.pool = QThreadPool.globalInstance()
@@ -120,15 +112,11 @@ class MainWindow(QMainWindow):
         self._statistics_owner: DatasetTab | None = None
         self._comparison_owner: DatasetTab | None = None
         self._compare_input_tabs: set[DatasetTab] = set()
-        self._categorical_input_tabs: set[DatasetTab] = set()
         self._merge_input_tabs: set[DatasetTab] = set()
         # Each Builder is deliberately bound to the dataset that was active
         # when the user opened it.  Tab navigation must never silently change
         # a calculation's source or discard the Builder's in-progress input.
-        self._builder_sources: dict[str, DatasetTab | None] = {
-            "categorical": None,
-        }
-        self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
+        self._builder_sources: dict[str, DatasetTab | None] = {}
         self._merge_sources: dict[DatasetTab, MergeResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
         self._deferred_directory_removals: set[Path] = set()
@@ -200,7 +188,7 @@ class MainWindow(QMainWindow):
             "Open Categorical Long Result", self
         )
         self.open_categorical_long_action.triggered.connect(
-            self._open_categorical_long_result
+            lambda: self.analysis_controller.open_categorical_long_result()
         )
         self.open_rule_based_long_action = QAction("Open Rule-based Long Result", self)
         self.open_rule_based_long_action.triggered.connect(
@@ -354,18 +342,6 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.all_tabs_closed.connect(self.analysis_dock.hide)
         self.analysis_panel.builder.settings_requested.connect(self.show_settings)
-        self.analysis_panel.categorical_builder.run_requested.connect(
-            self._run_categorical_builder
-        )
-        self.analysis_panel.categorical_builder.validation_error.connect(
-            lambda message: QMessageBox.warning(self, "Categorical Table", message)
-        )
-        self.analysis_panel.categorical_builder.browse_adsl_requested.connect(
-            self._browse_categorical_adsl
-        )
-        self.analysis_panel.categorical_builder.cleared.connect(
-            lambda: self._clear_builder_source("categorical")
-        )
     def _create_compare_panel(self) -> None:
         self.compare_panel = DatasetComparePanel()
         self.compare_dock = QDockWidget("Dataset Compare", self)
@@ -613,8 +589,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "analysis_panel"):
             return
         datasets = self.available_sas_dataset_tabs()
-        self.analysis_panel.categorical_builder.set_adsl_sources(datasets)
         if hasattr(self, "analysis_controller"):
+            self.analysis_controller.refresh_categorical_adsl_sources(datasets)
             self.analysis_controller.refresh_listing_adsl_sources(datasets)
             self.analysis_controller.refresh_rule_based_adsl_sources(datasets)
             self.analysis_controller.refresh_ae_table_adsl_sources(datasets)
@@ -635,9 +611,13 @@ class MainWindow(QMainWindow):
 
         def ready(tab: DatasetTab) -> None:
             self._refresh_categorical_sources()
-            self.analysis_panel.categorical_builder.select_adsl(tab)
+            self.analysis_controller.select_categorical_adsl(tab)
 
         self._open_path(source, ready)
+
+    def browse_categorical_adsl_dataset(self) -> None:
+        """Host callback used by the Categorical Builder browse action."""
+        self._browse_categorical_adsl()
 
     def _browse_rule_based_adsl(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
@@ -957,7 +937,7 @@ class MainWindow(QMainWindow):
             )
         )
         tab.categorical_drilldown_requested.connect(
-            lambda row, column, display, owner=tab: self._drilldown_categorical(
+            lambda row, column, display, owner=tab: self.analysis_controller.drilldown_categorical(
                 owner, row, column, display
             )
         )
@@ -1395,63 +1375,12 @@ class MainWindow(QMainWindow):
             if self._last_statistics_request is not None:
                 self._recalculate_statistics()
 
-    def _analysis_builder(self, name: str):
-        return {
-            "categorical": self.analysis_panel.categorical_builder,
-        }[name]
-
-    def _builder_source(self, name: str) -> DatasetTab | None:
-        tab = self._builder_sources[name]
-        if tab is None or self.tabs.indexOf(tab) < 0:
-            return None
-        return tab
-
-    def _set_builder_dataset(self, name: str, tab: DatasetTab | None) -> None:
-        """Bind one Builder without affecting its siblings or active-tab state."""
-        builder = self._analysis_builder(name)
-        if tab is None:
-            if name == "categorical":
-                builder.set_dataset(None, "")
-            else:
-                builder.set_dataset(None, "", "", "sas")
-            return
-        metadata = tab.handle.metadata
-        source_text = str(tab.handle.source_path)
-        filter_text = tab.current_where_text()
-        if name == "categorical":
-            builder.set_dataset(metadata, source_text, filter_text)
-        else:
-            builder.set_dataset(metadata, source_text, filter_text, tab.handle.kind)
-
-    def _bind_builder_source(self, name: str) -> DatasetTab | None:
-        """Fix a Builder to its first eligible source until the user clears it."""
-        source = self._builder_source(name)
-        if source is not None:
-            return source
-        active_tab = self.current_dataset_tab()
-        if (
-            active_tab is None
-            or not is_analysis_dataset(active_tab.handle)
-            or not active_tab.cache_complete
-        ):
-            return None
-        self._builder_sources[name] = active_tab
-        self._set_builder_dataset(name, active_tab)
-        return active_tab
-
-    def _clear_builder_source(self, name: str) -> None:
-        """Release the source only after the user explicitly presses Clear."""
-        self._builder_sources[name] = None
-        self._set_builder_dataset(name, None)
-
     def show_proc_means_builder(self) -> None:
         self.analysis_controller.show_proc_means_builder()
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:
-        self._bind_builder_source("categorical")
-        self._refresh_categorical_sources()
-        self.analysis_panel.show_categorical_tab()
+        self.analysis_controller.show_categorical_builder()
         self.analysis_dock.show()
 
     def show_rule_based_builder(self) -> None:
@@ -2062,13 +1991,6 @@ class MainWindow(QMainWindow):
                 "to finish before closing it.",
             )
             return
-        if widget in self._categorical_input_tabs:
-            QMessageBox.information(
-                self,
-                "Categorical Table Running",
-                "This dataset is currently used by a Categorical Table. Wait for the calculation to finish before closing it.",
-            )
-            return
         if blocker := self.analysis_controller.tab_close_blocker(widget):
             QMessageBox.information(
                 self,
@@ -2088,16 +2010,6 @@ class MainWindow(QMainWindow):
         for worker in self._workers.get(widget, set()):
             worker.cancel()
         if isinstance(widget, DatasetTab):
-            categorical_context = self._categorical_sources.pop(widget, None)
-            if categorical_context is not None:
-                directories = {categorical_context.source.temporary_path.parent}
-                if categorical_context.population is not None:
-                    directories.add(
-                        categorical_context.population.temporary_path.parent
-                    )
-                self._pending_directory_releases.setdefault(widget, []).extend(
-                    directories
-                )
             if directories := self.analysis_controller.take_result_release_paths(widget):
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
