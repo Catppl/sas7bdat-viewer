@@ -27,6 +27,9 @@ class RuleBasedDenominator:
     )
     population_filter_text: str = ""
     analysis_value_variable: str = ""
+    # Population N may use a differently named treatment variable in ADSL
+    # (for example, TRT01AN versus TRTAN in an AE source dataset).
+    population_treatment_variable: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,14 +84,22 @@ class RuleBasedConfig:
             population_fields = {
                 variable.name.casefold(): variable for variable in population.variables
             }
+            population_treatment = (
+                self.denominator.population_treatment_variable
+                or self.treatment_variable
+            )
             for name, label in (
-                (self.treatment_variable, "Treatment variable"),
+                (population_treatment, "Population treatment variable"),
                 (self.subject_id_variable, "Subject ID variable"),
             ):
                 if name.casefold() not in population_fields:
                     raise ValueError(f'Population N requires {label} "{name}" in ADSL.')
-                source_variable = fields[name.casefold()]
                 population_variable = population_fields[name.casefold()]
+                source_variable = (
+                    fields[self.treatment_variable.casefold()]
+                    if label == "Population treatment variable"
+                    else fields[name.casefold()]
+                )
                 if source_variable.kind != population_variable.kind:
                     raise ValueError(
                         f'Population N requires {label} "{name}" to have the same type in source and ADSL.'

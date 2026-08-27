@@ -130,8 +130,12 @@ class RuleBasedEngine:
         config.validate(source.metadata, population.metadata if population else None)
         treatment = self._fields(source.metadata)[config.treatment_variable.casefold()]
         if config.denominator.type == "population" and population is not None:
+            population_treatment_name = (
+                config.denominator.population_treatment_variable
+                or config.treatment_variable
+            )
             denominator_treatment = self._fields(population.metadata)[
-                config.treatment_variable.casefold()
+                population_treatment_name.casefold()
             ]
         else:
             denominator_treatment = treatment
@@ -306,8 +310,12 @@ class RuleBasedEngine:
     ) -> dict[str, int]:
         if config.denominator.type == "population":
             assert population is not None
+            population_treatment_name = (
+                config.denominator.population_treatment_variable
+                or config.treatment_variable
+            )
             denominator_treatment = self._fields(population.metadata)[
-                config.treatment_variable.casefold()
+                population_treatment_name.casefold()
             ]
             handle = population
             where_sql = config.denominator.population_filter.sql

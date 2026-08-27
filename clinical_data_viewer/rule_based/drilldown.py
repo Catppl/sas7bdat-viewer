@@ -60,7 +60,11 @@ def build_population_cell_filter(
     treatment_value: object | None,
 ) -> tuple[str, tuple[object, ...]]:
     fields = {variable.name.casefold(): variable for variable in metadata.variables}
-    treatment = fields[config.treatment_variable.casefold()]
+    population_treatment = (
+        config.denominator.population_treatment_variable
+        or config.treatment_variable
+    )
+    treatment = fields[population_treatment.casefold()]
     clauses = [(config.denominator.population_filter.sql, config.denominator.population_filter.parameters)]
     if treatment_value is not None:
         clauses.append(_exact_clause(treatment, treatment_value))

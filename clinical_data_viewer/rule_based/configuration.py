@@ -125,11 +125,16 @@ def build_rule_based_configuration(
     else:
         if population is None:
             raise ValueError("Population metadata is required for Population N.")
+        population_treatment = (
+            config.denominator.population_treatment_variable
+            or config.treatment_variable
+        )
         denominator = {
             "type": "population",
             "population": {
                 "input": _input_block(population),
                 "variables": _variables(population.metadata),
+                "treatment_variable": population_treatment,
                 "filter": _filter_block(
                     config.denominator.population_filter_text,
                     population.metadata.variables,

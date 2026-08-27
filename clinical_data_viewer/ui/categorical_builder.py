@@ -176,6 +176,7 @@ class CategoricalBuilder(QWidget):
     run_requested = Signal(object)
     validation_error = Signal(str)
     browse_adsl_requested = Signal()
+    cleared = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -426,6 +427,7 @@ class CategoricalBuilder(QWidget):
         self.percent_digits.setValue(1)
         self._adsl_user_selected = False
         self.status.clear()
+        self.cleared.emit()
 
     def _sync_denominator_page(self) -> None:
         is_n1 = self.denominator_type.currentData() == "baseline_postbaseline"

@@ -190,6 +190,61 @@ class RuleBasedEngineTests(unittest.TestCase):
                     ("1 (100.0)", "1 (100.0)"),
                 )
 
+    def test_population_denominator_can_use_a_different_treatment_variable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRTAN", kind="numeric"),
+                VariableMetadata("ITEM"),
+                VariableMetadata("AVAL", kind="numeric"),
+            )
+            population_variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT01AN", kind="numeric"),
+                VariableMetadata("SAFFL"),
+            )
+            source = make_handle(
+                root,
+                "adae",
+                source_variables,
+                (("S1", 1, "X", 1.0), ("S2", 2, "X", 1.0)),
+            )
+            adsl = make_handle(
+                root,
+                "adsl",
+                population_variables,
+                (("S1", 1, "Y"), ("S2", 2, "Y")),
+            )
+            source_engine = FilterEngine(source_variables)
+            population_filter = FilterEngine(population_variables).compile('SAFFL = "Y"')
+            config = RuleBasedConfig(
+                (RuleBasedRow("row_001", "Item X", source_engine.compile('ITEM = "X"'), 'ITEM = "X"'),),
+                "TRTAN",
+                "USUBJID",
+                source_engine.compile(""),
+                "",
+                RuleBasedDenominator(
+                    type="population",
+                    population_filter=population_filter,
+                    population_filter_text='SAFFL = "Y"',
+                    population_treatment_variable="TRT01AN",
+                ),
+            )
+            result = RuleBasedEngine(TempManager(root / "temp")).run(
+                source, config, adsl
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute('SELECT "TRT_1", "TRT_2" FROM dataset').fetchone(),
+                    ("1 (100.0)", "1 (100.0)"),
+                )
+            _sql, parameters = build_population_cell_filter(
+                adsl.metadata, config, config.rows[0], 1
+            )
+            self.assertIn('"TRT01AN" = ?', _sql)
+            self.assertEqual(parameters[-1], 1)
+
     def test_missing_treatment_blocks_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

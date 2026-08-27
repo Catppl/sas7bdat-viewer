@@ -336,15 +336,36 @@ class SasRuleBasedGenerator:
             population_variables = _mapping(
                 population.get("variables"), "denominator.population.variables"
             )
-            if treatment_variable.casefold() not in {
+            population_treatment_variable = str(
+                population.get("treatment_variable") or treatment_variable
+            )
+            population_variable_names = {
                 str(name).casefold() for name in population_variables
-            }:
+            }
+            if population_treatment_variable.casefold() not in population_variable_names:
                 raise ValueError(
-                    "Population variables must include the treatment variable."
+                    "Population variables must include the population treatment variable."
                 )
-            if "USUBJID".casefold() not in {
-                str(name).casefold() for name in population_variables
-            }:
+            population_treatment_metadata = next(
+                metadata
+                for name, metadata in population_variables.items()
+                if str(name).casefold()
+                == population_treatment_variable.casefold()
+            )
+            if (
+                _mapping(
+                    population_treatment_metadata,
+                    f"denominator.population.variables.{population_treatment_variable}",
+                ).get("type")
+                != treatment_kind
+            ):
+                raise ValueError(
+                    "Population treatment variable must have the same type as the source treatment variable."
+                )
+            denominator_context["population"]["treatment"] = sas_name(
+                population_treatment_variable
+            )
+            if "USUBJID".casefold() not in population_variable_names:
                 raise ValueError("Population variables must include USUBJID.")
 
         output_dataset = _validate_dataset_reference(

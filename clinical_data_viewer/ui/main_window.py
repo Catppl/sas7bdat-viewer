@@ -186,6 +186,15 @@ class MainWindow(QMainWindow):
         self._rule_based_input_tabs: set[DatasetTab] = set()
         self._ae_table_input_tabs: set[DatasetTab] = set()
         self._merge_input_tabs: set[DatasetTab] = set()
+        # Each Builder is deliberately bound to the dataset that was active
+        # when the user opened it.  Tab navigation must never silently change
+        # a calculation's source or discard the Builder's in-progress input.
+        self._builder_sources: dict[str, DatasetTab | None] = {
+            "proc_means": None,
+            "categorical": None,
+            "rule_based": None,
+            "ae_table": None,
+        }
         self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
         self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
         self._rule_based_sources: dict[DatasetTab, RuleBasedResultContext] = {}
@@ -408,6 +417,9 @@ class MainWindow(QMainWindow):
             lambda message: QMessageBox.warning(self, "PROC MEANS Builder", message)
         )
         self.analysis_panel.builder.settings_requested.connect(self.show_settings)
+        self.analysis_panel.builder.cleared.connect(
+            lambda: self._clear_builder_source("proc_means")
+        )
         self.analysis_panel.categorical_builder.run_requested.connect(
             self._run_categorical_builder
         )
@@ -416,6 +428,9 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.categorical_builder.browse_adsl_requested.connect(
             self._browse_categorical_adsl
+        )
+        self.analysis_panel.categorical_builder.cleared.connect(
+            lambda: self._clear_builder_source("categorical")
         )
         self.analysis_panel.rule_based_builder.run_requested.connect(
             self._run_rule_based_builder
@@ -429,6 +444,9 @@ class MainWindow(QMainWindow):
         self.analysis_panel.rule_based_builder.browse_adsl_requested.connect(
             self._browse_rule_based_adsl
         )
+        self.analysis_panel.rule_based_builder.cleared.connect(
+            lambda: self._clear_builder_source("rule_based")
+        )
         self.analysis_panel.ae_table_builder.run_requested.connect(
             self._run_ae_table_builder
         )
@@ -440,6 +458,9 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.ae_table_builder.browse_adsl_requested.connect(
             self._browse_ae_adsl
+        )
+        self.analysis_panel.ae_table_builder.cleared.connect(
+            lambda: self._clear_builder_source("ae_table")
         )
 
     def _create_compare_panel(self) -> None:
@@ -1362,68 +1383,89 @@ class MainWindow(QMainWindow):
             if self._last_statistics_request is not None:
                 self._recalculate_statistics()
 
+    def _analysis_builder(self, name: str):
+        return {
+            "proc_means": self.analysis_panel.builder,
+            "categorical": self.analysis_panel.categorical_builder,
+            "rule_based": self.analysis_panel.rule_based_builder,
+            "ae_table": self.analysis_panel.ae_table_builder,
+        }[name]
+
+    def _builder_source(self, name: str) -> DatasetTab | None:
+        tab = self._builder_sources[name]
+        if tab is None or self.tabs.indexOf(tab) < 0:
+            return None
+        return tab
+
+    def _set_builder_dataset(self, name: str, tab: DatasetTab | None) -> None:
+        """Bind one Builder without affecting its siblings or active-tab state."""
+        builder = self._analysis_builder(name)
+        if tab is None:
+            if name == "categorical":
+                builder.set_dataset(None, "")
+            else:
+                builder.set_dataset(None, "", "", "sas")
+            return
+        metadata = tab.handle.metadata
+        source_text = str(tab.handle.source_path)
+        filter_text = tab.current_where_text()
+        if name == "categorical":
+            builder.set_dataset(metadata, source_text, filter_text)
+        else:
+            builder.set_dataset(metadata, source_text, filter_text, tab.handle.kind)
+
+    def _bind_builder_source(self, name: str) -> DatasetTab | None:
+        """Fix a Builder to its first eligible source until the user clears it."""
+        source = self._builder_source(name)
+        if source is not None:
+            return source
+        active_tab = self.current_dataset_tab()
+        if (
+            active_tab is None
+            or not is_analysis_dataset(active_tab.handle)
+            or not active_tab.cache_complete
+        ):
+            return None
+        self._builder_sources[name] = active_tab
+        self._set_builder_dataset(name, active_tab)
+        return active_tab
+
+    def _clear_builder_source(self, name: str) -> None:
+        """Release the source only after the user explicitly presses Clear."""
+        self._builder_sources[name] = None
+        self._set_builder_dataset(name, None)
+
     def show_proc_means_builder(self) -> None:
+        self._bind_builder_source("proc_means")
         self.analysis_panel.show_builder_tab()
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:
-        active_tab = self.current_dataset_tab()
-        if (
-            active_tab is not None
-            and is_analysis_dataset(active_tab.handle)
-            and active_tab.cache_complete
-        ):
-            # Opening the Builder after applying a source-tab WHERE should
-            # seed Numerator WHERE.  An explicitly edited Builder filter is
-            # preserved by inherit_current_filter().
-            self.analysis_panel.categorical_builder.set_dataset(
-                active_tab.handle.metadata,
-                str(active_tab.handle.source_path),
-                active_tab.current_where_text(),
-            )
-            self.analysis_panel.categorical_builder.inherit_current_filter(
-                active_tab.current_where_text()
-            )
+        self._bind_builder_source("categorical")
         self._refresh_categorical_sources()
         self.analysis_panel.show_categorical_tab()
         self.analysis_dock.show()
 
     def show_rule_based_builder(self) -> None:
-        active_tab = self.current_dataset_tab()
-        if (
-            active_tab is not None
-            and is_analysis_dataset(active_tab.handle)
-            and active_tab.cache_complete
-        ):
-            self.analysis_panel.rule_based_builder.set_dataset(
-                active_tab.handle.metadata,
-                str(active_tab.handle.source_path),
-                active_tab.current_where_text(),
-                active_tab.handle.kind,
-            )
-            self.analysis_panel.rule_based_builder.inherit_current_filter(
-                active_tab.current_where_text()
-            )
+        self._bind_builder_source("rule_based")
         self._refresh_categorical_sources()
         self.analysis_panel.show_rule_based_tab()
         self.analysis_dock.show()
 
     def show_ae_table_builder(self) -> None:
-        active_tab = self.current_dataset_tab()
-        if active_tab is not None and is_analysis_dataset(active_tab.handle) and active_tab.cache_complete:
-            self.analysis_panel.ae_table_builder.set_dataset(
-                active_tab.handle.metadata, str(active_tab.handle.source_path),
-                active_tab.current_where_text(), active_tab.handle.kind,
-            )
-            self.analysis_panel.ae_table_builder.inherit_current_filter(active_tab.current_where_text())
+        self._bind_builder_source("ae_table")
         self._refresh_categorical_sources()
         self.analysis_panel.show_ae_table_tab()
         self.analysis_dock.show()
 
     def _ae_table_context(self, selection: AeTableBuilderSelection):
-        tab = self.current_dataset_tab()
+        tab = self._builder_source("ae_table")
         if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
-            QMessageBox.warning(self, "AE Table", "Select a fully loaded source dataset before using the Builder.")
+            QMessageBox.warning(
+                self,
+                "AE Table",
+                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
+            )
             return None
         pop = selection.population_tab
         if selection.denominator_type == "population" and (not isinstance(pop, DatasetTab) or not pop.cache_complete):
@@ -1509,12 +1551,12 @@ class MainWindow(QMainWindow):
     def _rule_based_builder_context(
         self, selection: RuleBasedBuilderSelection
     ) -> tuple[DatasetTab, DatasetTab | None, RuleBasedConfig] | None:
-        tab = self.current_dataset_tab()
+        tab = self._builder_source("rule_based")
         if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
             QMessageBox.warning(
                 self,
                 "Rule-based Table",
-                "Select a fully loaded source dataset before using the Builder.",
+                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
             )
             return None
         population_tab = selection.population_tab
@@ -1558,10 +1600,11 @@ class MainWindow(QMainWindow):
                 dataset_filter,
                 selection.dataset_filter_text,
                 RuleBasedDenominator(
-                    selection.denominator_type,
-                    population_filter,
-                    selection.population_filter_text,
-                    selection.nonmissing_value_variable,
+                    type=selection.denominator_type,
+                    population_filter=population_filter,
+                    population_filter_text=selection.population_filter_text,
+                    population_treatment_variable=selection.population_treatment_variable,
+                    analysis_value_variable=selection.nonmissing_value_variable,
                 ),
                 selection.include_total,
                 1,
@@ -1582,9 +1625,6 @@ class MainWindow(QMainWindow):
         )
 
     def _run_rule_based_builder(self, selection: RuleBasedBuilderSelection) -> None:
-        active_tab = self.current_dataset_tab()
-        if active_tab is None or not is_analysis_dataset(active_tab.handle):
-            return
         context = self._rule_based_builder_context(selection)
         if context is None:
             return
@@ -1697,12 +1737,12 @@ class MainWindow(QMainWindow):
     def _categorical_builder_context(
         self, selection: CategoricalBuilderSelection
     ) -> tuple[DatasetTab, DatasetTab | None, CategoricalConfig] | None:
-        tab = self.current_dataset_tab()
+        tab = self._builder_source("categorical")
         if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
             QMessageBox.warning(
                 self,
                 "Categorical Table",
-                "Select a fully loaded SAS source dataset before using the Builder.",
+                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
             )
             return None
         population_tab = selection.population_tab
@@ -1772,11 +1812,11 @@ class MainWindow(QMainWindow):
         )
 
     def _run_categorical_builder(self, selection: CategoricalBuilderSelection) -> None:
-        active_tab = self.current_dataset_tab()
-        if active_tab is None or not is_analysis_dataset(active_tab.handle):
+        source_tab = self._builder_source("categorical")
+        if source_tab is None or not is_analysis_dataset(source_tab.handle):
             return
         builder = self.analysis_panel.categorical_builder
-        current_filter = active_tab.current_where_text()
+        current_filter = source_tab.current_where_text()
         builder_filter = builder.current_filter_text()
         # An empty Builder value can still be offered the current source WHERE
         # as a convenience.  A non-empty, different value is an intentional
@@ -1844,12 +1884,12 @@ class MainWindow(QMainWindow):
         )
 
     def _proc_means_builder_context(self, selection, action_title: str):
-        tab = self.current_dataset_tab()
+        tab = self._builder_source("proc_means")
         if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
             QMessageBox.warning(
                 self,
                 action_title,
-                "Select a fully loaded SAS source dataset before using the Builder.",
+                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
             )
             return None
         filter_text = self.analysis_panel.builder.current_filter_text()
@@ -1932,10 +1972,10 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _run_proc_means_builder(self, selection) -> None:
-        active_tab = self.current_dataset_tab()
-        if active_tab is None or not is_analysis_dataset(active_tab.handle):
+        source_tab = self._builder_source("proc_means")
+        if source_tab is None or not is_analysis_dataset(source_tab.handle):
             return
-        current_filter = active_tab.current_where_text()
+        current_filter = source_tab.current_where_text()
         builder_filter = self.analysis_panel.builder.current_filter_text()
         if not builder_filter or builder_filter != current_filter:
             response = QMessageBox.question(
@@ -2657,6 +2697,20 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         widget = self.tabs.widget(index)
+        bound_builders = [
+            name.replace("_", " ").title()
+            for name, source in self._builder_sources.items()
+            if source is widget
+        ]
+        if bound_builders:
+            QMessageBox.warning(
+                self,
+                "Builder Source Dataset",
+                "This dataset is the fixed source for: "
+                + ", ".join(bound_builders)
+                + ".\n\nClick Clear in the Builder before closing this source dataset.",
+            )
+            return
         if widget in self._compare_input_tabs:
             QMessageBox.information(
                 self,
@@ -2772,36 +2826,6 @@ class MainWindow(QMainWindow):
         ) if tab else self.variables_panel.set_dataset(None)
         if tab and tab.handle.kind == "compare":
             self.compare_panel.set_advanced_checked(tab.advanced_visible)
-        builder_source = (
-            tab
-            if tab is not None
-            and is_analysis_dataset(tab.handle)
-            and tab.cache_complete
-            else None
-        )
-        self.analysis_panel.builder.set_dataset(
-            builder_source.handle.metadata if builder_source else None,
-            str(builder_source.handle.source_path) if builder_source else "",
-            builder_source.current_where_text() if builder_source else "",
-            builder_source.handle.kind if builder_source else "sas",
-        )
-        self.analysis_panel.categorical_builder.set_dataset(
-            builder_source.handle.metadata if builder_source else None,
-            str(builder_source.handle.source_path) if builder_source else "",
-            builder_source.current_where_text() if builder_source else "",
-        )
-        self.analysis_panel.rule_based_builder.set_dataset(
-            builder_source.handle.metadata if builder_source else None,
-            str(builder_source.handle.source_path) if builder_source else "",
-            builder_source.current_where_text() if builder_source else "",
-            builder_source.handle.kind if builder_source else "sas",
-        )
-        self.analysis_panel.ae_table_builder.set_dataset(
-            builder_source.handle.metadata if builder_source else None,
-            str(builder_source.handle.source_path) if builder_source else "",
-            builder_source.current_where_text() if builder_source else "",
-            builder_source.handle.kind if builder_source else "sas",
-        )
         self._refresh_compare_datasets()
         self._refresh_merge_datasets()
         self._refresh_categorical_sources()
@@ -2860,17 +2884,6 @@ class MainWindow(QMainWindow):
         self.filter_status.style().polish(self.filter_status)
         source = tab.handle.display_source or str(tab.handle.source_path)
         self.source_status.setText(f"Source:  {source}")
-        if (
-            tab is self.current_dataset_tab()
-            and is_analysis_dataset(tab.handle)
-            and tab.cache_complete
-        ):
-            self.analysis_panel.builder.set_dataset(
-                tab.handle.metadata,
-                str(tab.handle.source_path),
-                tab.current_where_text(),
-                tab.handle.kind,
-            )
 
     def _submit(
         self, owner: QWidget, function, completed, failed, progress_data=None

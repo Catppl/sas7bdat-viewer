@@ -141,6 +141,7 @@ class ProcMeansBuilder(QWidget):
     r_code_requested = Signal(object)
     validation_error = Signal(str)
     settings_requested = Signal()
+    cleared = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -310,6 +311,7 @@ class ProcMeansBuilder(QWidget):
         self.by_variables.clear()
         self.class_variables.clear()
         self.status.clear()
+        self.cleared.emit()
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy

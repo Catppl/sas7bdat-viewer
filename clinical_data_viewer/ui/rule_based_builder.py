@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -40,6 +41,7 @@ class RuleBasedBuilderSelection:
     treatment_variable: str
     denominator_type: str
     population_tab: object | None
+    population_treatment_variable: str
     population_filter_text: str
     nonmissing_value_variable: str
     include_total: bool
@@ -50,6 +52,7 @@ class RuleBasedBuilder(QWidget):
     sas_code_requested = Signal(object)
     validation_error = Signal(str)
     browse_adsl_requested = Signal()
+    cleared = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -61,6 +64,7 @@ class RuleBasedBuilder(QWidget):
         self._busy = False
         self._row_counter = 0
         self._adsl_user_selected = False
+        self._population_treatment_user_selected = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -68,9 +72,17 @@ class RuleBasedBuilder(QWidget):
         scroll.setFrameShape(QScrollArea.NoFrame)
         content = QWidget()
         content.setObjectName("ruleBasedBuilderContent")
+        # Keep the full layout width/height as the scroll area's scrollable
+        # extent.  Without an explicit min/max layout constraint, some Qt
+        # styles can resize the child to the viewport and clip its right edge
+        # even after the horizontal bar reaches its maximum.
+        content.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Preferred)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)
+        layout.setSizeConstraint(QLayout.SetMinAndMaxSize)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
 
@@ -123,6 +135,11 @@ class RuleBasedBuilder(QWidget):
         browse.clicked.connect(self.browse_adsl_requested)
         adsl_row.addWidget(browse)
         population_layout.addRow("ADSL dataset", adsl_row)
+        self.population_treatment = QComboBox()
+        self.population_treatment.currentIndexChanged.connect(
+            self._mark_population_treatment_user_selection
+        )
+        population_layout.addRow("ADSL treatment variable", self.population_treatment)
         self.population_where = QLineEdit()
         self.population_where.setPlaceholderText('e.g. SAFFL = "Y"')
         population_layout.addRow("Population WHERE", self.population_where)
@@ -211,6 +228,7 @@ class RuleBasedBuilder(QWidget):
             self.nonmissing_value.addItems(names)
             self.rows_table.setRowCount(0)
             self._row_counter = 0
+            self._refresh_population_treatment_variables()
         self.source_label.setText(
             f"Source: {source_text}"
             if metadata
@@ -271,6 +289,7 @@ class RuleBasedBuilder(QWidget):
             )
             self.adsl.setCurrentIndex(preferred)
         self.adsl.blockSignals(False)
+        self._refresh_population_treatment_variables()
 
     def select_adsl(self, tab: object) -> None:
         index = self.adsl.findData(tab)
@@ -281,6 +300,49 @@ class RuleBasedBuilder(QWidget):
     def _mark_adsl_user_selection(self, _index: int) -> None:
         if not self.adsl.signalsBlocked():
             self._adsl_user_selected = True
+            self._refresh_population_treatment_variables()
+
+    def _mark_population_treatment_user_selection(self, _index: int) -> None:
+        if not self.population_treatment.signalsBlocked():
+            self._population_treatment_user_selected = True
+
+    def _refresh_population_treatment_variables(self) -> None:
+        """Populate the independent ADSL treatment variable selector."""
+        selected = (
+            self.population_treatment.currentText()
+            if self._population_treatment_user_selected
+            else ""
+        )
+        tab = self.adsl.currentData()
+        metadata = getattr(getattr(tab, "handle", None), "metadata", None)
+        names = [variable.name for variable in metadata.variables] if metadata else []
+        self.population_treatment.blockSignals(True)
+        self.population_treatment.clear()
+        self.population_treatment.addItems(names)
+        source_treatment = self.treatment.currentText()
+        preferred = (
+            selected
+            if selected in names
+            else source_treatment
+            if source_treatment.casefold().startswith("trt")
+            else ""
+        )
+        index = self.population_treatment.findText(preferred, Qt.MatchFixedString)
+        if index < 0:
+            # ADSL often has TRT01AN while the source has TRTAN.  Prefer a
+            # treatment-looking variable over an arbitrary first column, but
+            # always leave the final choice visible and editable to the user.
+            index = next(
+                (
+                    position
+                    for position, name in enumerate(names)
+                    if name.casefold().startswith("trt")
+                ),
+                -1,
+            )
+        if index >= 0:
+            self.population_treatment.setCurrentIndex(index)
+        self.population_treatment.blockSignals(False)
 
     def add_row(self) -> None:
         self._row_counter += 1
@@ -348,9 +410,13 @@ class RuleBasedBuilder(QWidget):
     def clear(self) -> None:
         self.rows_table.setRowCount(0)
         self.status.clear()
+        self.cleared.emit()
 
     def _sync_denominator_page(self) -> None:
         self.denominator_stack.setCurrentIndex(self.denominator_type.currentIndex())
+        self.population_treatment.setEnabled(
+            self.denominator_type.currentData() == "population" and not self._busy
+        )
 
     def _selection(self) -> RuleBasedBuilderSelection | None:
         if self._metadata is None:
@@ -374,6 +440,7 @@ class RuleBasedBuilder(QWidget):
             self.treatment.currentText(),
             str(self.denominator_type.currentData()),
             self.adsl.currentData(),
+            self.population_treatment.currentText(),
             self.population_where.text().strip(),
             self.nonmissing_value.currentText(),
             self.include_total.isChecked(),

@@ -295,20 +295,23 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
                         "length": 20,
                         "format": "",
                     },
-                    "TRT01A": {
+                    "TRT_POP": {
                         "type": "character",
                         "label": "Treatment",
                         "length": 40,
                         "format": "",
                     },
                 },
-                "filter": _filter(_comparison("TRT01A", "A"), 'TRT01A = "A"'),
+                "treatment_variable": "TRT_POP",
+                "filter": _filter(_comparison("TRT_POP", "A"), 'TRT_POP = "A"'),
             },
         }
         code = self.generator.generate(configuration)
         self.assertIn(r"libname population xport 'C:\project\data\adsl.xpt';", code)
         self.assertIn("set population.ADSL;", code)
-        self.assertIn("where TRT01A = 'A';", code)
+        self.assertIn("where TRT_POP = 'A';", code)
+        self.assertIn("if missing(TRT_POP)", code)
+        self.assertIn("select TRT_POP as trt_value", code)
         self.assertIn("from rb_population", code)
         denominator_section = code.split("/* Denominator counts", 1)[1].split(
             "quit;", 1

@@ -220,6 +220,48 @@ class RuleBasedConfigurationTests(unittest.TestCase):
             self.assertEqual(population_block["filter"]["ast"]["type"], "comparison")
             self.assertNotIn("population", configuration["input"])
 
+    def test_population_configuration_records_its_own_treatment_variable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_variables = (
+                VariableMetadata("USUBJID", kind="character"),
+                VariableMetadata("TRTAN", kind="numeric"),
+                VariableMetadata("TRTEMFL", kind="character"),
+                VariableMetadata("AESER", kind="character"),
+                VariableMetadata("AVAL", kind="numeric"),
+            )
+            population_variables = (
+                VariableMetadata("USUBJID", kind="character"),
+                VariableMetadata("TRT01AN", kind="numeric"),
+                VariableMetadata("SAFFL", kind="character"),
+            )
+            source = _handle(root, "adae", source_variables)
+            population = _handle(root, "adsl", population_variables)
+            source_engine = FilterEngine(source_variables)
+            config = RuleBasedConfig(
+                (
+                    RuleBasedRow(
+                        "row_001", "Any", source_engine.compile(""), "", 0
+                    ),
+                ),
+                "TRTAN",
+                "USUBJID",
+                source_engine.compile(""),
+                "",
+                RuleBasedDenominator(
+                    type="population",
+                    population_filter=FilterEngine(population_variables).compile(
+                        'SAFFL = "Y"'
+                    ),
+                    population_filter_text='SAFFL = "Y"',
+                    population_treatment_variable="TRT01AN",
+                ),
+            )
+            configuration = build_rule_based_configuration(source, config, population)
+            population_block = configuration["denominator"]["population"]
+            self.assertEqual(population_block["treatment_variable"], "TRT01AN")
+            self.assertIn("TRT01AN", population_block["variables"])
+
     def test_nonmissing_and_merge_input_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

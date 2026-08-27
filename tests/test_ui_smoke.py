@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
@@ -223,6 +224,232 @@ class UiSmokeTests(unittest.TestCase):
             )
             window.close()
             application.processEvents()
+
+    def test_analysis_builders_keep_their_fixed_source_and_inputs_until_clear(self) -> None:
+        """Changing tabs must not silently rebind or reset an open Builder."""
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        def make_tab(root: Path, name: str) -> DatasetTab:
+            metadata = DatasetMetadata(
+                name.upper(),
+                2,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRT01A"),
+                    VariableMetadata("AVAL", kind="numeric"),
+                    VariableMetadata("AEBODSYS"),
+                    VariableMetadata("AEDECOD"),
+                ),
+            )
+            handle = DatasetHandle(
+                root / f"{name}.sas7bdat",
+                root / f"{name}.tmp",
+                root / f"{name}.sqlite",
+                metadata,
+                2,
+                True,
+            )
+            tab = DatasetTab(handle, 500)
+            tab.applied_where = 'TRT01A = "A"'
+            tab.where_editor.setPlainText(tab.applied_where)
+            return tab
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                TestSettings(), TempManager(root / "temp"), FilterHistory(root / "history.sqlite")
+            )
+            source_a, source_b = make_tab(root, "adae"), make_tab(root, "adlb")
+            window.tabs.addTab(source_a, "ADAE")
+            window.tabs.addTab(source_b, "ADLB")
+            window.tabs.setCurrentWidget(source_a)
+            window.show_proc_means_builder()
+            window.show_categorical_builder()
+            window.show_rule_based_builder()
+            window.show_ae_table_builder()
+
+            window.analysis_panel.builder.analysis_variables.set_variables(("AVAL",))
+            window.analysis_panel.categorical_builder.numerator_where.setPlainText(
+                'TRT01A = "A" and AVAL > 0'
+            )
+            window.analysis_panel.rule_based_builder.dataset_filter.setPlainText(
+                'TRT01A = "A" and AVAL > 0'
+            )
+            window.analysis_panel.ae_table_builder.dataset_filter.setPlainText(
+                'TRT01A = "A" and AVAL > 0'
+            )
+
+            window.tabs.setCurrentWidget(source_b)
+            application.processEvents()
+
+            self.assertTrue(
+                all(source is source_a for source in window._builder_sources.values())
+            )
+            self.assertEqual(
+                window.analysis_panel.builder.analysis_variables.selected_variables(),
+                ("AVAL",),
+            )
+            self.assertEqual(
+                window.analysis_panel.categorical_builder.current_filter_text(),
+                'TRT01A = "A" and AVAL > 0',
+            )
+            self.assertEqual(
+                window.analysis_panel.rule_based_builder.current_filter_text(),
+                'TRT01A = "A" and AVAL > 0',
+            )
+            self.assertEqual(
+                window.analysis_panel.ae_table_builder.current_filter_text(),
+                'TRT01A = "A" and AVAL > 0',
+            )
+
+            with patch(
+                "clinical_data_viewer.ui.main_window.QMessageBox.warning"
+            ) as warning:
+                window.close_tab(window.tabs.indexOf(source_a))
+            self.assertGreaterEqual(window.tabs.indexOf(source_a), 0)
+            self.assertIn("fixed source", warning.call_args.args[2])
+
+            for builder in (
+                window.analysis_panel.builder,
+                window.analysis_panel.categorical_builder,
+                window.analysis_panel.rule_based_builder,
+                window.analysis_panel.ae_table_builder,
+            ):
+                builder.clear()
+            self.assertTrue(
+                all(source is None for source in window._builder_sources.values())
+            )
+            window.close()
+            application.processEvents()
+
+    def test_rule_based_builder_allows_a_different_population_treatment_variable(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.rule_based_builder import RuleBasedBuilder
+
+        class Tab:
+            def __init__(self) -> None:
+                self.handle = type("Handle", (), {})()
+                self.handle.metadata = DatasetMetadata(
+                    "ADSL",
+                    1,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("TRT01AN", kind="numeric"),
+                    ),
+                )
+
+        application = QApplication.instance() or QApplication([])
+        builder = RuleBasedBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRTAN", kind="numeric"),
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        adsl = Tab()
+        builder.set_adsl_sources([(adsl, "ADSL — adsl.sas7bdat")])
+        self.assertEqual(builder.population_treatment.currentText(), "TRT01AN")
+        builder.deleteLater()
+        application.processEvents()
+
+    def test_ae_table_builder_scrolls_when_the_panel_is_short(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QScrollArea
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.ae_table_builder import AeTableBuilder
+
+        application = QApplication.instance() or QApplication([])
+        builder = AeTableBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRT01A"),
+                    VariableMetadata("AEBODSYS"),
+                    VariableMetadata("AEDECOD"),
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        builder.resize(360, 220)
+        builder.show()
+        application.processEvents()
+        scroll = builder.findChild(QScrollArea)
+        self.assertIsNotNone(scroll)
+        assert scroll is not None
+        self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
+        builder.deleteLater()
+        application.processEvents()
+
+    def test_rule_based_builder_scrollbars_reach_both_content_edges(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QScrollArea
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.rule_based_builder import RuleBasedBuilder
+
+        application = QApplication.instance() or QApplication([])
+        builder = RuleBasedBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRT01A"),
+                    VariableMetadata("AVAL", kind="numeric"),
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        for _ in range(4):
+            builder.add_row()
+        builder.resize(360, 220)
+        builder.show()
+        application.processEvents()
+        scroll = builder.findChild(QScrollArea)
+        self.assertIsNotNone(scroll)
+        assert scroll is not None
+        self.assertGreater(scroll.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
+
+        scroll.horizontalScrollBar().setValue(scroll.horizontalScrollBar().maximum())
+        scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+        application.processEvents()
+        content_rect = scroll.widget().geometry()
+        viewport_rect = scroll.viewport().rect()
+        self.assertLessEqual(content_rect.right(), viewport_rect.right())
+        self.assertLessEqual(content_rect.bottom(), viewport_rect.bottom())
+        builder.deleteLater()
+        application.processEvents()
 
     def test_main_window_constructs_with_reference_layout(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

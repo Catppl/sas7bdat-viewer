@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
+    QVBoxLayout, QWidget,
 )
 
 from ..domain import DatasetMetadata
@@ -32,6 +33,7 @@ class AeTableBuilder(QWidget):
     sas_code_requested = Signal(object)
     validation_error = Signal(str)
     browse_adsl_requested = Signal()
+    cleared = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -40,7 +42,13 @@ class AeTableBuilder(QWidget):
         self._filter_text = ""
         self._busy = False
         self._source_kind = "sas"
-        layout = QVBoxLayout(self); layout.setContentsMargins(6, 6, 6, 6)
+        outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content); layout.setContentsMargins(6, 6, 6, 6)
+        outer.addWidget(scroll, 1)
         source = QGroupBox("Source"); form = QFormLayout(source)
         self.source_label = QLabel("Select a fully loaded source dataset."); self.source_label.setWordWrap(True)
         form.addRow(self.source_label)
@@ -67,9 +75,10 @@ class AeTableBuilder(QWidget):
         self.percent_digits = QSpinBox(); self.percent_digits.setRange(0, 4); self.percent_digits.setValue(1); of.addRow("Percent digits", self.percent_digits)
         layout.addWidget(options); layout.addStretch(1)
         self.status = QLabel(""); self.status.setWordWrap(True); layout.addWidget(self.status)
+        scroll.setWidget(content)
         buttons = QHBoxLayout(); clear = QPushButton("Clear"); clear.clicked.connect(self.clear); buttons.addWidget(clear)
         self.sas_code_button = QPushButton("SAS Code Generator…"); self.sas_code_button.clicked.connect(self._generate_sas_code); buttons.addWidget(self.sas_code_button)
-        self.run_button = QPushButton("Run AE Table"); self.run_button.setDefault(True); self.run_button.clicked.connect(self._run); buttons.addWidget(self.run_button, 1); layout.addLayout(buttons)
+        self.run_button = QPushButton("Run AE Table"); self.run_button.setDefault(True); self.run_button.clicked.connect(self._run); buttons.addWidget(self.run_button, 1); outer.addLayout(buttons)
         self._sync_denominator(); self.set_dataset(None, "")
 
     def set_dataset(self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = "", source_kind: str = "sas"):
@@ -114,6 +123,7 @@ class AeTableBuilder(QWidget):
         self._busy = busy; available = not busy and self._metadata is not None; self.run_button.setEnabled(available); self.sas_code_button.setEnabled(available and self._source_kind == "sas"); self._sync_denominator(); self.status.setText(message)
     def clear(self):
         self.dataset_filter.clear(); self.population_where.clear(); self.status.clear()
+        self.cleared.emit()
     def _selection(self):
         if self._metadata is None: return
         population = self.adsl.currentData() if self.denominator_type.currentData() == "population" else None

@@ -47,7 +47,7 @@ data {{ work_population }};
 
 data _null_;
     set {{ work_population }};
-    if missing({{ treatment }}) then do;
+    if missing({{ denominator.population.treatment }}) then do;
         put "ERROR: Population denominator contains missing treatment values.";
         abort cancel;
     end;
@@ -57,12 +57,12 @@ run;
 /* Denominator counts: Row Filters are deliberately not applied here. */
 proc sql;
     create table {{ work_denominator }} as
-    select {{ treatment }} as trt_value,
+    select {% if denominator.type == "population" %}{{ denominator.population.treatment }}{% else %}{{ treatment }}{% endif %} as trt_value,
            count(distinct {{ subject }}) as denom
     from {% if denominator.type == "population" %}{{ work_population }}{% else %}{{ work_source }}{% endif %}
     where not missing({{ subject }}){% if denominator.type == "nonmissing" %}
       and not missing({{ denominator.analysis_value }}){% endif %}
-    group by {{ treatment }};
+    group by {% if denominator.type == "population" %}{{ denominator.population.treatment }}{% else %}{{ treatment }}{% endif %};
     create table {{ work_denominator_total }} as
     select count(distinct {{ subject }}) as denom
     from {% if denominator.type == "population" %}{{ work_population }}{% else %}{{ work_source }}{% endif %}
