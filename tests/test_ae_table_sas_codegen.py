@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,6 +54,16 @@ def configuration(*, denominator="same_universe", include_any=True, include_tota
 
 
 class AeSasGeneratorTests(unittest.TestCase):
+    def test_uses_ae_table_jinja_template(self):
+        generator = SasAeTableGenerator()
+        self.assertIn("ae_table.sas.j2", generator.environment.list_templates())
+
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "ae_table.sas.j2"
+            template.write_text("/* custom AE template */\n", encoding="utf-8")
+            rendered = SasAeTableGenerator(Path(directory)).generate(configuration())
+            self.assertEqual(rendered, "/* custom AE template */\n")
+
     def test_runtime_sort_and_dynamic_columns(self):
         code = SasAeTableGenerator().generate(configuration())
         self.assertIn("proc sort data=soc_total out=soc_order", code)
