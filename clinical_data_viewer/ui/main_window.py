@@ -25,14 +25,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..ae_table import (
+    AeTableConfig,
+    AeTableDenominator,
+    AeTableEngine,
+    AeTableLongResultBuilder,
+    build_ae_table_configuration,
+)
+from ..ae_table.drilldown import build_cell_filter as build_ae_cell_filter
+from ..ae_table.drilldown import lookup_cell as lookup_ae_cell
 from ..categorical import (
     CategoricalConfig,
     CategoricalEngine,
     CategoricalLongResultBuilder,
     DenominatorConfig,
 )
-from ..ae_table import AeTableConfig, AeTableDenominator, AeTableEngine, AeTableLongResultBuilder, build_ae_table_configuration
-from ..ae_table.drilldown import build_cell_filter as build_ae_cell_filter, lookup_cell as lookup_ae_cell
 from ..categorical.drilldown import (
     CategoricalQueryBuilder,
     build_cell_filter,
@@ -41,7 +48,11 @@ from ..categorical.drilldown import (
 )
 from ..codegen import build_proc_means_configuration
 from ..codegen.r import RProcMeansGenerator
-from ..codegen.sas import SasAeTableGenerator, SasProcMeansGenerator, SasRuleBasedGenerator
+from ..codegen.sas import (
+    SasAeTableGenerator,
+    SasProcMeansGenerator,
+    SasRuleBasedGenerator,
+)
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
@@ -79,9 +90,9 @@ from ..settings import PROC_MEANS_STATISTICS, AppSettings
 from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
+from .ae_table_builder import AeTableBuilderSelection
 from .analysis_panel import AnalysisPanel
 from .categorical_builder import CategoricalBuilderSelection
-from .ae_table_builder import AeTableBuilderSelection
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
 from .dataset_merge_panel import DatasetMergePanel
@@ -266,7 +277,9 @@ class MainWindow(QMainWindow):
             self._open_rule_based_long_result
         )
         self.open_ae_table_long_action = QAction("Open AE Table Long Result", self)
-        self.open_ae_table_long_action.triggered.connect(self._open_ae_table_long_result)
+        self.open_ae_table_long_action.triggered.connect(
+            self._open_ae_table_long_result
+        )
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
@@ -694,7 +707,9 @@ class MainWindow(QMainWindow):
     def _browse_ae_adsl(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
         filename, _filter = QFileDialog.getOpenFileName(
-            self, "Choose ADSL Dataset", initial,
+            self,
+            "Choose ADSL Dataset",
+            initial,
             "SAS datasets (*.sas7bdat *.xpt);;All files (*)",
         )
         if not filename:
@@ -702,9 +717,11 @@ class MainWindow(QMainWindow):
         source = Path(filename)
         self.settings.last_open_directory = str(source.parent)
         self.settings.save()
+
         def ready(tab: DatasetTab) -> None:
             self._refresh_categorical_sources()
             self.analysis_panel.ae_table_builder.select_adsl(tab)
+
         self._open_path(source, ready)
 
     def _run_dataset_merge(
@@ -991,9 +1008,13 @@ class MainWindow(QMainWindow):
                 metadata=metadata,
                 cached_row_count=progress.cached_rows,
                 cache_complete=progress.complete,
+                total_rows_known=progress.total_rows_known,
             )
             tab.set_cache_state(
-                progress.cached_rows, progress.total_rows, progress.complete
+                progress.cached_rows,
+                progress.total_rows,
+                progress.complete,
+                progress.total_rows_known,
             )
             self._refresh_status(tab)
 
@@ -1002,7 +1023,10 @@ class MainWindow(QMainWindow):
                 return
             tab.handle = handle
             tab.set_cache_state(
-                handle.cached_row_count, handle.metadata.row_count, True
+                handle.cached_row_count,
+                handle.metadata.row_count,
+                True,
+                handle.total_rows_known,
             )
             self._sync_active_tab()
             self._refresh_status(tab)
@@ -1468,12 +1492,26 @@ class MainWindow(QMainWindow):
             )
             return None
         pop = selection.population_tab
-        if selection.denominator_type == "population" and (not isinstance(pop, DatasetTab) or not pop.cache_complete):
-            QMessageBox.warning(self, "AE Table", "Open or browse a fully loaded ADSL dataset for Population N.")
+        if selection.denominator_type == "population" and (
+            not isinstance(pop, DatasetTab) or not pop.cache_complete
+        ):
+            QMessageBox.warning(
+                self,
+                "AE Table",
+                "Open or browse a fully loaded ADSL dataset for Population N.",
+            )
             return None
         try:
-            source_filter = FilterEngine(tab.handle.metadata.variables).compile(selection.dataset_filter_text)
-            pop_filter = FilterEngine(pop.handle.metadata.variables).compile(selection.population_filter_text) if isinstance(pop, DatasetTab) else FilterEngine(tab.handle.metadata.variables).compile("")
+            source_filter = FilterEngine(tab.handle.metadata.variables).compile(
+                selection.dataset_filter_text
+            )
+            pop_filter = (
+                FilterEngine(pop.handle.metadata.variables).compile(
+                    selection.population_filter_text
+                )
+                if isinstance(pop, DatasetTab)
+                else FilterEngine(tab.handle.metadata.variables).compile("")
+            )
             config = AeTableConfig(
                 selection.soc_variable,
                 selection.pt_variable,
@@ -1481,34 +1519,71 @@ class MainWindow(QMainWindow):
                 "USUBJID",
                 source_filter,
                 selection.dataset_filter_text,
-                AeTableDenominator(selection.denominator_type, pop_filter, selection.population_filter_text),
+                AeTableDenominator(
+                    selection.denominator_type,
+                    pop_filter,
+                    selection.population_filter_text,
+                ),
                 selection.include_any_ae,
                 selection.any_ae_label,
                 selection.include_total,
                 selection.percent_digits,
                 selection.hierarchy_missing_policy,
             )
-            config.validate(tab.handle.metadata, pop.handle.metadata if isinstance(pop, DatasetTab) else None)
+            config.validate(
+                tab.handle.metadata,
+                pop.handle.metadata if isinstance(pop, DatasetTab) else None,
+            )
         except ValueError as error:
-            QMessageBox.warning(self, "AE Table", str(error)); return None
+            QMessageBox.warning(self, "AE Table", str(error))
+            return None
         return tab, pop if isinstance(pop, DatasetTab) else None, config
 
     def _run_ae_table_builder(self, selection: AeTableBuilderSelection) -> None:
         context = self._ae_table_context(selection)
-        if context is None: return
-        source_tab, pop_tab, config = context; source_handle = source_tab.handle; pop_handle = pop_tab.handle if pop_tab else None
-        builder = self.analysis_panel.ae_table_builder; self._ae_table_input_tabs = {source_tab}
-        if pop_tab: self._ae_table_input_tabs.add(pop_tab)
+        if context is None:
+            return
+        source_tab, pop_tab, config = context
+        source_handle = source_tab.handle
+        pop_handle = pop_tab.handle if pop_tab else None
+        builder = self.analysis_panel.ae_table_builder
+        self._ae_table_input_tabs = {source_tab}
+        if pop_tab:
+            self._ae_table_input_tabs.add(pop_tab)
         builder.set_busy(True, "Calculating AE Table in the background…")
+
         def completed(handle):
-            self._ae_table_input_tabs.clear(); builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
+            self._ae_table_input_tabs.clear()
+            builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
             result_tab = self._make_dataset_tab(handle)
-            for directory in {source_handle.temporary_path.parent, *( [pop_handle.temporary_path.parent] if pop_handle else [])}: self._retain_directory(directory)
-            self._ae_table_sources[result_tab] = AeTableResultContext(source_handle, pop_handle, config)
-            index = self.tabs.addTab(result_tab, "AE Table Result"); self.tabs.setCurrentIndex(index); self._sync_active_tab(); result_tab.start()
+            for directory in {
+                source_handle.temporary_path.parent,
+                *([pop_handle.temporary_path.parent] if pop_handle else []),
+            }:
+                self._retain_directory(directory)
+            self._ae_table_sources[result_tab] = AeTableResultContext(
+                source_handle, pop_handle, config
+            )
+            index = self.tabs.addTab(result_tab, "AE Table Result")
+            self.tabs.setCurrentIndex(index)
+            self._sync_active_tab()
+            result_tab.start()
+
         def failed(message, details):
-            self._ae_table_input_tabs.clear(); builder.set_busy(False, "AE Table failed."); self._show_error("AE Table Failed", message, details)
-        self._submit(builder, lambda worker: self.ae_table_engine.run(source_handle, config, pop_handle, worker.report), completed, failed)
+            self._ae_table_input_tabs.clear()
+            builder.set_busy(False, "AE Table failed.")
+            self._show_error("AE Table Failed", message, details)
+
+        self._submit(
+            builder,
+            lambda worker: self.ae_table_engine.run(
+                source_handle, config, pop_handle, worker.report
+            ),
+            completed,
+            failed,
+        )
 
     def _generate_ae_table_sas_code(self, selection: AeTableBuilderSelection) -> None:
         """Generate AE SAS from the current Builder snapshot without running a table."""
@@ -1529,11 +1604,18 @@ class MainWindow(QMainWindow):
         def completed(code: str) -> None:
             self._ae_table_input_tabs.clear()
             builder.set_busy(False, "SAS code generated.")
-            safe_name = "".join(
-                character if character.isalnum() or character in {"-", "_"} else "_"
-                for character in source_handle.metadata.name
-            ).strip("_").lower() or "dataset"
-            SasCodeDialog(code, str(source_handle.source_path), f"{safe_name}_ae_soc_pt.sas", self).exec()
+            safe_name = (
+                "".join(
+                    character if character.isalnum() or character in {"-", "_"} else "_"
+                    for character in source_handle.metadata.name
+                )
+                .strip("_")
+                .lower()
+                or "dataset"
+            )
+            SasCodeDialog(
+                code, str(source_handle.source_path), f"{safe_name}_ae_soc_pt.sas", self
+            ).exec()
 
         def failed(message: str, details: str) -> None:
             self._ae_table_input_tabs.clear()
@@ -2399,37 +2481,88 @@ class MainWindow(QMainWindow):
         if tab is None or tab.handle.kind != "ae_table":
             return
         title = self._unique_dataset_tab_title("AE Table Long Result")
+
         def completed(handle):
             if self.tabs.indexOf(tab) < 0:
-                self._remove_dataset_directory(handle.temporary_path.parent); return
+                self._remove_dataset_directory(handle.temporary_path.parent)
+                return
             long_tab = self._make_dataset_tab(handle)
-            index = self.tabs.addTab(long_tab, title); self.tabs.setCurrentIndex(index); long_tab.start()
-        self._submit(tab, lambda _worker: self.ae_table_long_result_builder.run(tab.handle, self._ae_table_sources[tab].source), completed,
-                     lambda message, details: self._show_error("AE Table Long Result Failed", message, details))
+            index = self.tabs.addTab(long_tab, title)
+            self.tabs.setCurrentIndex(index)
+            long_tab.start()
 
-    def _drilldown_ae_table(self, tab: DatasetTab, view_row: int, column_name: str, display: str) -> None:
-        context = self._ae_table_sources.get(tab); source_row = tab.model.source_row_id(view_row)
-        if context is None or source_row is None or not display: return
+        self._submit(
+            tab,
+            lambda _worker: self.ae_table_long_result_builder.run(
+                tab.handle, self._ae_table_sources[tab].source
+            ),
+            completed,
+            lambda message, details: self._show_error(
+                "AE Table Long Result Failed", message, details
+            ),
+        )
+
+    def _drilldown_ae_table(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        context = self._ae_table_sources.get(tab)
+        source_row = tab.model.source_row_id(view_row)
+        if context is None or source_row is None or not display:
+            return
         cell = lookup_ae_cell(tab.handle, source_row, column_name)
-        if cell is None: return
+        if cell is None:
+            return
         dialog, records, subjects, denominator = self._categorical_drilldown_dialog()
-        dialog.setWindowTitle("AE Table Drill-down"); dialog.exec(); selected = dialog.selected_button
-        if selected not in {records, subjects, denominator}: return
+        dialog.setWindowTitle("AE Table Drill-down")
+        dialog.exec()
+        selected = dialog.selected_button
+        if selected not in {records, subjects, denominator}:
+            return
         is_denominator = selected is denominator
-        target = context.population if is_denominator and context.config.denominator.type == "population" else context.source
-        if target is None: return
+        target = (
+            context.population
+            if is_denominator and context.config.denominator.type == "population"
+            else context.source
+        )
+        if target is None:
+            return
         try:
-            where_sql, parameters = build_ae_cell_filter(target.metadata, context.config, cell, denominator=is_denominator)
+            where_sql, parameters = build_ae_cell_filter(
+                target.metadata, context.config, cell, denominator=is_denominator
+            )
         except (KeyError, ValueError, StopIteration) as error:
-            QMessageBox.warning(self, "AE Table Drill-down", str(error)); return
-        mode = "Denominator Subjects" if is_denominator else "Numerator Subjects" if selected is subjects else "Numerator Records"
+            QMessageBox.warning(self, "AE Table Drill-down", str(error))
+            return
+        mode = (
+            "Denominator Subjects"
+            if is_denominator
+            else "Numerator Subjects"
+            if selected is subjects
+            else "Numerator Records"
+        )
         title = self._unique_dataset_tab_title(f"Query: {mode}")
-        self._submit(tab, lambda _worker: self.categorical_query_builder.run(target, where_sql, parameters, title, subject_id_variable=context.config.subject_id_variable if selected is subjects or is_denominator else None),
-                     lambda handle: self._add_query_tab(handle, title),
-                     lambda message, details: self._show_error("AE Table Drill-down Failed", message, details))
+        self._submit(
+            tab,
+            lambda _worker: self.categorical_query_builder.run(
+                target,
+                where_sql,
+                parameters,
+                title,
+                subject_id_variable=context.config.subject_id_variable
+                if selected is subjects or is_denominator
+                else None,
+            ),
+            lambda handle: self._add_query_tab(handle, title),
+            lambda message, details: self._show_error(
+                "AE Table Drill-down Failed", message, details
+            ),
+        )
 
     def _add_query_tab(self, handle, title):
-        query_tab = self._make_dataset_tab(handle); index = self.tabs.addTab(query_tab, title); self.tabs.setCurrentIndex(index); query_tab.start()
+        query_tab = self._make_dataset_tab(handle)
+        index = self.tabs.addTab(query_tab, title)
+        self.tabs.setCurrentIndex(index)
+        query_tab.start()
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if (
@@ -2781,7 +2914,9 @@ class MainWindow(QMainWindow):
                 directories = {ae_context.source.temporary_path.parent}
                 if ae_context.population is not None:
                     directories.add(ae_context.population.temporary_path.parent)
-                self._pending_directory_releases.setdefault(widget, []).extend(directories)
+                self._pending_directory_releases.setdefault(widget, []).extend(
+                    directories
+                )
             merge_context = self._merge_sources.pop(widget, None)
             if merge_context is not None:
                 self._pending_directory_releases.setdefault(widget, []).extend(
@@ -2872,6 +3007,8 @@ class MainWindow(QMainWindow):
             self.rows_status.setText(
                 f"Rows: {tab.model.filtered_count:,} / {tab.handle.metadata.row_count:,}"
             )
+        elif not tab.handle.total_rows_known:
+            self.rows_status.setText(f"Rows cached: {tab.handle.cached_row_count:,}")
         else:
             self.rows_status.setText(
                 f"Rows cached: {tab.handle.cached_row_count:,} / "

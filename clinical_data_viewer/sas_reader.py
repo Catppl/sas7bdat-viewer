@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,6 +10,7 @@ from typing import Any
 from .domain import CacheProgress, DatasetHandle, DatasetMetadata, VariableMetadata
 from .filter_engine import quote_identifier
 from .temp_manager import TempManager
+from .xpt_reader import XptSequentialReader
 
 ProgressCallback = Callable[[str], None]
 CacheProgressCallback = Callable[[CacheProgress], None]
@@ -41,31 +42,46 @@ def normalize_value(value: Any) -> object:
 
 
 class SasDatasetReader:
-    """Copy the source, expose an initial cache, then append the rest in WAL mode."""
+    """Copy sources, cache the first rows, then append in WAL mode."""
 
-    def __init__(self, temp_manager: TempManager, chunk_size: int = 20_000) -> None:
+    DEFAULT_SAS_INITIAL_ROWS = 5_000
+    DEFAULT_XPT_INITIAL_ROWS = 2_500
+    DEFAULT_CACHE_CHUNK_ROWS = 20_000
+
+    def __init__(
+        self,
+        temp_manager: TempManager,
+        chunk_size: int | None = None,
+        *,
+        sas_initial_chunk_size: int = DEFAULT_SAS_INITIAL_ROWS,
+        xpt_initial_chunk_size: int = DEFAULT_XPT_INITIAL_ROWS,
+        cache_chunk_size: int = DEFAULT_CACHE_CHUNK_ROWS,
+        xpt_reader_factory=XptSequentialReader,
+    ) -> None:
+        """Create a reader with format-specific first-screen chunk sizes.
+
+        ``chunk_size`` remains as a compact test/backwards-compatibility
+        override. When supplied it applies to every chunk type.
+        """
+        if chunk_size is not None:
+            sas_initial_chunk_size = chunk_size
+            xpt_initial_chunk_size = chunk_size
+            cache_chunk_size = chunk_size
+        if min(sas_initial_chunk_size, xpt_initial_chunk_size, cache_chunk_size) < 1:
+            raise ValueError("Dataset cache chunk sizes must be positive.")
         self.temp_manager = temp_manager
-        self.chunk_size = chunk_size
+        self.sas_initial_chunk_size = sas_initial_chunk_size
+        self.xpt_initial_chunk_size = xpt_initial_chunk_size
+        self.cache_chunk_size = cache_chunk_size
+        self.xpt_reader_factory = xpt_reader_factory
 
     @staticmethod
-    def _read_function(pyreadstat: Any, dataset_path: Path):
-        """Return the pyreadstat reader appropriate for an original SAS format."""
-        if dataset_path.suffix.lower() == ".xpt":
-            return pyreadstat.read_xport
-        return pyreadstat.read_sas7bdat
-
-    @staticmethod
-    def _read_options(dataset_path: Path) -> dict[str, object]:
-        """Options shared by direct and chunked reads for the selected format."""
-        options: dict[str, object] = {
+    def _read_options() -> dict[str, object]:
+        return {
             "output_format": "dict",
             "disable_datetime_conversion": True,
+            "user_missing": True,
         }
-        # read_xport does not accept user_missing; XPT has no SAS special-missing
-        # representation for pyreadstat to preserve in the same way as sas7bdat.
-        if dataset_path.suffix.lower() == ".sas7bdat":
-            options["user_missing"] = True
-        return options
 
     def load(
         self, source_path: Path, progress: ProgressCallback | None = None
@@ -80,6 +96,8 @@ class SasDatasetReader:
         self, source_path: Path, progress: ProgressCallback | None = None
     ) -> DatasetHandle:
         notify = progress or (lambda _message: None)
+        source_path = source_path.resolve(strict=True)
+        source_size_bytes = source_path.stat().st_size
 
         def copy_progress(copied: int, total: int) -> None:
             percentage = int(copied * 100 / total) if total else 100
@@ -90,25 +108,20 @@ class SasDatasetReader:
         )
         database_path = dataset_directory / "dataset.sqlite"
         try:
-            notify("Reading SAS metadata…")
-            variables, reported_rows = self._read_metadata(temporary_path)
-            notify(f"Loading the first {self.chunk_size:,} rows…")
-            first_chunk = self._read_first_chunk(temporary_path)
-            cached_rows = self._create_cache(
-                database_path, variables, first_chunk, reported_rows
-            )
-            total_rows = reported_rows if reported_rows is not None else cached_rows
-            cache_complete = cached_rows < self.chunk_size or (
-                reported_rows is not None and cached_rows >= reported_rows
-            )
-            metadata = DatasetMetadata(source_path.stem, total_rows, variables)
-            return DatasetHandle(
-                source_path.resolve(),
+            if temporary_path.suffix.lower() == ".xpt":
+                return self._load_initial_xpt(
+                    source_path,
+                    source_size_bytes,
+                    temporary_path,
+                    database_path,
+                    notify,
+                )
+            return self._load_initial_sas7bdat(
+                source_path,
+                source_size_bytes,
                 temporary_path,
                 database_path,
-                metadata,
-                cached_rows,
-                cache_complete,
+                notify,
             )
         except BaseException:
             self.temp_manager.remove_dataset(dataset_directory)
@@ -124,64 +137,211 @@ class SasDatasetReader:
             return handle
         notify = progress or (lambda _message: None)
         report_cache = cache_progress or (lambda _progress: None)
+        if handle.temporary_path.suffix.lower() == ".xpt":
+            return self._continue_xpt_cache(handle, notify, report_cache)
+        return self._continue_sas_cache(handle, notify, report_cache)
+
+    def _load_initial_sas7bdat(
+        self,
+        source_path: Path,
+        source_size_bytes: int,
+        temporary_path: Path,
+        database_path: Path,
+        notify: ProgressCallback,
+    ) -> DatasetHandle:
+        notify("Reading SAS metadata…")
+        variables, reported_rows = self._read_sas_metadata(temporary_path)
+        notify(f"Loading the first {self.sas_initial_chunk_size:,} rows…")
+        first_chunk = self._read_sas_first_chunk(temporary_path)
+        names = [variable.name for variable in variables]
+        cached_rows = self._create_cache(
+            database_path,
+            variables,
+            self._mapping_rows(first_chunk, names),
+            self._mapping_length(first_chunk),
+            reported_rows,
+            self.sas_initial_chunk_size,
+        )
+        return self._initial_handle(
+            source_path,
+            source_size_bytes,
+            temporary_path,
+            database_path,
+            variables,
+            reported_rows,
+            cached_rows,
+            self.sas_initial_chunk_size,
+        )
+
+    def _load_initial_xpt(
+        self,
+        source_path: Path,
+        source_size_bytes: int,
+        temporary_path: Path,
+        database_path: Path,
+        notify: ProgressCallback,
+    ) -> DatasetHandle:
+        notify("Reading XPT metadata…")
+        with self.xpt_reader_factory(temporary_path) as reader:
+            variables = reader.variables
+            reported_rows = reader.total_rows
+            notify(f"Loading the first {self.xpt_initial_chunk_size:,} rows…")
+            first_chunk = reader.read_chunk(self.xpt_initial_chunk_size)
+            cached_rows = self._create_cache(
+                database_path,
+                variables,
+                self._frame_rows(
+                    first_chunk, [variable.name for variable in variables]
+                ),
+                0 if first_chunk is None else len(first_chunk),
+                reported_rows,
+                self.xpt_initial_chunk_size,
+            )
+        return self._initial_handle(
+            source_path,
+            source_size_bytes,
+            temporary_path,
+            database_path,
+            variables,
+            reported_rows,
+            cached_rows,
+            self.xpt_initial_chunk_size,
+        )
+
+    def _initial_handle(
+        self,
+        source_path: Path,
+        source_size_bytes: int,
+        temporary_path: Path,
+        database_path: Path,
+        variables: tuple[VariableMetadata, ...],
+        reported_rows: int | None,
+        cached_rows: int,
+        requested_rows: int,
+    ) -> DatasetHandle:
+        total_rows = reported_rows if reported_rows is not None else cached_rows
+        cache_complete = cached_rows < requested_rows or (
+            reported_rows is not None and cached_rows >= reported_rows
+        )
+        return DatasetHandle(
+            source_path,
+            temporary_path,
+            database_path,
+            DatasetMetadata(source_path.stem, total_rows, variables),
+            cached_rows,
+            cache_complete,
+            source_size_bytes=source_size_bytes,
+            total_rows_known=reported_rows is not None,
+        )
+
+    def _continue_sas_cache(
+        self,
+        handle: DatasetHandle,
+        notify: ProgressCallback,
+        report_cache: CacheProgressCallback,
+    ) -> DatasetHandle:
         pyreadstat = _import_pyreadstat()
         variables = handle.metadata.variables
         names = [variable.name for variable in variables]
-        columns = ", ".join(quote_identifier(name) for name in names)
-        placeholders = ", ".join("?" for _ in names)
-        insert_sql = f"INSERT INTO dataset ({columns}) VALUES ({placeholders})"
         cached_rows = handle.cached_row_count
-        total_hint = handle.metadata.row_count
+        total_hint = handle.metadata.row_count if handle.total_rows_known else None
         connection = sqlite3.connect(handle.database_path)
         try:
             reader = pyreadstat.read_file_in_chunks(
-                self._read_function(pyreadstat, handle.temporary_path),
+                pyreadstat.read_sas7bdat,
                 str(handle.temporary_path),
-                chunksize=self.chunk_size,
+                chunksize=self.cache_chunk_size,
                 offset=cached_rows,
-                **self._read_options(handle.temporary_path),
+                **self._read_options(),
             )
             for chunk, _meta in reader:
-                chunk_length = len(next(iter(chunk.values()), ()))
-                rows = zip(*(chunk[name] for name in names))
-                connection.executemany(
-                    insert_sql,
-                    ([normalize_value(value) for value in row] for row in rows),
-                )
+                chunk_length = self._mapping_length(chunk)
+                self._insert_rows(connection, names, self._mapping_rows(chunk, names))
                 cached_rows += chunk_length
-                connection.execute(
-                    "UPDATE cache_info SET cached_rows = ?", (cached_rows,)
+                self._commit_cache_progress(connection, cached_rows)
+                self._report_cache_progress(
+                    notify, report_cache, cached_rows, total_hint
                 )
-                connection.commit()
-                visible_total = max(total_hint, cached_rows)
-                notify(f"Caching rows… {cached_rows:,} / {visible_total:,}")
-                report_cache(CacheProgress(cached_rows, visible_total))
-            total_rows = cached_rows
+        finally:
+            connection.close()
+        return self._finish_cache(handle, cached_rows, report_cache)
+
+    def _continue_xpt_cache(
+        self,
+        handle: DatasetHandle,
+        notify: ProgressCallback,
+        report_cache: CacheProgressCallback,
+    ) -> DatasetHandle:
+        variables = handle.metadata.variables
+        names = [variable.name for variable in variables]
+        cached_rows = handle.cached_row_count
+        connection = sqlite3.connect(handle.database_path)
+        try:
+            with self.xpt_reader_factory(handle.temporary_path) as reader:
+                if tuple(names) != tuple(reader.column_names):
+                    raise ValueError(
+                        "The XPT column layout changed while rebuilding the cache."
+                    )
+                total_hint = reader.total_rows
+                self._skip_xpt_rows(reader, cached_rows)
+                while True:
+                    chunk = reader.read_chunk(self.cache_chunk_size)
+                    if chunk is None or len(chunk) == 0:
+                        break
+                    self._insert_rows(connection, names, self._frame_rows(chunk, names))
+                    cached_rows += len(chunk)
+                    self._commit_cache_progress(connection, cached_rows)
+                    self._report_cache_progress(
+                        notify, report_cache, cached_rows, total_hint
+                    )
+        finally:
+            connection.close()
+        return self._finish_cache(handle, cached_rows, report_cache)
+
+    def _skip_xpt_rows(self, reader: XptSequentialReader, expected_rows: int) -> None:
+        remaining = expected_rows
+        while remaining:
+            chunk = reader.read_chunk(min(self.cache_chunk_size, remaining))
+            actual_rows = 0 if chunk is None else len(chunk)
+            if actual_rows == 0:
+                raise ValueError(
+                    "The XPT file ended before its existing cache could be skipped."
+                )
+            remaining -= actual_rows
+
+    def _finish_cache(
+        self,
+        handle: DatasetHandle,
+        cached_rows: int,
+        report_cache: CacheProgressCallback,
+    ) -> DatasetHandle:
+        connection = sqlite3.connect(handle.database_path)
+        try:
             connection.execute(
                 "UPDATE cache_info SET cached_rows = ?, total_rows = ?, complete = 1",
-                (total_rows, total_rows),
+                (cached_rows, cached_rows),
             )
             connection.commit()
         finally:
             connection.close()
         complete = replace(
             handle,
-            metadata=replace(handle.metadata, row_count=total_rows),
-            cached_row_count=total_rows,
+            metadata=replace(handle.metadata, row_count=cached_rows),
+            cached_row_count=cached_rows,
             cache_complete=True,
+            total_rows_known=True,
         )
-        report_cache(CacheProgress(total_rows, total_rows, True))
+        report_cache(CacheProgress(cached_rows, cached_rows, True, True))
         return complete
 
-    def _read_metadata(
+    def _read_sas_metadata(
         self, dataset_path: Path
     ) -> tuple[tuple[VariableMetadata, ...], int | None]:
         pyreadstat = _import_pyreadstat()
-        reader = self._read_function(pyreadstat, dataset_path)
-        _data, meta = reader(
+        _data, meta = pyreadstat.read_sas7bdat(
             str(dataset_path),
             metadataonly=True,
-            **self._read_options(dataset_path),
+            **self._read_options(),
         )
         names = list(meta.column_names)
         labels = list(meta.column_labels or [])
@@ -208,13 +368,12 @@ class SasDatasetReader:
         reported_rows = int(raw_rows) if raw_rows is not None else None
         return tuple(variables), reported_rows
 
-    def _read_first_chunk(self, dataset_path: Path) -> dict[str, object]:
+    def _read_sas_first_chunk(self, dataset_path: Path) -> dict[str, object]:
         pyreadstat = _import_pyreadstat()
-        reader = self._read_function(pyreadstat, dataset_path)
-        data, _meta = reader(
+        data, _meta = pyreadstat.read_sas7bdat(
             str(dataset_path),
-            row_limit=self.chunk_size,
-            **self._read_options(dataset_path),
+            row_limit=self.sas_initial_chunk_size,
+            **self._read_options(),
         )
         return data
 
@@ -222,8 +381,10 @@ class SasDatasetReader:
         self,
         database_path: Path,
         variables: tuple[VariableMetadata, ...],
-        first_chunk: dict[str, object],
+        rows: Iterable[tuple[object, ...]],
+        cached_rows: int,
         total_rows: int | None,
+        requested_rows: int,
     ) -> int:
         connection = sqlite3.connect(database_path)
         try:
@@ -238,18 +399,9 @@ class SasDatasetReader:
                 f"CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, {definitions})"
             )
             names = [variable.name for variable in variables]
-            columns = ", ".join(quote_identifier(name) for name in names)
-            placeholders = ", ".join("?" for _ in names)
-            rows = zip(*(first_chunk.get(name, ()) for name in names))
-            connection.executemany(
-                f"INSERT INTO dataset ({columns}) VALUES ({placeholders})",
-                ([normalize_value(value) for value in row] for row in rows),
-            )
-            cached_rows = int(
-                connection.execute("SELECT count(*) FROM dataset").fetchone()[0]
-            )
+            self._insert_rows(connection, names, rows)
             complete = int(
-                cached_rows < self.chunk_size
+                cached_rows < requested_rows
                 or (total_rows is not None and cached_rows >= total_rows)
             )
             connection.execute(
@@ -265,3 +417,54 @@ class SasDatasetReader:
             return cached_rows
         finally:
             connection.close()
+
+    @staticmethod
+    def _mapping_length(chunk: dict[str, object]) -> int:
+        return len(next(iter(chunk.values()), ()))
+
+    @staticmethod
+    def _mapping_rows(
+        chunk: dict[str, object], names: list[str]
+    ) -> Iterable[tuple[object, ...]]:
+        return zip(*(chunk.get(name, ()) for name in names))
+
+    @staticmethod
+    def _frame_rows(frame: Any, names: list[str]) -> Iterable[tuple[object, ...]]:
+        if frame is None:
+            return ()
+        return frame.reindex(columns=names).itertuples(index=False, name=None)
+
+    @staticmethod
+    def _insert_rows(
+        connection: sqlite3.Connection,
+        names: list[str],
+        rows: Iterable[tuple[object, ...]],
+    ) -> None:
+        columns = ", ".join(quote_identifier(name) for name in names)
+        placeholders = ", ".join("?" for _ in names)
+        connection.executemany(
+            f"INSERT INTO dataset ({columns}) VALUES ({placeholders})",
+            ([normalize_value(value) for value in row] for row in rows),
+        )
+
+    @staticmethod
+    def _commit_cache_progress(
+        connection: sqlite3.Connection, cached_rows: int
+    ) -> None:
+        connection.execute("UPDATE cache_info SET cached_rows = ?", (cached_rows,))
+        connection.commit()
+
+    @staticmethod
+    def _report_cache_progress(
+        notify: ProgressCallback,
+        report_cache: CacheProgressCallback,
+        cached_rows: int,
+        total_rows: int | None,
+    ) -> None:
+        if total_rows is None:
+            notify(f"Caching rows… {cached_rows:,} rows")
+            report_cache(CacheProgress(cached_rows, cached_rows, False, False))
+            return
+        visible_total = max(total_rows, cached_rows)
+        notify(f"Caching rows… {cached_rows:,} / {visible_total:,}")
+        report_cache(CacheProgress(cached_rows, visible_total, False, True))

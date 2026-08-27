@@ -205,6 +205,12 @@ QLabel#cacheNotice {
     color: #0f5f9f;
     padding: 6px 9px;
 }
+QLabel#xptSubmissionWarning {
+    background: #fff4e5;
+    border: 1px solid #e7b66d;
+    color: #7a4b00;
+    padding: 5px 8px;
+}
 QLabel#whereTitle { color: #0f6fb5; font-weight: 700; }
 QLabel#panelTitle { color: #174b73; font-weight: 700; }
 QToolButton:hover { background: #e1f0ff; border-radius: 3px; }

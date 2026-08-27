@@ -12,6 +12,52 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
+    def test_large_xpt_submission_warning_is_english_and_persists_on_reload(
+        self,
+    ) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_engine import CompiledFilter
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = DatasetMetadata("ADAE", 1, (VariableMetadata("USUBJID"),))
+            large = DatasetHandle(
+                root / "adae.xpt",
+                root / "temp.xpt",
+                root / "dataset.sqlite",
+                metadata,
+                1,
+                True,
+                source_size_bytes=5_000_000_001,
+            )
+            tab = DatasetTab(large, 500)
+            self.assertFalse(tab.xpt_submission_warning.isHidden())
+            self.assertIn("Submission warning:", tab.xpt_submission_warning.text())
+            self.assertIn("FDA recommends", tab.xpt_submission_warning.text())
+
+            compliant = DatasetHandle(
+                root / "adae.xpt",
+                root / "temp.xpt",
+                root / "dataset.sqlite",
+                metadata,
+                1,
+                True,
+                source_size_bytes=5_000_000_000,
+            )
+            tab.replace_handle(compliant, ["USUBJID"], CompiledFilter("", ()))
+            self.assertTrue(tab.xpt_submission_warning.isHidden())
+            tab.deleteLater()
+            application.processEvents()
+
     def test_rule_based_codegen_stays_disabled_for_merge(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
@@ -225,7 +271,9 @@ class UiSmokeTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
-    def test_analysis_builders_keep_their_fixed_source_and_inputs_until_clear(self) -> None:
+    def test_analysis_builders_keep_their_fixed_source_and_inputs_until_clear(
+        self,
+    ) -> None:
         """Changing tabs must not silently rebind or reset an open Builder."""
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
@@ -274,7 +322,9 @@ class UiSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             window = MainWindow(
-                TestSettings(), TempManager(root / "temp"), FilterHistory(root / "history.sqlite")
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
             )
             source_a, source_b = make_tab(root, "adae"), make_tab(root, "adlb")
             window.tabs.addTab(source_a, "ADAE")
@@ -339,7 +389,9 @@ class UiSmokeTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
-    def test_rule_based_builder_allows_a_different_population_treatment_variable(self) -> None:
+    def test_rule_based_builder_allows_a_different_population_treatment_variable(
+        self,
+    ) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
 

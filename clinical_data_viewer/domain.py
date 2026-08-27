@@ -47,6 +47,8 @@ class DatasetHandle:
     kind: str = "sas"
     display_source: str = ""
     configuration_path: Path | None = None
+    source_size_bytes: int | None = None
+    total_rows_known: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,7 @@ class CacheProgress:
     cached_rows: int
     total_rows: int
     complete: bool = False
+    total_rows_known: bool = True
 
 
 @dataclass(frozen=True, slots=True)

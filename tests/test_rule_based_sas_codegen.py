@@ -149,6 +149,10 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertIn("data work.rule_based_result;", code)
         self.assertIn("length col1-col4 $200;", code)
         self.assertIn("keep item col1-col4;", code)
+        self.assertIn("col{i} = cat(", code)
+        self.assertIn("strip(put(cnt{i}, 3.))", code)
+        self.assertNotIn("cats(", code)
+        self.assertIn("item = 'Event'", code)
         self.assertIn("label", code)
         self.assertIn("col1 = 'Drug B n (%)'", code)
         self.assertIn("col2 = 'Placebo n (%)'", code)
@@ -299,14 +303,23 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertIn("from rb_src", denominator_section)
         self.assertNotIn("AESER", denominator_section)
 
-    def test_percent_digits_zero_and_two_are_rendered(self) -> None:
-        for digits, increment in ((0, "1"), (2, "0.01")):
+    def test_percent_digits_render_dynamic_width_and_precision(self) -> None:
+        for digits, increment, number_format in (
+            (0, "1", "4.0"),
+            (1, "0.1", "5.1"),
+            (2, "0.01", "6.2"),
+            (3, "0.001", "7.3"),
+            (4, "0.0001", "8.4"),
+        ):
             with self.subTest(digits=digits):
                 configuration = _base_configuration()
                 configuration["display"]["percent_digits"] = digits
                 code = self.generator.generate(configuration)
                 self.assertIn(f"round(_pct, {increment})", code)
-                self.assertIn(f"32.{digits}", code)
+                self.assertIn(
+                    f"strip(put(round(_pct, {increment}), {number_format}))",
+                    code,
+                )
 
     def test_numeric_treatment_literals_and_order_are_preserved(self) -> None:
         configuration = _base_configuration()

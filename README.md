@@ -2,14 +2,15 @@
 
 [中文](README.md) | [English](README.en.md)
 
-独立的 Windows 临床 SAS 数据集浏览器。它只读打开 `.sas7bdat` 和 SAS Transport `.xpt`，采用 PySide6 原生桌面界面、pyreadstat 分块读取和磁盘 SQLite 查询缓存，目标是在日常查看大数据集时保持界面响应。
+独立的 Windows 临床 SAS 数据集浏览器。它只读打开 `.sas7bdat` 和 SAS Transport `.xpt`，采用 PySide6 原生桌面界面和磁盘 SQLite 查询缓存，目标是在日常查看大数据集时保持界面响应。
 
 ## 已实现功能
 
 - 同时打开多个 `.sas7bdat` / `.xpt`，使用可关闭、可移动的 Tab 切换。
 - 源文件先分块复制到本次会话的临时目录；复制结束后，读取、筛选、排序和导出都只访问临时文件/缓存。
 - 关闭 Tab 清理对应副本；退出清理整个会话；启动时清理超过 24 小时且不属于仍在运行进程的异常退出遗留目录。
-- 大文件复制完成后先读取 metadata 和首批 20,000 行并显示 Tab，其余行继续在后台写入本地缓存；缓存期间仍可浏览首批及随后到达的数据。
+- 大文件复制完成后立即显示首批数据：`.sas7bdat` 首批 5,000 行继续使用 pyreadstat；`.xpt` 首批 2,500 行使用顺序 XPORT reader。两种格式其余数据均按每批 20,000 行在后台写入本地缓存；缓存期间仍可浏览首批及随后到达的数据。
+- `.xpt` 原始文件超过 5 GB 时，数据表下方会显示英文 Submission warning。该提醒不阻止浏览；FDA 建议将超过 5 GB 的单个数据集拆分为不大于 5 GB 的文件后再提交。
 - `QTableView + QAbstractTableModel` 虚拟行模型，每页默认 500 行、内存中只保留有限页面；可以直接滚动/跳到远端页面，不需要先加载前面的所有行。
 - 可折叠 Variables 面板、显示列勾选、Select All、变量定位、变量搜索，以及 Variable/Label/Type/Length/Format metadata。
 - 手写 SAS-like WHERE；支持列与常量或列与列比较，例如 `AESTDTC <= AEENDTC`。
@@ -591,7 +592,8 @@ Copy-Item ".\manual-test\lock-test-backup.sas7bdat" ".\manual-test\lock-test.sas
 - 修改或重新生成测试源文件，点击 Reload；确认显示新内容，并尽量保留 WHERE 和显示变量。大文件缓存完成后 WHERE 应自动重用。
 - 先筛选、隐藏若干变量并排序，然后 Export CSV；确认导出的行数、行顺序和列集合与当前视图完全一致，文件开头包含 UTF-8 BOM。
 - 加载过程中拖动窗口、切换其他 Tab；导出大 CSV 时继续操作界面，确认没有主线程冻结。
-- 用行数超过 20,000 的数据集验证：首批行显示后 Tab 可立即浏览，底部缓存行数持续增加；缓存完成前筛选/排序/查找/跳转/导出不可用，完成后自动恢复。
+- 用行数超过 20,000 的数据集验证：`.sas7bdat` 首批 5,000 行、`.xpt` 首批 2,500 行显示后 Tab 可立即浏览，底部缓存行数持续增加；缓存完成前筛选/排序/查找/跳转/导出不可用，完成后自动恢复。
+- 对超过 5 GB 的 `.xpt`，确认数据表下方持续显示英文 Submission warning；刚好 5 GB 或 `.sas7bdat` 不显示该提示。
 - 打开文件后检查 `%LOCALAPPDATA%\ClinicalDataViewer\temp`；关闭对应 Tab 后其 dataset 子目录应消失，正常退出后本次 `cde-*` 会话目录应消失。
 
 ### Windows ZIP 打包
@@ -694,7 +696,8 @@ clinical_data_viewer/
   codegen/r/          R Jinja2 生成器与 R 专用模板
   filter_ast.py       Python WHERE parser AST 的跨语言 JSON 序列化
   ui/                 PySide6 主窗口、数据 Tab、Variables、历史与复制表格
-  sas_reader.py       pyreadstat metadata/分块读取与 SQLite 缓存
+  sas_reader.py       SAS7BDAT/XPT 首批读取、后台缓存与 SQLite 写入
+  xpt_reader.py       XPORT V5/V8 顺序读取 adapter
   temp_manager.py     源文件临时复制、会话清理、遗留清理
   table_model.py      QAbstractTableModel lazy loading
   where_parser.py     SAS-like WHERE lexer/parser

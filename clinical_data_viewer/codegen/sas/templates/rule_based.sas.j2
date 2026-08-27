@@ -120,16 +120,17 @@ data {{ output_dataset }};
             col{i} = '0 (—)';
         else do;
             _pct = cnt{i} / den{i} * 100;
-            col{i} = cats(
-                strip(put(cnt{i}, best32.)),
+            col{i} = cat(
+                strip(put(cnt{i}, 3.)),
                 ' (',
-                strip(put(round(_pct, {{ round_increment }}), 32.{{ digits }})),
+                strip(put(round(_pct, {{ round_increment }}), {{ 4 + digits }}.{{ digits }})),
                 ')'
             );
         end;
     end;
 
     label
+        item = 'Event'
 {% for level in levels %}        col{{ level.order }} = {{ (level.label ~ " n (%)") | sas_string }}
 {% endfor %}{% if total_enabled %}        col{{ total_order }} = 'Total n (%)'
 {% endif %}    ;

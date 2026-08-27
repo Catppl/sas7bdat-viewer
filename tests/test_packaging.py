@@ -13,6 +13,7 @@ class PackagingConfigurationTests(unittest.TestCase):
         self.assertIn('name="SASDataViewer"', spec)
         self.assertIn("clinical_data_viewer/codegen/sas/templates", spec)
         self.assertIn("clinical_data_viewer/codegen/r/templates", spec)
+        self.assertIn('collect_all("pandas")', spec)
 
     def test_windows_build_script_creates_release_zip(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -21,6 +22,11 @@ class PackagingConfigurationTests(unittest.TestCase):
         self.assertIn("SASDataViewer-Windows-x64.zip", script)
         self.assertIn("Compress-Archive", script)
         self.assertIn("ZIP SHA256", script)
+
+    def test_build_requirements_include_runtime_dependencies(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        requirements = (root / "requirements-build.txt").read_text(encoding="utf-8")
+        self.assertIn("-r requirements.txt", requirements)
 
 
 if __name__ == "__main__":

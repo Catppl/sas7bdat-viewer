@@ -36,6 +36,25 @@ from ..table_model import DatasetTableModel
 from .copy_table import MANUAL_HIGHLIGHTS, CopyTableView
 from .filter_header import FilterHeaderView
 
+XPT_SUBMISSION_SIZE_BYTES = 5_000_000_000
+
+
+def xpt_submission_warning_text(handle: DatasetHandle) -> str:
+    """Return the persistent FDA XPT-size reminder for an opened source."""
+    if (
+        handle.kind != "sas"
+        or handle.source_path.suffix.lower() != ".xpt"
+        or handle.source_size_bytes is None
+        or handle.source_size_bytes <= XPT_SUBMISSION_SIZE_BYTES
+    ):
+        return ""
+    size_gb = handle.source_size_bytes / 1_000_000_000
+    return (
+        f"Submission warning: This XPT file is {size_gb:.2f} GB. FDA recommends "
+        "splitting individual datasets larger than 5 GB into files no larger "
+        "than 5 GB before submission."
+    )
+
 
 class WhereEditor(QPlainTextEdit):
     apply_requested = Signal()
@@ -288,6 +307,12 @@ class DatasetTab(QWidget):
         self.table.drilldown_requested.connect(self._cell_double_clicked)
         layout.addWidget(self.table, 1)
 
+        self.xpt_submission_warning = QLabel(xpt_submission_warning_text(handle))
+        self.xpt_submission_warning.setObjectName("xptSubmissionWarning")
+        self.xpt_submission_warning.setWordWrap(True)
+        self.xpt_submission_warning.setVisible(bool(self.xpt_submission_warning.text()))
+        layout.addWidget(self.xpt_submission_warning)
+
         where_frame = QFrame()
         where_frame.setObjectName("wherePanel")
         where_frame.setFrameShape(QFrame.StyledPanel)
@@ -329,7 +354,10 @@ class DatasetTab(QWidget):
         )
         QShortcut(QKeySequence("Ctrl+G"), self, activated=self.prompt_goto_row)
         self.set_cache_state(
-            handle.cached_row_count, handle.metadata.row_count, handle.cache_complete
+            handle.cached_row_count,
+            handle.metadata.row_count,
+            handle.cache_complete,
+            handle.total_rows_known,
         )
 
     def _install_model(self) -> None:
@@ -510,6 +538,8 @@ class DatasetTab(QWidget):
         previous_sort = self.model.sort_spec
         self.handle = handle
         self.cache_failed = False
+        self.xpt_submission_warning.setText(xpt_submission_warning_text(handle))
+        self.xpt_submission_warning.setVisible(bool(self.xpt_submission_warning.text()))
         self.visible_columns = visible_columns
         self.where_compiled_filter = compiled
         known = {variable.name for variable in handle.metadata.variables}
@@ -533,7 +563,10 @@ class DatasetTab(QWidget):
                 Qt.AscendingOrder if previous_sort.ascending else Qt.DescendingOrder,
             )
         self.set_cache_state(
-            handle.cached_row_count, handle.metadata.row_count, handle.cache_complete
+            handle.cached_row_count,
+            handle.metadata.row_count,
+            handle.cache_complete,
+            handle.total_rows_known,
         )
         initial_count = (
             handle.metadata.row_count
@@ -545,15 +578,24 @@ class DatasetTab(QWidget):
         self.analysis_invalidated.emit()
 
     def set_cache_state(
-        self, cached_rows: int, total_rows: int, complete: bool
+        self,
+        cached_rows: int,
+        total_rows: int,
+        complete: bool,
+        total_rows_known: bool = True,
     ) -> None:
         self.cache_complete = complete
         if complete:
             self.cache_failed = False
         self.cache_notice.setVisible(not complete)
+        progress_text = (
+            f"{cached_rows:,} / {total_rows:,} rows available"
+            if total_rows_known
+            else f"{cached_rows:,} rows available"
+        )
         self.cache_notice.setText(
             "Preparing full dataset cache in the background — "
-            f"{cached_rows:,} / {total_rows:,} rows available. "
+            f"{progress_text}. "
             "Filter, sort, find, go to row, and export will be enabled when complete."
         )
         self.apply_button.setEnabled(complete and bool(self.visible_columns))
