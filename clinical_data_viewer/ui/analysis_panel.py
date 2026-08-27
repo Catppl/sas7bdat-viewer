@@ -18,10 +18,11 @@ from PySide6.QtWidgets import (
 from ..domain import DatasetMetadata, RowComparisonResult
 from ..settings import PROC_MEANS_STATISTICS
 from ..statistics import StatisticsResult
+from .ae_table_builder import AeTableBuilder
 from .categorical_builder import CategoricalBuilder
+from .listing_builder import ListingBuilder
 from .proc_means_builder import ProcMeansBuilder
 from .rule_based_builder import RuleBasedBuilder
-from .ae_table_builder import AeTableBuilder
 
 
 class AnalysisPanel(QWidget):
@@ -44,6 +45,7 @@ class AnalysisPanel(QWidget):
         self._create_categorical_tab()
         self._create_rule_based_tab()
         self._create_ae_table_tab()
+        self._create_listing_tab()
         self._create_comparison_tab()
 
     def _create_statistics_tab(self) -> None:
@@ -103,6 +105,9 @@ class AnalysisPanel(QWidget):
     def _create_ae_table_tab(self) -> None:
         self.ae_table_builder = AeTableBuilder()
 
+    def _create_listing_tab(self) -> None:
+        self.listing_builder = ListingBuilder()
+
     def _activate(self, page: QWidget, title: str) -> None:
         index = self.tabs.indexOf(page)
         if index < 0:
@@ -123,6 +128,9 @@ class AnalysisPanel(QWidget):
 
     def show_ae_table_tab(self) -> None:
         self._activate(self.ae_table_builder, "AE Table")
+
+    def show_listing_tab(self) -> None:
+        self._activate(self.listing_builder, "Listing Generator")
 
     def show_comparison_tab(self) -> None:
         self._activate(self.comparison_page, "Row Comparison")

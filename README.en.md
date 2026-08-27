@@ -15,8 +15,9 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, missing-value conditions, SAS temporal literals, and common character functions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
 | Analysis | PROC MEANS Simple, PROC MEANS Builder, Categorical Table, Rule-based Table, AE Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
+| Listing | `Tools > Listing Generator` builds record-level QC listings with an optional ADSL LEFT merge, filter, derived columns, stable sort, normal Viewer result tab, and Jinja2 SAS/PROC REPORT code generation. |
 | Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used; manual row highlights are recorded in an additional `HIGHLIGHT` column because CSV cannot store cell background colors. |
-| Code generation | SAS and R PROC MEANS code generators based on the same language-neutral JSON v3 configuration. |
+| Code generation | SAS/R PROC MEANS generators and a SAS Listing generator, each based on a language-neutral JSON configuration. |
 
 The interface follows a compact Windows 11 / SAS Studio-style layout: menu bar, toolbar, dataset tabs, Variables panel, data table, WHERE editor, and status bar.
 
@@ -154,6 +155,18 @@ Open `Tools > AE Table Builder` to create the standard clinical Adverse Events b
 Version 1 supports Population N (ADSL) and Same-universe N. The Population WHERE is independent from the AE Dataset Filter. Any AE and Total rows can be enabled, and percentages support 0–4 digits. The subject count variable is fixed to `USUBJID`. SOC and PT rows are sorted by descending Total frequency with case-insensitive alphabetical tie-breaking. Missing SOC/PT values are excluded by default, with an option to display them as `Uncoded`. Missing treatment values block calculation.
 
 Each successful run creates a paged `AE Table Result` tab and stores `dataset.sqlite`, `ae_table_config.json` v1, and the authoritative long result in the same session-temporary directory. The JSON `sort` block is the reusable business contract: generated AE SAS code recalculates SOC/PT frequencies on every run and applies that rule. `resolved_hierarchy` is only the current Python reference-run snapshot for audit, debugging, and validation; it is not a fixed ordering input for the generator. The long result stores explicit `TRT_ORDER` and displays rows by `ROW_ORDER, TRT_ORDER`, never by SQLite insertion order. Use `View > Open AE Table Long Result` to open the long table. Double-click an Any AE, SOC, or PT `n (%)` cell to drill down to numerator records, numerator subjects, or denominator subjects. AE results reuse normal paging, WHERE filtering, sorting, visible-column selection, copying, and CSV export. Merge Results are accepted as Python AE sources; AE SAS code generation is available for physical SAS sources and is disabled for Merge Results.
+
+## Listing Generator module
+
+Open `Tools > Listing Generator` for a lightweight record-level QC Listing. Its pipeline is fixed: **Source Dataset → Optional ADSL LEFT Merge → Data Filter → DATA Step columns → PROC SORT → PROC REPORT**. The Builder remains bound to the source that was active when it was opened; switching tabs never silently changes the source or clears inputs, and closing that source prompts the user to press `Clear` first.
+
+Each compact one-line Column configuration includes Expression, Output Name, Label, Format, Sort, Direction, Report Type, In Report, and an optional division-by-zero post-process. `In Report=Yes` columns are user-named `$200` character display values (for example, `ITEM`). `In Report=No` columns remain visible in the Python Result Tab for QC and can retain numeric/date values for sort, but are excluded from PROC REPORT.
+
+Version 1 supports direct variables, `||`, `CATS`, `CATX`, `STRIP`, `UPCASE`, `LOWCASE`, `SUBSTR`, `SCAN`, `COALESCE`, `COALESCEC`, `PUT`, `INPUT`, and simple arithmetic. Expressions are stored as ASTs shared by the Python reference engine and SAS generator. Numeric values in character concatenation use the variable metadata SAS format when present. `CATX` suppresses missing arguments and their delimiters. For a direct `A / B` expression, the optional post-process returns missing when `B=0` and emits an explanatory SAS comment.
+
+The optional ADSL merge defaults to `USUBJID` and is always a source LEFT merge. ADSL missing BY values are warned and excluded from the merge; source missing BY values remain unmatched; duplicate non-missing ADSL BY values block execution. Keep and Drop are mutually exclusive. Non-BY duplicate variables require Ignore or an explicit Rename such as `AGE=AGE_ADSL`; source values are never silently overwritten. The Data Filter runs after the merge and before derivation, so it may reference selected ADSL variables. Derived columns cannot yet be inputs to other derived expressions or the filter.
+
+Run creates a background, session-temporary SQLite `Listing Result` tab that reuses normal Variables, WHERE, sorting, copying, search, and CSV. There is no separate long result or drill-down because the Listing is already record-level. The result directory includes `listing_config.json` v1 and is removed when the result closes. A real SAS7BDAT/XPT source can use `SAS Code Generator…`; the Jinja2 `listing.sas.j2` template renders merge, filter/derivation, sort, and PROC REPORT. A Merge Result may run the Python Listing but its SAS generator is disabled because it has no real SAS source path. The application previews/saves SAS but never executes it.
 
 ## Rule-based Table module
 
@@ -326,6 +339,7 @@ Keep the EXE and `_internal` directory together. The build is unsigned, so Windo
 ```text
 clinical_data_viewer/
   compare_engine/     streaming grouping, weighted matching, comparison, temp results
+  listing/            Listing config, expression AST, Python reference engine, SQLite result, JSON
   proc_means/         Builder configuration, grouped statistics, SQLite results, JSON
   codegen/sas/        SAS Jinja2 generator and templates
   codegen/r/          R Jinja2 generator and templates

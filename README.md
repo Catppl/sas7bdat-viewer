@@ -26,6 +26,7 @@
 - `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（固定 ADSL）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total 和单元格 drill-down。
 - `Tools > Rule-based Table Builder` 可按多条 Item/Row Filter 生成 distinct `USUBJID` 的临床 `n (%)` 宽表，第一版支持 Population N、Non-missing N 和 Same-universe 三种独立分母，并可从 `View > Open Rule-based Long Result` 打开长表。
 - `Tools > AE Table Builder` 可按 SOC/PT 自动生成 Any AE、System Organ Class 和 Preferred Term 的 distinct `USUBJID` `n (%)` 宽表，同时保存长表、钻取结果和 `ae_table_config.json` v1。
+- `Tools > Listing Generator` 可按“可选 ADSL LEFT merge → Data Filter → derived columns → Sort → PROC REPORT”生成记录级 QC Listing；Python reference result 作为普通临时 Tab 打开，SAS 代码由 Jinja2 模板生成。
 - Settings 可为每项统计量设置相对观测基础精度的 `+0～+4`，最终最多 4 位；表格与 CSV 使用相同 `ROUND_HALF_UP` 显示值，底层 SQLite 保留完整精度。
 - 在行号区域用 `Ctrl+click` 可非连续选择 2–20 行，然后右键 Compare Selected Rows；程序比较所有变量，只在参与比较的行中用浅黄色标出有差异的单元格，并在右侧 Analysis > Row Comparison 列出各行值。
 - `Tools > Compare Datasets` 打开右侧比较面板；Main/QC 可从已打开 Tab 选择，也可 Browse 新的 `.sas7bdat` / `.xpt`。按 Group Variables 分组，以带权 Match Variables、数值 tolerance、Hungarian 全局一对一匹配、threshold 和 ambiguity margin 确定 observation 对应关系；Key Variables 只控制正式差异输出。结果写入会话临时 SQLite，以 Main/QC 相邻行的新 Tab 展示并高亮差异单元格，不生成 SAS 文件。
@@ -278,6 +279,18 @@ Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以�
 支持 `Population N (ADSL)` 和 `Same-universe N` 两种分母，Population WHERE 与 AE Dataset Filter 独立；可选择 Total、Any AE 行和 0–4 位百分比。SOC/PT 按 Total 频数降序、同频时按字母序排列。Subject 计数变量固定为 `USUBJID`。缺失 SOC/PT 默认排除，也可以选择映射为 `Uncoded`；缺失 treatment 会阻止计算。
 
 成功运行后会生成宽表 `AE Table Result` Tab，并在同一临时目录保存 `dataset.sqlite`、`ae_table_config.json` v1 和权威 long result。JSON 中的 `sort` 是可复用的业务 contract：生成的 AE SAS code 会在每次运行时重新计算 SOC/PT 频数并按该规则排序；`resolved_hierarchy` 只记录本次 Python reference run 的行快照，用于审计、调试和验证，不是生成器的固定排序输入。Long Result 保存显式 `TRT_ORDER`，并按 `ROW_ORDER, TRT_ORDER` 展示，避免依赖 SQLite 插入顺序。可用 `View > Open AE Table Long Result` 打开长表；双击 Any AE、SOC 或 PT 的 `n (%)` 单元格可钻取 Numerator Records、Numerator Subjects 或 Denominator Subjects。AE 结果支持现有分页、WHERE、排序、变量选择、复制和 CSV 导出，Merge Result 可以作为 Python AE source；真实 SAS source 可在 Builder 中使用 `SAS Code Generator…`，Merge source 暂不支持 AE SAS code generation。
+
+## Listing Generator 模块
+
+从 `Tools > Listing Generator` 打开。它用于生成轻量的 record-level QC Listing，流程固定为：**Source Dataset → Optional ADSL LEFT Merge → Data Filter → DATA Step columns → PROC SORT → PROC REPORT**。Builder 固定使用打开它时的 source；切换数据 Tab 不会悄悄改 source 或清空输入，关闭该 source 前会提示先按 Builder 的 `Clear`。
+
+每个 Column 以紧凑单行配置：Expression、Output Name、Label、Format、Sort、Direction、Report Type、In Report 与 division-by-zero post-process。`In Report=Yes` 的最终显示列固定为 `$200` character，Output Name 可由用户定义（例如 `ITEM`）；`In Report=No` 的隐藏列仍保留在 Python Result Tab，便于 QC，并可保留 numeric/date raw value 用于排序，但不会进入 PROC REPORT。
+
+v1 支持直接变量、`||`、`CATS`、`CATX`、`STRIP`、`UPCASE`、`LOWCASE`、`SUBSTR`、`SCAN`、`COALESCE`、`COALESCEC`、`PUT`、`INPUT` 与简单算术。表达式保存为 AST，Python reference engine 和 SAS Generator 共用同一语义；numeric 参与字符拼接时优先采用 variable metadata 的 SAS format。`CATX` 会跳过 missing argument 及对应 delimiter；勾选 division post-process 时，直接 `A / B` 的 `B=0` 会返回 missing，生成的 SAS 会标出该规则。
+
+可选 ADSL merge 默认 BY=`USUBJID`，始终是 source LEFT merge：source record 不会因 ADSL 缺失被删除。ADSL 的 missing BY 会警告并不参与合并；source missing BY 会保留但不会匹配；ADSL 非缺失 BY 不唯一会阻止运行。Keep/Drop 互斥；同名 ADSL variables 必须选择 Ignore 或明确 Rename（例如 `AGE=AGE_ADSL`），不会静默覆盖 source。Data Filter 位于 merge 后、derived columns 前，因此可引用已带入的 ADSL variable；derived column 暂不允许作为另一个 derived expression 或 Filter 的输入。
+
+Run 在后台生成会话临时 SQLite `Listing Result` Tab，支持普通 Viewer 的 Variables、WHERE、排序、复制、查找与 CSV；Listing 不另设 drill-down 或 long result，因为它已是 record level。成功 result 的同一临时目录保存 `listing_config.json` v1；关闭 Result Tab 后一起清理。真实 SAS7BDAT/XPT source 可点击 `SAS Code Generator…`，生成的 Jinja2 `listing.sas.j2` 依次包含 merge、filter/derivation、sort 和 `PROC REPORT`；Merge Result 也可运行 Python Listing，但暂不支持生成 SAS（没有真实 source path）。Viewer 只预览/保存 SAS，不执行 SAS。
 
 ## Rule-based Table 模块
 
@@ -693,6 +706,7 @@ Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 ```text
 clinical_data_viewer/
   compare_engine/     分组流式读取、加权成本、Hungarian 匹配、逐变量比较和临时结果
+  listing/            Listing 配置、表达式 AST、Python reference engine、SQLite result 与 JSON
   proc_means/         Builder 配置、分组统计、long-format SQLite 和配置 JSON
   codegen/sas/        SAS Jinja2 生成器与 SAS 专用模板
   codegen/r/          R Jinja2 生成器与 R 专用模板

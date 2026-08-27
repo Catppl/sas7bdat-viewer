@@ -402,6 +402,7 @@ class UiSmokeTests(unittest.TestCase):
             window.show_categorical_builder()
             window.show_rule_based_builder()
             window.show_ae_table_builder()
+            window.show_listing_builder()
 
             window.analysis_panel.builder.analysis_variables.set_variables(("AVAL",))
             window.analysis_panel.categorical_builder.numerator_where.setPlainText(
@@ -411,6 +412,9 @@ class UiSmokeTests(unittest.TestCase):
                 'TRT01A = "A" and AVAL > 0'
             )
             window.analysis_panel.ae_table_builder.dataset_filter.setPlainText(
+                'TRT01A = "A" and AVAL > 0'
+            )
+            window.analysis_panel.listing_builder.data_filter.setPlainText(
                 'TRT01A = "A" and AVAL > 0'
             )
 
@@ -436,6 +440,10 @@ class UiSmokeTests(unittest.TestCase):
                 window.analysis_panel.ae_table_builder.current_filter_text(),
                 'TRT01A = "A" and AVAL > 0',
             )
+            self.assertEqual(
+                window.analysis_panel.listing_builder.data_filter.toPlainText(),
+                'TRT01A = "A" and AVAL > 0',
+            )
 
             with patch(
                 "clinical_data_viewer.ui.main_window.QMessageBox.warning"
@@ -449,6 +457,7 @@ class UiSmokeTests(unittest.TestCase):
                 window.analysis_panel.categorical_builder,
                 window.analysis_panel.rule_based_builder,
                 window.analysis_panel.ae_table_builder,
+                window.analysis_panel.listing_builder,
             ):
                 builder.clear()
             self.assertTrue(
@@ -676,6 +685,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertIn("Analysis", tools_actions)
             self.assertIn("PROC MEANS Builder", tools_actions)
             self.assertIn("Categorical Table Builder", tools_actions)
+            self.assertIn("Listing Generator", tools_actions)
             view_actions = [
                 action.text()
                 for action in window.menuBar().actions()[2].menu().actions()
