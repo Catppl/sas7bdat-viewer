@@ -132,28 +132,68 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
     def setUp(self) -> None:
         self.generator = SasRuleBasedGenerator()
 
-    def test_complete_configuration_renders_readable_stable_code(self) -> None:
+    def test_template_renders_row_counts_then_set_then_display(self) -> None:
         code = self.generator.generate(_base_configuration())
+
         self.assertIn("Reference engine: python_rule_based_v1", code)
         self.assertIn(r"libname analysis 'C:\project\data';", code)
         self.assertIn("set analysis.adae;", code)
-        self.assertIn("where TRTEMFL = 'Y';", code)
-        self.assertIn("if not (AESER = 'Y') then delete;", code)
-        self.assertIn("count(distinct USUBJID)", code)
-        self.assertIn("display = '0 (—)';", code)
-        self.assertIn("round(pct, 0.1)", code)
-        self.assertIn("label TRT_1='Drug B n (%)';", code)
-        self.assertIn("label TRT_2='Placebo n (%)';", code)
-        self.assertIn("label TRT_3='Drug A n (%)';", code)
-        self.assertIn(
-            "case when items.indent > 0\n"
-            "                 then repeat(' ', items.indent * 4 - 1)",
-            code,
-        )
-        self.assertLess(code.index("label TRT_1"), code.index("label TRT_2"))
-        self.assertLess(code.index("label TRT_2"), code.index("label TRT_3"))
-        self.assertIn("as TOTAL length=200", code)
-        self.assertNotIn("sum(treatment", code.casefold())
+        self.assertIn("if not (TRTEMFL = 'Y') then delete;", code)
+        self.assertIn("data rb_src;", code)
+        self.assertIn("create table denom as", code)
+        self.assertIn("create table row1 as", code)
+        self.assertIn("create table row2 as", code)
+        self.assertIn("from row2_src(where=(AESER = 'Y'))", code)
+        self.assertIn("data counts;", code)
+        self.assertIn("set\n        row1\n        row2", code)
+        self.assertIn("data work.rule_based_result;", code)
+        self.assertIn("length col1-col4 $200;", code)
+        self.assertIn("keep item col1-col4;", code)
+        self.assertIn("label", code)
+        self.assertIn("col1 = 'Drug B n (%)'", code)
+        self.assertIn("col2 = 'Placebo n (%)'", code)
+        self.assertIn("col3 = 'Drug A n (%)'", code)
+        self.assertIn("col4 = 'Total n (%)'", code)
+        self.assertNotIn("rb_long", code)
+        self.assertNotIn("long_branches", code)
+        self.assertNotIn("union all", code.casefold())
+        self.assertNotIn("group by", code.casefold())
+        self.assertNotIn("TRT_1", code)
+        self.assertNotIn("as TOTAL", code)
+
+        self.assertLess(code.index("create table row1 as"), code.index("data counts;"))
+        self.assertLess(code.index("data counts;"), code.index("data work.rule_based_result;"))
+
+        count_lines = [
+            line.strip() for line in code.splitlines() if "count(distinct" in line
+        ]
+        self.assertTrue(count_lines)
+        self.assertTrue(all("end)) as" in line for line in count_lines))
+
+    def test_conditional_counts_preserve_resolved_treatment_order_and_total_semantics(
+        self,
+    ) -> None:
+        code = self.generator.generate(_base_configuration())
+
+        expected_counts = [
+            "count(distinct (case when TRT01A = 'Drug B' then USUBJID end)) as count1,",
+            "count(distinct (case when TRT01A = 'Placebo' then USUBJID end)) as count2,",
+            "count(distinct (case when TRT01A = 'Drug A' then USUBJID end)) as count3,",
+            "count(distinct (case when not missing(TRT01A) then USUBJID end)) as count4",
+        ]
+        for expression in expected_counts:
+            self.assertGreaterEqual(code.count(expression), 1)
+
+        expected_denoms = [
+            "count(distinct (case when TRT01A = 'Drug B' then USUBJID end)) as denom1,",
+            "count(distinct (case when TRT01A = 'Placebo' then USUBJID end)) as denom2,",
+            "count(distinct (case when TRT01A = 'Drug A' then USUBJID end)) as denom3,",
+            "count(distinct (case when not missing(TRT01A) then USUBJID end)) as denom4",
+        ]
+        for expression in expected_denoms:
+            self.assertIn(expression, code)
+        self.assertNotIn("sum(count", code.casefold())
+        self.assertNotIn("sum(denom", code.casefold())
 
     def test_filters_are_rendered_from_ast_and_character_quotes_are_escaped(
         self,
@@ -178,7 +218,10 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             'TRTEMFL = "Y" and TRT01A in ("A", "B")',
         )
         code = self.generator.generate(configuration)
-        self.assertIn("where (TRTEMFL = 'Y' and TRT01A in ('A', 'B'));", code)
+        self.assertIn(
+            "if not ((TRTEMFL = 'Y' and TRT01A in ('A', 'B'))) then delete;",
+            code,
+        )
         self.assertIn("'Patient''s TEAE'", code)
         self.assertNotIn('TRTEMFL = "Y"', code)
 
@@ -207,11 +250,15 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             }
         )
         code = self.generator.generate(configuration)
-        self.assertIn("where (TRTEMFL ne 'Y' or AVAL between 1 and 3);", code)
         self.assertIn(
-            "if not ((AEDECOD =: 'HEAD' and missing(AESER))) then delete;", code
+            "if not ((TRTEMFL ne 'Y' or AVAL between 1 and 3)) then delete;",
+            code,
         )
-        self.assertNotIn("and (AEDECOD =: 'HEAD'", code)
+        self.assertIn(
+            "from row1_src(where=((AEDECOD =: 'HEAD' and missing(AESER))))",
+            code,
+        )
+        self.assertNotIn("where (TRTEMFL ne 'Y'", code)
 
     def test_empty_treatment_levels_without_total_still_emit_rule_rows(self) -> None:
         configuration = _base_configuration()
@@ -221,11 +268,36 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             "method": "recompute_distinct_subjects",
         }
         code = self.generator.generate(configuration)
-        self.assertIn("create table rb_items as", code)
-        self.assertIn("data rb_long;", code)
-        self.assertIn("create table work.rule_based_result as", code)
-        self.assertNotIn("as TRT_1", code)
-        self.assertNotIn("create table rb_long as\n    ;", code)
+        self.assertIn("data denom;", code)
+        self.assertIn("select distinct", code)
+        self.assertIn("data counts;", code)
+        self.assertIn("keep item;", code)
+        self.assertNotIn("array cnt", code)
+        self.assertNotIn("col1", code)
+        self.assertNotIn("rb_long", code)
+
+    def test_empty_treatment_levels_with_total_emit_a_valid_total_column(self) -> None:
+        configuration = _base_configuration()
+        configuration["treatment"]["resolved_levels"] = []
+        code = self.generator.generate(configuration)
+
+        total_expression = (
+            "count(distinct (case when not missing(TRT01A) then USUBJID end))"
+        )
+        self.assertIn(f"{total_expression} as denom1", code)
+        self.assertIn(f"{total_expression} as count1", code)
+        self.assertIn("length col1-col1 $200;", code)
+        self.assertIn("col1 = 'Total n (%)'", code)
+        self.assertNotIn("col2", code)
+
+    def test_same_universe_denominator_does_not_use_row_filter(self) -> None:
+        configuration = _base_configuration()
+        code = self.generator.generate(configuration)
+        denominator_section = code.split("/* Calculate denominators", 1)[1].split(
+            "quit;", 1
+        )[0]
+        self.assertIn("from rb_src", denominator_section)
+        self.assertNotIn("AESER", denominator_section)
 
     def test_percent_digits_zero_and_two_are_rendered(self) -> None:
         for digits, increment in ((0, "1"), (2, "0.01")):
@@ -233,7 +305,7 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
                 configuration = _base_configuration()
                 configuration["display"]["percent_digits"] = digits
                 code = self.generator.generate(configuration)
-                self.assertIn(f"round(pct, {increment})", code)
+                self.assertIn(f"round(_pct, {increment})", code)
                 self.assertIn(f"32.{digits}", code)
 
     def test_numeric_treatment_literals_and_order_are_preserved(self) -> None:
@@ -265,18 +337,15 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             "method": "recompute_distinct_subjects",
         }
         code = self.generator.generate(configuration)
-        self.assertIn("if missing(TRT01AN)", code)
-        self.assertIn("2 as trt_value", code)
-        self.assertIn("1 as trt_value", code)
+        self.assertIn("TRT01AN = 2", code)
+        self.assertIn("TRT01AN = 1", code)
         self.assertLess(
-            code.index("label TRT_1='Drug B n (%)'"),
-            code.index("label TRT_2='Placebo n (%)'"),
+            code.index("col1 = 'Drug B n (%)'"),
+            code.index("col2 = 'Placebo n (%)'"),
         )
-        self.assertNotIn("as TOTAL length=200", code)
+        self.assertNotIn("as TOTAL", code)
 
-    def test_population_denominator_is_independent_and_uses_population_member(
-        self,
-    ) -> None:
+    def test_population_denominator_is_independent_and_uses_pop_libref(self) -> None:
         configuration = _base_configuration()
         configuration["denominator"] = {
             "type": "population",
@@ -307,16 +376,17 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             },
         }
         code = self.generator.generate(configuration)
-        self.assertIn(r"libname population xport 'C:\project\data\adsl.xpt';", code)
-        self.assertIn("set population.ADSL;", code)
-        self.assertIn("where TRT_POP = 'A';", code)
+        self.assertIn(r"libname pop xport 'C:\project\data\adsl.xpt';", code)
+        self.assertNotIn("libname population", code)
+        self.assertIn("set pop.ADSL;", code)
+        self.assertIn("if not (TRT_POP = 'A') then delete;", code)
         self.assertIn("if missing(TRT_POP)", code)
-        self.assertIn("select TRT_POP as trt_value", code)
-        self.assertIn("from rb_population", code)
-        denominator_section = code.split("/* Denominator counts", 1)[1].split(
+        self.assertIn("from rb_pop", code)
+        denominator_section = code.split("/* Calculate denominators", 1)[1].split(
             "quit;", 1
         )[0]
-        self.assertNotIn("AESER = 'Y'", denominator_section)
+        self.assertIn("TRT_POP", denominator_section)
+        self.assertNotIn("TRTEMFL", denominator_section)
 
     def test_nonmissing_denominator_has_analysis_value_condition(self) -> None:
         configuration = _base_configuration()
@@ -325,11 +395,27 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             "analysis_value_variable": "AVAL",
         }
         code = self.generator.generate(configuration)
-        denominator_section = code.split("/* Denominator counts", 1)[1].split(
+        denominator_section = code.split("/* Calculate denominators", 1)[1].split(
             "quit;", 1
         )[0]
-        self.assertIn("not missing(AVAL)", code)
+        self.assertIn("not missing(AVAL)", denominator_section)
         self.assertIn("not missing(USUBJID)", denominator_section)
+
+    def test_xpt_source_uses_xport_libname(self) -> None:
+        configuration = _base_configuration()
+        configuration["input"] = copy.deepcopy(configuration["input"])
+        configuration["input"]["format"] = "xpt"
+        configuration["input"]["source_path"] = r"C:\project\data\adae.xpt"
+        code = self.generator.generate(configuration)
+        self.assertIn(r"libname analysis xport 'C:\project\data\adae.xpt';", code)
+
+    def test_resolved_hierarchy_is_ignored_by_generator(self) -> None:
+        configuration = _base_configuration()
+        configuration["resolved_hierarchy"] = [
+            {"item": "This must not become a generated row"}
+        ]
+        code = self.generator.generate(configuration)
+        self.assertNotIn("This must not become a generated row", code)
 
     def test_validation_rejects_unsupported_contracts_and_merge_sources(self) -> None:
         cases = [

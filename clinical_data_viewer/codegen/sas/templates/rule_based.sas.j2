@@ -10,29 +10,31 @@
    Percent digits: {{ digits }}
 */
 options validvarname=any;
+
+/* Prepare source data */
 {% if source.format == "xpt" %}
 libname {{ source_library }} xport {{ source.source_path | sas_string }};
 {% else %}
 libname {{ source_library }} {{ source.source_directory | sas_string }};
 {% endif %}
-{% if denominator.type == "population" %}
-{% if denominator.population.input.format == "xpt" %}
-libname population xport {{ denominator.population.input.source_path | sas_string }};
-{% else %}
-libname population {{ denominator.population.input.source_directory | sas_string }};
-{% endif %}
-{% endif %}
 
 data {{ work_source }};
     set {{ source_reference }};
-{% if dataset_filter %}    where {{ dataset_filter }};
+{% if dataset_filter %}    if not ({{ dataset_filter }}) then delete;
 {% endif %}run;
 
-/* Treatment missing validation is intentionally performed before counting. */
+/* Validate treatment values in each configured analysis universe */
 {% for row in rows %}
+{% if row.has_filter %}
 data {{ row.source_member }};
     set {{ work_source }};
-{% if row.filter %}    if not ({{ row.filter }}) then delete;
+run;
+
+data _null_;
+    set {{ row.source_member }}(where=({{ row.filter }}));
+{% else %}
+data _null_;
+    set {{ work_source }};
 {% endif %}    if missing({{ treatment }}) then do;
         put "ERROR: Rule-based row {{ row.id }} ({{ row.item | replace('"', '""') }}) contains missing treatment values.";
         abort cancel;
@@ -40,9 +42,16 @@ data {{ row.source_member }};
 run;
 {% endfor %}
 {% if denominator.type == "population" %}
+/* Prepare the independent population denominator */
+{% if denominator.population.input.format == "xpt" %}
+libname pop xport {{ denominator.population.input.source_path | sas_string }};
+{% else %}
+libname pop {{ denominator.population.input.source_directory | sas_string }};
+{% endif %}
+
 data {{ work_population }};
-    set population.{{ denominator.population.member }};
-{% if denominator.population.filter %}    where {{ denominator.population.filter }};
+    set pop.{{ denominator.population.member }};
+{% if denominator.population.filter %}    if not ({{ denominator.population.filter }}) then delete;
 {% endif %}run;
 
 data _null_;
@@ -54,113 +63,94 @@ data _null_;
 run;
 {% endif %}
 
-/* Denominator counts: Row Filters are deliberately not applied here. */
+/* Calculate denominators.  Row Filters are deliberately not applied here. */
+{% if output_columns %}
 proc sql;
     create table {{ work_denominator }} as
-    select {% if denominator.type == "population" %}{{ denominator.population.treatment }}{% else %}{{ treatment }}{% endif %} as trt_value,
-           count(distinct {{ subject }}) as denom
-    from {% if denominator.type == "population" %}{{ work_population }}{% else %}{{ work_source }}{% endif %}
-    where not missing({{ subject }}){% if denominator.type == "nonmissing" %}
-      and not missing({{ denominator.analysis_value }}){% endif %}
-    group by {% if denominator.type == "population" %}{{ denominator.population.treatment }}{% else %}{{ treatment }}{% endif %};
-    create table {{ work_denominator_total }} as
-    select count(distinct {{ subject }}) as denom
-    from {% if denominator.type == "population" %}{{ work_population }}{% else %}{{ work_source }}{% endif %}
-    where not missing({{ subject }}){% if denominator.type == "nonmissing" %}
+    select
+{% for level in levels %}        count(distinct (case when {{ denominator_treatment }} = {{ level.literal }} then {{ denominator_subject }} end)) as denom{{ level.order }}{% if not loop.last or total_enabled %},{% endif %}
+{% endfor %}{% if total_enabled %}        count(distinct (case when not missing({{ denominator_treatment }}) then {{ denominator_subject }} end)) as denom{{ total_order }}
+{% endif %}    from {{ denominator_source }}
+    where not missing({{ denominator_subject }}){% if denominator.type == "nonmissing" %}
       and not missing({{ denominator.analysis_value }}){% endif %};
 quit;
-{% for row in rows %}
-proc sql;
-    create table {{ row.member }} as
-    select {{ treatment }} as trt_value,
-           count(distinct {{ subject }}) as freq
-    from {{ row.source_member }}
-    where not missing({{ subject }})
-    group by {{ treatment }};
-    create table {{ row.member }}_total as
-    select count(distinct {{ subject }}) as freq
-    from {{ row.source_member }}
-    where not missing({{ subject }});
-quit;
-{% endfor %}
-
-/* Keep one output row per configured rule, including an empty treatment universe. */
-proc sql;
-    create table {{ work_items }} as
-{% for row in rows %}    select {{ row.order }} as row_order,
-           {{ row.item | sas_string }} as item length=1024,
-           {{ row.indent }} as indent
-    from dictionary.tables(obs=1)
-{% if not loop.last %}    union all
-{% endif %}{% endfor %};
-quit;
-
-/* Long trace table preserves row order, treatment order, and numeric values. */
-{% if long_branches %}
-proc sql;
-    create table {{ work_long }} as
-{% for branch in long_branches %}    select {{ branch.row.order }} as row_order,
-           {{ branch.row.id | sas_string }} as row_id length=64,
-           {{ branch.row.item | sas_string }} as item length=1024,
-           {{ branch.row.indent }} as indent,
-           {{ branch.order }} as trt_order,
-           {{ branch.literal }} as trt_value{% if treatment_kind == "character" %} length=200{% endif %},
-           {{ branch.label | sas_string }} as trt_label length=200,
-           {% if branch.total %}coalesce((select freq from {{ branch.frequency_table }}), 0){% else %}coalesce((select freq from {{ branch.frequency_table }} where trt_value = {{ branch.literal }}), 0){% endif %} as freq,
-           {% if branch.total %}coalesce((select denom from {{ work_denominator_total }}), 0){% else %}coalesce((select denom from {{ work_denominator }} where trt_value = {{ branch.literal }}), 0){% endif %} as denom
-    from dictionary.tables(obs=1)
-{% if not loop.last %}    union all
-{% endif %}{% endfor %};
-quit;
 {% else %}
-data {{ work_long }};
-    length row_order 8 row_id $64 item $1024 indent 8 trt_order 8
-           trt_value $200 trt_label $200 freq 8 denom 8;
-    stop;
+data {{ work_denominator }};
+    _denom = 0;
 run;
 {% endif %}
 
-data {{ work_long }};
-    set {{ work_long }};
-    length display $200;
-    if denom = 0 then do;
-        pct = .;
-        display = '0 (—)';
-    end;
-    else do;
-        pct = freq / denom * 100;
-        display = cats(strip(put(freq, best.)), ' (',
-            strip(put(round(pct, {{ round_increment }}), 32.{{ digits }})), ')');
-    end;
+/* Calculate each configured Rule row independently */
+{% for row in rows %}
+/* Row {{ row.order }}: {{ row.item }} */
+proc sql;
+    create table {{ row.member }} as
+{% if output_columns %}    select
+        {{ row.display_item | sas_string }} as item length=200,
+{% for level in levels %}        count(distinct (case when {{ treatment }} = {{ level.literal }} then {{ subject }} end)) as count{{ level.order }}{% if not loop.last or total_enabled %},{% endif %}
+{% endfor %}{% if total_enabled %}        count(distinct (case when not missing({{ treatment }}) then {{ subject }} end)) as count{{ total_order }}
+{% endif %}    from {% if row.has_filter %}{{ row.source_member }}(where=({{ row.filter }})){% else %}{{ work_source }}{% endif %}
+    where not missing({{ subject }});
+{% else %}    select distinct
+        {{ row.display_item | sas_string }} as item length=200
+    from dictionary.tables(obs=1);
+{% endif %}quit;
+{% endfor %}
+
+/* Combine all row counts before calculating percentages */
+data {{ work_counts }};
+    set
+{% for row in rows %}        {{ row.member }}
+{% endfor %}    ;
 run;
 
-proc sql;
-    create table {{ output_dataset }} as
-    select (case when items.indent > 0
-                 then repeat(' ', items.indent * 4 - 1)
-                 else '' end) || strip(items.item) as ITEM length=1024
-{% for level in levels %}        ,max(case when trt_order = {{ loop.index }} then display else '' end) as TRT_{{ loop.index }} length=200
-{% endfor %}{% if total_enabled %}        ,max(case when trt_order = {{ levels | length + 1 }} then display else '' end) as TOTAL length=200
-{% endif %}    from {{ work_items }} as items
-    left join {{ work_long }} as long
-      on long.row_order = items.row_order
-    group by items.row_order, items.item, items.indent
-    order by items.row_order;
-quit;
-
+/* Calculate n (%) once, after all rows have been combined */
 data {{ output_dataset }};
-    set {{ output_dataset }};
-{% for level in levels %}    label TRT_{{ loop.index }}={{ (level.label ~ ' n (%)') | sas_string }};
-{% endfor %}{% if total_enabled %}    label TOTAL='Total n (%)';
+{% if output_columns %}    if _n_ = 1 then set {{ work_denominator }};
+{% endif %}    set {{ work_counts }};
+{% if output_columns %}
+    length col1-col{{ output_columns }} $200;
+
+    array cnt {*} count1-count{{ output_columns }};
+    array den {*} denom1-denom{{ output_columns }};
+    array col {*} $ col1-col{{ output_columns }};
+
+    do i = 1 to dim(cnt);
+        if den{i} = 0 then
+            col{i} = '0 (—)';
+        else do;
+            _pct = cnt{i} / den{i} * 100;
+            col{i} = cats(
+                strip(put(cnt{i}, best32.)),
+                ' (',
+                strip(put(round(_pct, {{ round_increment }}), 32.{{ digits }})),
+                ')'
+            );
+        end;
+    end;
+
+    label
+{% for level in levels %}        col{{ level.order }} = {{ (level.label ~ " n (%)") | sas_string }}
+{% endfor %}{% if total_enabled %}        col{{ total_order }} = 'Total n (%)'
+{% endif %}    ;
+
+    keep item col1-col{{ output_columns }};
+{% else %}
+    keep item;
 {% endif %}run;
 
+/* Clean up intermediate WORK tables */
 proc datasets library=work nolist;
-    delete {{ work_source }} {{ work_items }} {{ work_long }} {{ work_denominator }} {{ work_denominator_total }}
-{% if denominator.type == "population" %}           {{ work_population }}
-{% endif %}{% for row in rows %}           {{ row.source_member }} {{ row.member }} {{ row.member }}_total
-{% endfor %}           ;
+    delete
+        {{ work_source }}
+{% if denominator.type == "population" %}        {{ work_population }}
+{% endif %}{% for row in rows %}{% if row.has_filter %}        {{ row.source_member }}
+{% endif %}        {{ row.member }}
+{% endfor %}        {{ work_counts }}
+        {{ work_denominator }}
+    ;
 quit;
 {% if denominator.type == "population" %}
-libname population clear;
+libname pop clear;
 {% endif %}
 libname {{ source_library }} clear;

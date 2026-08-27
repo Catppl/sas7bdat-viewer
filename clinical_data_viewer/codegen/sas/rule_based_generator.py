@@ -254,6 +254,7 @@ class SasRuleBasedGenerator:
             literal = _sas_literal(value, treatment_kind, "treatment level value")
             levels.append(
                 {
+                    "order": len(levels) + 1,
                     "value": value,
                     "label": str(level_mapping["label"]),
                     "literal": literal,
@@ -263,13 +264,19 @@ class SasRuleBasedGenerator:
         rows_value = configuration["rows"]
         if not isinstance(rows_value, list) or not rows_value:
             raise ValueError("Rule-based configuration rows must be a non-empty array.")
+        denominator = _mapping(configuration["denominator"], "denominator")
         used_members: set[str] = set()
-        work_source = _work_member("rb_source", used_members)
-        work_population = _work_member("rb_population", used_members)
-        work_items = _work_member("rb_items", used_members)
-        work_long = _work_member("rb_long", used_members)
-        work_denominator = _work_member("rb_denominator", used_members)
-        work_denominator_total = _work_member("rb_denominator_total", used_members)
+        # Keep generated WORK members short and descriptive.  The program
+        # header documents the real source, so repeating it in every member
+        # name only makes the generated SAS harder to read.
+        work_source = _work_member("rb_src", used_members)
+        work_population = (
+            _work_member("rb_pop", used_members)
+            if denominator.get("type") == "population"
+            else ""
+        )
+        work_denominator = _work_member("denom", used_members)
+        work_counts = _work_member("counts", used_members)
         rows: list[dict[str, object]] = []
         row_ids: set[str] = set()
         for index, row in enumerate(rows_value, start=1):
@@ -295,16 +302,16 @@ class SasRuleBasedGenerator:
                     "order": index,
                     "id": row_id,
                     "item": item,
+                    "display_item": (" " * (indent * 4)) + item,
                     "indent": indent,
                     "filter": _filter_text(
                         row_mapping.get("filter"), f"rows[{index - 1}].filter"
                     ),
-                    "source_member": _work_member(f"rb_{row_id}_source", used_members),
-                    "member": _work_member(f"rb_{row_id}", used_members),
+                    "source_member": _work_member(f"row{index}_src", used_members),
+                    "member": _work_member(f"row{index}", used_members),
                 }
             )
 
-        denominator = _mapping(configuration["denominator"], "denominator")
         denominator_type = denominator.get("type")
         if denominator_type not in {"same_universe", "nonmissing", "population"}:
             raise ValueError(
@@ -381,62 +388,51 @@ class SasRuleBasedGenerator:
         source_reference = _validate_dataset_reference(
             f"{source_library}.{source_member}", "targets.sas source"
         )
-        long_branches: list[dict[str, object]] = []
+
+        output_columns = len(levels) + (1 if total["enabled"] else 0)
         for row in rows:
-            for order, level in enumerate(levels, start=1):
-                long_branches.append(
-                    {
-                        "row": row,
-                        "order": order,
-                        "value": level["value"],
-                        "literal": level["literal"],
-                        "label": level["label"],
-                        "frequency_table": row["member"],
-                        "total": False,
-                    }
-                )
-            if total["enabled"]:
-                long_branches.append(
-                    {
-                        "row": row,
-                        "order": len(levels) + 1,
-                        "value": None,
-                        "literal": "''" if treatment_kind == "character" else ".",
-                        "label": "Total",
-                        "frequency_table": f"{row['member']}_total",
-                        "total": True,
-                    }
-                )
+            # The row source is intentionally a lightweight copy of rb_src.
+            # The actual row filter is attached to the FROM item in the
+            # template, keeping the SQL aggregate itself easy to read.
+            row["has_filter"] = bool(row["filter"])
+
+        denominator_source = (
+            work_population if denominator_type == "population" else work_source
+        )
+        denominator_treatment = (
+            denominator_context["population"]["treatment"]
+            if denominator_type == "population"
+            else sas_name(treatment_variable)
+        )
 
         return {
             "version": 1,
             "source": input_block,
             "source_reference": source_reference,
             "source_library": str(source_library),
-            "source_member": str(source_member),
             "dataset_filter": _filter_text(
                 configuration["dataset_filter"], "dataset_filter"
             ),
             "treatment": sas_name(treatment_variable),
-            "treatment_variable": treatment_variable,
             "subject": sas_name("USUBJID"),
             "levels": levels,
             "rows": rows,
-            "long_branches": long_branches,
             "denominator": denominator_context,
+            "denominator_source": denominator_source,
+            "denominator_treatment": denominator_treatment,
+            "denominator_subject": sas_name("USUBJID"),
             "total_enabled": total["enabled"],
+            "total_order": len(levels) + 1,
+            "output_columns": output_columns,
             "digits": digits,
-            "round_increment": 10 ** (-digits),
+            "round_increment": (
+                "1" if digits == 0 else f"{10 ** (-digits):.{digits}f}"
+            ),
             "output_dataset": output_dataset,
             "work_source": work_source,
             "work_population": work_population,
-            "work_items": work_items,
-            "work_long": work_long,
             "work_denominator": work_denominator,
-            "work_denominator_total": work_denominator_total,
-            "sas_string": sas_string,
-            "sas_name": sas_name,
-            "treatment_kind": treatment_kind,
+            "work_counts": work_counts,
         }
 
     def generate(self, configuration: dict[str, object]) -> str:
