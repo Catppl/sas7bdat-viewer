@@ -220,12 +220,15 @@ class AeSasGeneratorTests(unittest.TestCase):
         self.assertIn("label col%eval(&ntrt + 1) = 'Total n (%)';", code)
 
     def test_codegen_path_does_not_resolve_python_treatment_levels(self):
-        main_window = (
-            Path(__file__).parents[1] / "clinical_data_viewer" / "ui" / "main_window.py"
+        controller = (
+            Path(__file__).parents[1]
+            / "clinical_data_viewer"
+            / "controllers"
+            / "analysis_controller.py"
         )
-        source = main_window.read_text(encoding="utf-8")
-        section = source.split("def _generate_ae_table_sas_code", 1)[1].split(
-            "def _rule_based_builder_context", 1
+        source = controller.read_text(encoding="utf-8")
+        section = source.split("def generate_ae_table_sas_code", 1)[1].split(
+            "def drilldown_ae_table", 1
         )[0]
         self.assertNotIn("resolve_treatment_levels", section)
 

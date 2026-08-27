@@ -69,6 +69,9 @@ class AnalysisControllerTests(unittest.TestCase):
             def browse_rule_based_adsl_dataset(self):
                 return None
 
+            def browse_ae_table_adsl_dataset(self):
+                return None
+
             def unique_analysis_tab_title(self, base):
                 return base
 
@@ -193,6 +196,9 @@ class AnalysisControllerTests(unittest.TestCase):
             def browse_rule_based_adsl_dataset(self):
                 return None
 
+            def browse_ae_table_adsl_dataset(self):
+                return None
+
             def unique_analysis_tab_title(self, base):
                 return base
 
@@ -265,6 +271,136 @@ class AnalysisControllerTests(unittest.TestCase):
 
             panel.rule_based_builder.clear()
             self.assertIsNone(controller.rule_based_source)
+            panel.deleteLater()
+
+    def test_ae_table_binding_close_blocker_and_result_release_paths(self) -> None:
+        """AE Table lifecycle state is owned by AnalysisController."""
+        from clinical_data_viewer.ae_table import AeTableConfig
+        from clinical_data_viewer.controllers.analysis_controller import (
+            AeTableResultContext,
+            AnalysisController,
+        )
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.analysis_panel import AnalysisPanel
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+
+        class Host:
+            def __init__(self, active, open_tabs):
+                self.active = active
+                self.open_tabs = open_tabs
+
+            def current_dataset_tab(self):
+                return self.active
+
+            def is_open_dataset_tab(self, tab):
+                return tab in self.open_tabs
+
+            def available_sas_dataset_tabs(self):
+                return [(tab, tab.handle.metadata.name) for tab in self.open_tabs]
+
+            def create_analysis_result_tab(self, handle):
+                return DatasetTab(handle, 100)
+
+            def show_analysis_result_tab(self, tab, title):
+                return None
+
+            def submit_analysis_task(self, owner, function, completed, failed):
+                return None
+
+            def retain_analysis_directory(self, path):
+                return None
+
+            def show_analysis_error(self, title, message, details=""):
+                return None
+
+            def browse_listing_adsl_dataset(self):
+                return None
+
+            def browse_rule_based_adsl_dataset(self):
+                return None
+
+            def browse_ae_table_adsl_dataset(self):
+                return None
+
+            def unique_analysis_tab_title(self, base):
+                return base
+
+            def discard_analysis_result(self, handle):
+                return None
+
+            def set_analysis_task_status(self, text):
+                return None
+
+        def make_tab(root: Path, name: str) -> DatasetTab:
+            temporary = root / name
+            temporary.mkdir()
+            handle = DatasetHandle(
+                root / f"{name}.sas7bdat",
+                temporary / f"{name}.sas7bdat",
+                temporary / "dataset.sqlite",
+                DatasetMetadata(
+                    name.upper(),
+                    1,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("TRT01A"),
+                        VariableMetadata("AEBODSYS"),
+                        VariableMetadata("AEDECOD"),
+                    ),
+                ),
+                1,
+                True,
+            )
+            return DatasetTab(handle, 100)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, other, adsl, result = (
+                make_tab(root, "adae"),
+                make_tab(root, "adlb"),
+                make_tab(root, "adsl"),
+                make_tab(root, "ae-result"),
+            )
+            host = Host(source, {source, other, adsl, result})
+            panel = AnalysisPanel()
+            controller = AnalysisController(host, panel, TempManager(root / "temp"))
+
+            controller.show_ae_table_builder()
+            host.active = other
+            controller.show_ae_table_builder()
+            self.assertIs(controller.ae_table_source, source)
+            self.assertEqual(
+                panel.ae_table_builder.source_label.text(),
+                "Source: " + str(source.handle.source_path),
+            )
+
+            controller._ae_table_input_tabs.add(source)
+            blocker = controller.tab_close_blocker(source)
+            self.assertIsNotNone(blocker)
+            self.assertEqual(blocker.title, "AE Table Running")
+            controller._ae_table_input_tabs.clear()
+
+            controller._ae_table_results[result] = AeTableResultContext(
+                source.handle,
+                adsl.handle,
+                AeTableConfig("AEBODSYS", "AEDECOD", "TRT01A"),
+            )
+            self.assertEqual(
+                set(controller.take_result_release_paths(result)),
+                {
+                    source.handle.temporary_path.parent,
+                    adsl.handle.temporary_path.parent,
+                },
+            )
+            self.assertEqual(controller.take_result_release_paths(result), ())
+
+            panel.ae_table_builder.clear()
+            self.assertIsNone(controller.ae_table_source)
             panel.deleteLater()
 
 
