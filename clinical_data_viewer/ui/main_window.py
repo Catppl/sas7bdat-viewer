@@ -50,19 +50,17 @@ from ..codegen import build_proc_means_configuration
 from ..codegen.r import RProcMeansGenerator
 from ..codegen.sas import (
     SasAeTableGenerator,
-    SasListingGenerator,
     SasProcMeansGenerator,
     SasRuleBasedGenerator,
 )
 from ..compare_engine import DatasetComparer, recommend_group_variables
+from ..controllers import AnalysisController
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
 from ..dataset_utils import is_analysis_dataset
 from ..domain import CacheProgress, DatasetHandle
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
-from ..listing import ListingConfig, ListingEngine
-from ..listing.configuration import build_listing_configuration
 from ..merge_datasets import MergeDatasetsEngine
 from ..proc_means import (
     ProcMeansConfig,
@@ -101,7 +99,6 @@ from .dataset_compare_panel import DatasetComparePanel
 from .dataset_merge_panel import DatasetMergePanel
 from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
-from .listing_builder import ListingBuilderSelection
 from .rule_based_builder import RuleBasedBuilderSelection
 from .sas_code_dialog import RCodeDialog, SasCodeDialog
 from .settings_dialog import SettingsDialog
@@ -157,13 +154,6 @@ class AeTableResultContext:
     config: AeTableConfig
 
 
-@dataclass(frozen=True, slots=True)
-class ListingResultContext:
-    source: DatasetHandle
-    adsl: DatasetHandle | None
-    config: ListingConfig
-
-
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -182,7 +172,6 @@ class MainWindow(QMainWindow):
         self.proc_means_engine = ProcMeansEngine(temp_manager)
         self.categorical_engine = CategoricalEngine(temp_manager)
         self.ae_table_engine = AeTableEngine(temp_manager)
-        self.listing_engine = ListingEngine(temp_manager)
         self.ae_table_long_result_builder = AeTableLongResultBuilder(temp_manager)
         self.categorical_long_result_builder = CategoricalLongResultBuilder(
             temp_manager
@@ -194,7 +183,6 @@ class MainWindow(QMainWindow):
         self.sas_proc_means_generator = SasProcMeansGenerator()
         self.sas_rule_based_generator = SasRuleBasedGenerator()
         self.sas_ae_table_generator = SasAeTableGenerator()
-        self.sas_listing_generator = SasListingGenerator()
         self.r_proc_means_generator = RProcMeansGenerator()
         self.store = DataStore()
         self.exporter = CsvExporter()
@@ -209,7 +197,6 @@ class MainWindow(QMainWindow):
         self._categorical_input_tabs: set[DatasetTab] = set()
         self._rule_based_input_tabs: set[DatasetTab] = set()
         self._ae_table_input_tabs: set[DatasetTab] = set()
-        self._listing_input_tabs: set[DatasetTab] = set()
         self._merge_input_tabs: set[DatasetTab] = set()
         # Each Builder is deliberately bound to the dataset that was active
         # when the user opened it.  Tab navigation must never silently change
@@ -219,13 +206,11 @@ class MainWindow(QMainWindow):
             "categorical": None,
             "rule_based": None,
             "ae_table": None,
-            "listing": None,
         }
         self._proc_means_sources: dict[DatasetTab, ProcMeansResultContext] = {}
         self._categorical_sources: dict[DatasetTab, CategoricalResultContext] = {}
         self._rule_based_sources: dict[DatasetTab, RuleBasedResultContext] = {}
         self._ae_table_sources: dict[DatasetTab, AeTableResultContext] = {}
-        self._listing_sources: dict[DatasetTab, ListingResultContext] = {}
         self._merge_sources: dict[DatasetTab, MergeResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
         self._deferred_directory_removals: set[Path] = set()
@@ -241,6 +226,9 @@ class MainWindow(QMainWindow):
         self._create_center()
         self._create_variables_panel()
         self._create_analysis_panel()
+        self.analysis_controller = AnalysisController(
+            self, self.analysis_panel, temp_manager, self
+        )
         self._create_compare_panel()
         self._create_merge_panel()
         self._create_status_bar()
@@ -503,19 +491,6 @@ class MainWindow(QMainWindow):
         self.analysis_panel.ae_table_builder.cleared.connect(
             lambda: self._clear_builder_source("ae_table")
         )
-        self.analysis_panel.listing_builder.run_requested.connect(
-            self._run_listing_builder
-        )
-        self.analysis_panel.listing_builder.sas_code_requested.connect(
-            self._generate_listing_sas_code
-        )
-        self.analysis_panel.listing_builder.browse_adsl_requested.connect(
-            self._browse_listing_adsl
-        )
-        self.analysis_panel.listing_builder.cleared.connect(
-            lambda: self._clear_builder_source("listing")
-        )
-
     def _create_compare_panel(self) -> None:
         self.compare_panel = DatasetComparePanel()
         self.compare_dock = QDockWidget("Dataset Compare", self)
@@ -576,6 +551,47 @@ class MainWindow(QMainWindow):
     def current_dataset_tab(self) -> DatasetTab | None:
         widget = self.tabs.currentWidget()
         return widget if isinstance(widget, DatasetTab) else None
+
+    # AnalysisController host surface.  These are deliberately thin wrappers
+    # around the existing MainWindow lifecycle mechanisms during Phase 1.
+    def is_open_dataset_tab(self, tab: DatasetTab) -> bool:
+        return self.tabs.indexOf(tab) >= 0
+
+    def available_sas_dataset_tabs(self) -> list[tuple[DatasetTab, str]]:
+        datasets: list[tuple[DatasetTab, str]] = []
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+                datasets.append(
+                    (
+                        tab,
+                        f"{tab.handle.metadata.name} — {tab.handle.source_path.name}",
+                    )
+                )
+        return datasets
+
+    def create_analysis_result_tab(self, handle: DatasetHandle) -> DatasetTab:
+        return self._make_dataset_tab(handle)
+
+    def show_analysis_result_tab(self, tab: DatasetTab, title: str) -> None:
+        index = self.tabs.addTab(tab, title)
+        self.tabs.setCurrentIndex(index)
+        self._sync_active_tab()
+        tab.start()
+
+    def submit_analysis_task(self, owner, function, completed, failed) -> None:
+        self._submit(owner, function, completed, failed)
+
+    def retain_analysis_directory(self, path: Path) -> None:
+        self._retain_directory(path)
+
+    def show_analysis_error(
+        self, title: str, message: str, details: str = ""
+    ) -> None:
+        self._show_error(title, message, details)
+
+    def browse_listing_adsl_dataset(self) -> None:
+        self._browse_listing_adsl()
 
     def open_files(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
@@ -690,20 +706,12 @@ class MainWindow(QMainWindow):
     def _refresh_categorical_sources(self) -> None:
         if not hasattr(self, "analysis_panel"):
             return
-        datasets: list[tuple[object, str]] = []
-        for index in range(self.tabs.count()):
-            tab = self.tabs.widget(index)
-            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
-                datasets.append(
-                    (
-                        tab,
-                        f"{tab.handle.metadata.name} — {tab.handle.source_path.name}",
-                    )
-                )
+        datasets = self.available_sas_dataset_tabs()
         self.analysis_panel.categorical_builder.set_adsl_sources(datasets)
         self.analysis_panel.rule_based_builder.set_adsl_sources(datasets)
         self.analysis_panel.ae_table_builder.set_adsl_sources(datasets)
-        self.analysis_panel.listing_builder.set_adsl_sources(datasets)
+        if hasattr(self, "analysis_controller"):
+            self.analysis_controller.refresh_listing_adsl_sources(datasets)
 
     def _browse_categorical_adsl(self) -> None:
         initial = self.settings.last_open_directory or str(Path.home())
@@ -782,7 +790,7 @@ class MainWindow(QMainWindow):
 
         def ready(tab: DatasetTab) -> None:
             self._refresh_categorical_sources()
-            self.analysis_panel.listing_builder.select_adsl(tab)
+            self.analysis_controller.select_listing_adsl(tab)
 
         self._open_path(source, ready)
 
@@ -1487,7 +1495,6 @@ class MainWindow(QMainWindow):
             "categorical": self.analysis_panel.categorical_builder,
             "rule_based": self.analysis_panel.rule_based_builder,
             "ae_table": self.analysis_panel.ae_table_builder,
-            "listing": self.analysis_panel.listing_builder,
         }[name]
 
     def _builder_source(self, name: str) -> DatasetTab | None:
@@ -1558,146 +1565,8 @@ class MainWindow(QMainWindow):
         self.analysis_dock.show()
 
     def show_listing_builder(self) -> None:
-        self._bind_builder_source("listing")
-        self._refresh_categorical_sources()
-        self.analysis_panel.show_listing_tab()
+        self.analysis_controller.show_listing_builder()
         self.analysis_dock.show()
-
-    def _listing_context(self, selection: ListingBuilderSelection):
-        tab = self._builder_source("listing")
-        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
-            QMessageBox.warning(
-                self,
-                "Listing Generator",
-                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
-            )
-            return None
-        adsl_tab = selection.adsl_tab if selection.merge_adsl.enabled else None
-        if selection.merge_adsl.enabled and (
-            not isinstance(adsl_tab, DatasetTab) or not adsl_tab.cache_complete
-        ):
-            QMessageBox.warning(
-                self,
-                "Listing Generator",
-                "Open a fully loaded ADSL dataset before running the Listing.",
-            )
-            return None
-        try:
-            preliminary = ListingConfig(
-                selection.columns,
-                data_filter_text=selection.data_filter_text,
-                merge_adsl=selection.merge_adsl,
-            )
-            resolved = self.listing_engine.resolved_metadata(
-                tab.handle,
-                preliminary,
-                adsl_tab.handle if isinstance(adsl_tab, DatasetTab) else None,
-            )
-            compiled = FilterEngine(resolved.variables).compile(
-                selection.data_filter_text
-            )
-            config = replace(preliminary, data_filter=compiled)
-            config.validate_basic()
-            from ..listing.expressions import parse_expression
-
-            for column in config.columns:
-                parse_expression(column.expression_text, resolved.variables)
-        except ValueError as error:
-            QMessageBox.warning(self, "Listing Generator", str(error))
-            return None
-        return (
-            tab,
-            adsl_tab if isinstance(adsl_tab, DatasetTab) else None,
-            config,
-            resolved,
-        )
-
-    def _run_listing_builder(self, selection: ListingBuilderSelection) -> None:
-        context = self._listing_context(selection)
-        if context is None:
-            return
-        source_tab, adsl_tab, config, _resolved = context
-        warnings = self.listing_engine.warnings(
-            source_tab.handle, config, adsl_tab.handle if adsl_tab else None
-        )
-        if warnings:
-            QMessageBox.warning(self, "Listing Generator", "\n\n".join(warnings))
-        source_handle = source_tab.handle
-        adsl_handle = adsl_tab.handle if adsl_tab else None
-        builder = self.analysis_panel.listing_builder
-        self._listing_input_tabs = {source_tab}
-        if adsl_tab:
-            self._listing_input_tabs.add(adsl_tab)
-        builder.set_busy(True, "Building Listing in the background…")
-
-        def completed(handle):
-            self._listing_input_tabs.clear()
-            builder.set_busy(
-                False, f"Created {handle.metadata.row_count:,} Listing records."
-            )
-            result_tab = self._make_dataset_tab(handle)
-            for directory in {
-                source_handle.temporary_path.parent,
-                *([adsl_handle.temporary_path.parent] if adsl_handle else []),
-            }:
-                self._retain_directory(directory)
-            self._listing_sources[result_tab] = ListingResultContext(
-                source_handle, adsl_handle, config
-            )
-            index = self.tabs.addTab(result_tab, "Listing Result")
-            self.tabs.setCurrentIndex(index)
-            self._sync_active_tab()
-            result_tab.start()
-
-        def failed(message, details):
-            self._listing_input_tabs.clear()
-            builder.set_busy(False, "Listing failed.")
-            self._show_error("Listing Generator Failed", message, details)
-
-        self._submit(
-            builder,
-            lambda worker: self.listing_engine.run(
-                source_handle, config, adsl_handle, worker.report
-            ),
-            completed,
-            failed,
-        )
-
-    def _generate_listing_sas_code(self, selection: ListingBuilderSelection) -> None:
-        context = self._listing_context(selection)
-        if context is None:
-            return
-        source_tab, adsl_tab, config, resolved = context
-        if source_tab.handle.kind != "sas":
-            return
-        source_handle = source_tab.handle
-        adsl_handle = adsl_tab.handle if adsl_tab else None
-        builder = self.analysis_panel.listing_builder
-        self._listing_input_tabs = {source_tab}
-        if adsl_tab:
-            self._listing_input_tabs.add(adsl_tab)
-        builder.set_busy(True, "Generating Listing SAS code…")
-
-        def completed(code: str) -> None:
-            self._listing_input_tabs.clear()
-            builder.set_busy(False, "SAS code generated.")
-            name = source_handle.metadata.name.lower() or "dataset"
-            SasCodeDialog(
-                code, str(source_handle.source_path), f"{name}_listing.sas", self
-            ).exec()
-
-        def failed(message, details):
-            self._listing_input_tabs.clear()
-            builder.set_busy(False, "SAS Code Generator failed.")
-            self._show_error("Listing SAS Code Generator Failed", message, details)
-
-        def generate(_worker: Worker) -> str:
-            configuration = build_listing_configuration(
-                source_handle, config, resolved, adsl_handle
-            )
-            return self.sas_listing_generator.generate(configuration)
-
-        self._submit(builder, generate, completed, failed)
 
     def _ae_table_context(self, selection: AeTableBuilderSelection):
         tab = self._builder_source("ae_table")
@@ -3053,6 +2922,7 @@ class MainWindow(QMainWindow):
             for name, source in self._builder_sources.items()
             if source is widget
         ]
+        bound_builders.extend(self.analysis_controller.bound_builder_titles(widget))
         if bound_builders:
             QMessageBox.warning(
                 self,
@@ -3092,11 +2962,11 @@ class MainWindow(QMainWindow):
                 "This dataset is currently used by a Rule-based Table. Wait for the calculation to finish before closing it.",
             )
             return
-        if widget in self._listing_input_tabs:
+        if blocker := self.analysis_controller.tab_close_blocker(widget):
             QMessageBox.information(
                 self,
-                "Listing Running",
-                "This dataset is currently used by a Listing. Wait for the calculation to finish before closing it.",
+                blocker.title,
+                blocker.message,
             )
             return
         if widget in self._merge_input_tabs:
@@ -3142,11 +3012,7 @@ class MainWindow(QMainWindow):
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )
-            listing_context = self._listing_sources.pop(widget, None)
-            if listing_context is not None:
-                directories = {listing_context.source.temporary_path.parent}
-                if listing_context.adsl is not None:
-                    directories.add(listing_context.adsl.temporary_path.parent)
+            if directories := self.analysis_controller.take_result_release_paths(widget):
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )

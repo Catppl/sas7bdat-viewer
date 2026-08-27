@@ -362,6 +362,8 @@ class UiSmokeTests(unittest.TestCase):
                 return None
 
         def make_tab(root: Path, name: str) -> DatasetTab:
+            temporary_directory = root / "temp" / name
+            temporary_directory.mkdir(parents=True)
             metadata = DatasetMetadata(
                 name.upper(),
                 2,
@@ -375,8 +377,8 @@ class UiSmokeTests(unittest.TestCase):
             )
             handle = DatasetHandle(
                 root / f"{name}.sas7bdat",
-                root / f"{name}.tmp",
-                root / f"{name}.sqlite",
+                temporary_directory / f"{name}.sas7bdat",
+                temporary_directory / "dataset.sqlite",
                 metadata,
                 2,
                 True,
@@ -424,6 +426,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertTrue(
                 all(source is source_a for source in window._builder_sources.values())
             )
+            self.assertIs(window.analysis_controller.listing_source, source_a)
             self.assertEqual(
                 window.analysis_panel.builder.analysis_variables.selected_variables(),
                 ("AVAL",),
@@ -463,6 +466,22 @@ class UiSmokeTests(unittest.TestCase):
             self.assertTrue(
                 all(source is None for source in window._builder_sources.values())
             )
+            self.assertIsNone(window.analysis_controller.listing_source)
+
+            # Listing's source binding is now controller-owned.  It must keep
+            # the existing source-close guard and release only after Clear.
+            window.tabs.setCurrentWidget(source_a)
+            window.show_listing_builder()
+            with patch(
+                "clinical_data_viewer.ui.main_window.QMessageBox.warning"
+            ) as warning:
+                window.close_tab(window.tabs.indexOf(source_a))
+            self.assertGreaterEqual(window.tabs.indexOf(source_a), 0)
+            self.assertIn("fixed source", warning.call_args.args[2])
+            window.analysis_panel.listing_builder.clear()
+            self.assertIsNone(window.analysis_controller.listing_source)
+            window.close_tab(window.tabs.indexOf(source_a))
+            self.assertLess(window.tabs.indexOf(source_a), 0)
             window.close()
             application.processEvents()
 
