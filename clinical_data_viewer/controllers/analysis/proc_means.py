@@ -187,18 +187,6 @@ class ProcMeansController(AnalysisModuleController):
         if source_tab is None or not is_analysis_dataset(source_tab.handle):
             return
         builder = self._panel.builder
-        current_filter = source_tab.current_where_text()
-        builder_filter = builder.current_filter_text()
-        if not builder_filter or builder_filter != current_filter:
-            response = QMessageBox.question(
-                self._parent_widget(),
-                "PROC MEANS Builder",
-                "Apply the current dataset filter to PROC MEANS?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if response == QMessageBox.Yes:
-                builder.apply_current_filter(current_filter)
         context = self._proc_means_context(selection, "PROC MEANS Builder")
         if context is None:
             return

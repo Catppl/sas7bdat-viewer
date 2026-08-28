@@ -147,7 +147,7 @@ class ProcMeansBuilder(QWidget):
         super().__init__(parent)
         self.setObjectName("procMeansBuilder")
         self._metadata: DatasetMetadata | None = None
-        self._filter_text = ""
+        self._source_text = ""
         self._source_kind = "sas"
         self._busy = False
         outer_layout = QVBoxLayout(self)
@@ -206,10 +206,12 @@ class ProcMeansBuilder(QWidget):
         filter_title = QLabel("Filter")
         filter_title.setObjectName("panelTitle")
         layout.addWidget(filter_title)
-        self.filter_label = QLabel("All rows")
-        self.filter_label.setWordWrap(True)
-        self.filter_label.setObjectName("filterNotice")
-        layout.addWidget(self.filter_label)
+        self.filter_editor = QLineEdit()
+        self.filter_editor.setObjectName("procMeansFilterEditor")
+        self.filter_editor.setPlaceholderText(
+            'Optional WHERE condition, e.g. ANL01FL = "Y"'
+        )
+        layout.addWidget(self.filter_editor)
 
         self.status = QLabel("")
         self.status.setWordWrap(True)
@@ -244,22 +246,34 @@ class ProcMeansBuilder(QWidget):
         source_kind: str = "sas",
     ) -> None:
         self._source_kind = source_kind
-        if metadata is not None and metadata is not self._metadata:
+        if metadata is None:
+            self._metadata = None
+            self._source_text = ""
+            self.filter_editor.clear()
+        elif source_text != self._source_text:
             self._metadata = metadata
-            self._filter_text = self._normalized_filter_text(filter_text)
+            self._source_text = source_text
+            self.filter_editor.setText(self._normalized_filter_text(filter_text))
             for editor in (
                 self.analysis_variables,
                 self.by_variables,
                 self.class_variables,
             ):
                 editor.set_metadata(metadata)
+        elif metadata is not self._metadata:
+            # A reload can provide a new metadata object for the same source.
+            # Keep the Builder-owned filter and pending variable selections.
+            self._metadata = metadata
+            for editor in (
+                self.analysis_variables,
+                self.by_variables,
+                self.class_variables,
+            ):
+                editor.set_metadata(metadata, preserve=True)
         self.source_label.setText(
             f"Source: {source_text}"
             if metadata
             else "Select a fully loaded source dataset."
-        )
-        self.filter_label.setText(
-            f"WHERE {self._filter_text}" if self._filter_text else "All rows"
         )
         available = metadata is not None and not self._busy
         self.run_button.setEnabled(available)
@@ -280,17 +294,15 @@ class ProcMeansBuilder(QWidget):
         ):
             editor.setEnabled(available)
         self.decimal_groups.setEnabled(available)
+        self.filter_editor.setEnabled(available)
 
     def current_filter_text(self) -> str:
-        """Return the Builder's saved source-filter snapshot."""
-        return self._filter_text
+        """Return the Builder-owned filter text."""
+        return self.filter_editor.text().strip()
 
     def apply_current_filter(self, filter_text: str) -> None:
-        """Replace the saved snapshot after the user explicitly confirms it."""
-        self._filter_text = self._normalized_filter_text(filter_text)
-        self.filter_label.setText(
-            f"WHERE {self._filter_text}" if self._filter_text else "All rows"
-        )
+        """Set the filter editor (kept as a compatibility helper)."""
+        self.filter_editor.setText(self._normalized_filter_text(filter_text))
 
     @staticmethod
     def _normalized_filter_text(filter_text: str) -> str:
@@ -310,6 +322,8 @@ class ProcMeansBuilder(QWidget):
         self.analysis_variables.clear()
         self.by_variables.clear()
         self.class_variables.clear()
+        self.filter_editor.clear()
+        self._source_text = ""
         self.status.clear()
         self.cleared.emit()
 
@@ -330,6 +344,7 @@ class ProcMeansBuilder(QWidget):
         ):
             editor.setEnabled(not busy)
         self.decimal_groups.setEnabled(not busy)
+        self.filter_editor.setEnabled(not busy and self._metadata is not None)
         if message:
             self.status.setText(message)
 
