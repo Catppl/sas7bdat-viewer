@@ -13,6 +13,7 @@ from ...domain import DatasetHandle, DatasetMetadata
 from ...filter_engine import FilterEngine
 from ...listing import ListingConfig, ListingEngine
 from ...listing.configuration import build_listing_configuration
+from ...listing.expressions import parse_expression
 from ...ui.dataset_tab import DatasetTab
 from ...ui.listing_builder import ListingBuilderSelection
 from ...ui.sas_code_dialog import SasCodeDialog
@@ -143,8 +144,6 @@ class ListingController(AnalysisModuleController):
             )
             config = replace(preliminary, data_filter=compiled)
             config.validate_basic()
-            from ..listing.expressions import parse_expression
-
             for column in config.columns:
                 parse_expression(column.expression_text, resolved.variables)
         except ValueError as error:

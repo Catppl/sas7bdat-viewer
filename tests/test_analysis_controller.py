@@ -45,11 +45,16 @@ class AnalysisControllerTests(unittest.TestCase):
             DatasetMetadata,
             VariableMetadata,
         )
-        from clinical_data_viewer.listing import ListingConfig
+        from clinical_data_viewer.listing import (
+            ListingColumn,
+            ListingConfig,
+            ListingMergeAdsl,
+        )
         from clinical_data_viewer.settings import AppSettings
         from clinical_data_viewer.temp_manager import TempManager
         from clinical_data_viewer.ui.analysis_panel import AnalysisPanel
         from clinical_data_viewer.ui.dataset_tab import DatasetTab
+        from clinical_data_viewer.ui.listing_builder import ListingBuilderSelection
 
         class Host:
             def __init__(self, active: DatasetTab, open_tabs: set[DatasetTab]) -> None:
@@ -144,6 +149,16 @@ class AnalysisControllerTests(unittest.TestCase):
                 panel.listing_builder.source_label.text(),
                 "Source: " + str(source.handle.source_path),
             )
+            context = controller.listing._listing_context(
+                ListingBuilderSelection(
+                    "",
+                    (ListingColumn("USUBJID", "USUBJID"),),
+                    ListingMergeAdsl(),
+                    None,
+                )
+            )
+            self.assertIsNotNone(context)
+            self.assertIs(context[0], source)
 
             controller.listing._listing_input_tabs.add(source)
             blocker = controller.tab_close_blocker(source)
