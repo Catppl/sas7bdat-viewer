@@ -18,6 +18,22 @@ class AnalysisControllerTests(unittest.TestCase):
 
         cls.application = QApplication.instance() or QApplication([])
 
+    def test_analysis_controller_exposes_separate_module_boundaries(self) -> None:
+        from clinical_data_viewer.controllers.analysis import (
+            AeTableController,
+            CategoricalController,
+            ListingController,
+            ProcMeansController,
+            RuleBasedController,
+        )
+        self.assertTrue(all(cls.name for cls in (
+            ListingController,
+            RuleBasedController,
+            AeTableController,
+            ProcMeansController,
+            CategoricalController,
+        )))
+
     def test_listing_binding_close_blocker_and_result_release_paths(self) -> None:
         """Listing lifecycle state stays in AnalysisController, not MainWindow."""
         from clinical_data_viewer.controllers.analysis_controller import (

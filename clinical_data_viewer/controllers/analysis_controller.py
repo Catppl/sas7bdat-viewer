@@ -90,6 +90,13 @@ from ..ui.proc_means_builder import ProcMeansBuilderSelection
 from ..ui.rule_based_builder import RuleBasedBuilderSelection
 from ..ui.sas_code_dialog import RCodeDialog, SasCodeDialog
 from ..workers import Worker
+from .analysis import (
+    AeTableController,
+    CategoricalController,
+    ListingController,
+    ProcMeansController,
+    RuleBasedController,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +253,14 @@ class AnalysisController(QObject):
         self._categorical_source: DatasetTab | None = None
         self._categorical_input_tabs: set[DatasetTab] = set()
         self._categorical_results: dict[DatasetTab, CategoricalResultContext] = {}
+
+        # Per-module boundaries.  The facade keeps the established public
+        # methods while each workflow is migrated into its own controller.
+        self.listing = ListingController(self)
+        self.rule_based = RuleBasedController(self)
+        self.ae_table = AeTableController(self)
+        self.proc_means = ProcMeansController(self)
+        self.categorical = CategoricalController(self)
 
         builder = self._panel.listing_builder
         builder.run_requested.connect(self.run_listing)
