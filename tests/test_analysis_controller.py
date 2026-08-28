@@ -5,6 +5,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
@@ -33,6 +35,22 @@ class AnalysisControllerTests(unittest.TestCase):
             ProcMeansController,
             CategoricalController,
         )))
+
+    def test_source_reload_lifecycle_is_forwarded_to_proc_means_module(self) -> None:
+        from clinical_data_viewer.controllers.analysis_controller import (
+            AnalysisController,
+        )
+
+        facade = SimpleNamespace(proc_means=Mock())
+        source = object()
+
+        AnalysisController.source_reload_started(facade, source)
+        AnalysisController.source_reload_completed(facade, source)
+        AnalysisController.source_reload_failed(facade, source)
+
+        facade.proc_means.source_reload_started.assert_called_once_with(source)
+        facade.proc_means.source_reload_completed.assert_called_once_with(source)
+        facade.proc_means.source_reload_failed.assert_called_once_with(source)
 
     def test_listing_binding_close_blocker_and_result_release_paths(self) -> None:
         """Listing lifecycle state stays in AnalysisController, not MainWindow."""
@@ -704,6 +722,10 @@ class AnalysisControllerTests(unittest.TestCase):
             blocker = controller.tab_close_blocker(source)
             self.assertIsNotNone(blocker)
             self.assertEqual(blocker.title, "PROC MEANS Running")
+            reload_blocker = controller.tab_reload_blocker(source)
+            self.assertIsNotNone(reload_blocker)
+            self.assertIn("before reloading it", reload_blocker.message)
+            self.assertNotIn("before closing it", reload_blocker.message)
             controller.proc_means._proc_means_input_tabs.clear()
 
             controller.proc_means._proc_means_results[result] = ProcMeansResultContext(

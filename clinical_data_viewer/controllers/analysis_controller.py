@@ -247,33 +247,54 @@ class AnalysisController(QObject):
             titles.append("Categorical")
         return titles
 
-    def tab_close_blocker(self, tab: object) -> TabCloseBlocker | None:
+    def _tab_activity_blocker(
+        self, tab: object, action: str
+    ) -> TabCloseBlocker | None:
         if self.listing.is_input_tab(tab):
             return TabCloseBlocker(
                 "Listing Running",
-                "This dataset is currently used by a Listing. Wait for the calculation to finish before closing it.",
+                f"This dataset is currently used by a Listing. Wait for the calculation to finish before {action} it.",
             )
         if self.rule_based.is_input_tab(tab):
             return TabCloseBlocker(
                 "Rule-based Table Running",
-                "This dataset is currently used by a Rule-based Table. Wait for the calculation to finish before closing it.",
+                f"This dataset is currently used by a Rule-based Table. Wait for the calculation to finish before {action} it.",
             )
         if self.ae_table.is_input_tab(tab):
             return TabCloseBlocker(
                 "AE Table Running",
-                "This dataset is currently used by an AE Table. Wait for the calculation to finish before closing it.",
+                f"This dataset is currently used by an AE Table. Wait for the calculation to finish before {action} it.",
             )
         if self.proc_means.is_input_tab(tab):
             return TabCloseBlocker(
                 "PROC MEANS Running",
-                "This dataset is currently being analyzed. Wait for PROC MEANS to finish before closing it.",
+                f"This dataset is currently being analyzed. Wait for PROC MEANS to finish before {action} it.",
             )
         if self.categorical.is_input_tab(tab):
             return TabCloseBlocker(
                 "Categorical Table Running",
-                "This dataset is currently used by a Categorical Table. Wait for the calculation to finish before closing it.",
+                f"This dataset is currently used by a Categorical Table. Wait for the calculation to finish before {action} it.",
             )
         return None
+
+    def tab_close_blocker(self, tab: object) -> TabCloseBlocker | None:
+        return self._tab_activity_blocker(tab, "closing")
+
+    def tab_reload_blocker(self, tab: object) -> TabCloseBlocker | None:
+        """Return an analysis-task blocker before replacing a tab handle."""
+        return self._tab_activity_blocker(tab, "reloading")
+
+    def source_reload_started(self, tab: DatasetTab) -> None:
+        """Notify the bound analysis module before a dataset handle is replaced."""
+        self.proc_means.source_reload_started(tab)
+
+    def source_reload_completed(self, tab: DatasetTab) -> None:
+        """Notify the bound analysis module after a reload fully completes."""
+        self.proc_means.source_reload_completed(tab)
+
+    def source_reload_failed(self, tab: DatasetTab) -> None:
+        """Notify the bound analysis module that a reload failed."""
+        self.proc_means.source_reload_failed(tab)
 
     def take_result_release_paths(self, tab: object) -> tuple[Path, ...]:
         """Detach an analysis result and return source directories to release."""

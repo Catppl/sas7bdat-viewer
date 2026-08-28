@@ -89,12 +89,41 @@ class ProcMeansController(AnalysisModuleController):
         self._proc_means_source = None
         self._set_proc_means_dataset(None)
 
-    def _set_proc_means_dataset(self, tab: DatasetTab | None) -> None:
+    def source_reload_started(self, tab: DatasetTab) -> None:
+        """Freeze the Builder while its fixed source is being reloaded."""
+        if self._proc_means_source is tab:
+            self._panel.builder.set_source_reloading(
+                True, "Source is reloading. PROC MEANS is temporarily unavailable."
+            )
+
+    def source_reload_completed(self, tab: DatasetTab) -> None:
+        """Refresh Builder metadata without replacing its independent Filter."""
+        if self._proc_means_source is not tab:
+            return
+        removed = self._set_proc_means_dataset(tab)
+        message = "Source reloaded."
+        if removed:
+            message += " Removed unavailable selections: " + ", ".join(removed) + "."
+        self._panel.builder.set_source_reloading(False, message)
+
+    def source_reload_failed(self, tab: DatasetTab) -> None:
+        """Restore the Builder after a failed reload without clearing input."""
+        if self._proc_means_source is tab:
+            if not getattr(tab, "cache_complete", False):
+                self._panel.builder.set_source_reloading(
+                    True,
+                    "Source cache is incomplete; reload the dataset before using PROC MEANS.",
+                )
+                return
+            self._panel.builder.set_source_reloading(
+                False, "Source reload failed; Builder configuration was retained."
+            )
+
+    def _set_proc_means_dataset(self, tab: DatasetTab | None) -> tuple[str, ...]:
         builder = self._panel.builder
         if tab is None:
-            builder.set_dataset(None, "", "", "sas")
-            return
-        builder.set_dataset(
+            return builder.set_dataset(None, "", "", "sas")
+        return builder.set_dataset(
             tab.handle.metadata,
             str(tab.handle.source_path),
             tab.current_where_text(),
@@ -105,11 +134,22 @@ class ProcMeansController(AnalysisModuleController):
         self, selection: ProcMeansBuilderSelection, action_title: str
     ) -> tuple[DatasetTab, ProcMeansConfig] | None:
         tab = self.proc_means_source
-        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+        if (
+            tab is None
+            or not is_analysis_dataset(tab.handle)
+            or not tab.cache_complete
+            or getattr(tab, "reload_in_progress", False)
+        ):
             QMessageBox.warning(
                 self._parent_widget(),
                 action_title,
-                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
+                (
+                    "The Builder source is reloading. Wait for the reload to finish "
+                    "before running PROC MEANS."
+                    if tab is not None and getattr(tab, "reload_in_progress", False)
+                    else "The Builder source is unavailable. Open a fully loaded source "
+                    "dataset, then open the Builder again."
+                ),
             )
             return None
         filter_text = self._panel.builder.current_filter_text()

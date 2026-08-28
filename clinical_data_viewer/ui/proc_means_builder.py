@@ -61,7 +61,7 @@ class VariableTokenEditor(QWidget):
     def set_metadata(
         self, metadata: DatasetMetadata | None, *, preserve: bool = False
     ) -> None:
-        selected = self.selected_variables() if preserve else ()
+        previous = self.selected_variables() if preserve else ()
         self._metadata = metadata
         names = (
             [
@@ -71,6 +71,12 @@ class VariableTokenEditor(QWidget):
             ]
             if metadata
             else []
+        )
+        canonical_names = {name.casefold(): name for name in names}
+        selected = tuple(
+            canonical_names[name.casefold()]
+            for name in previous
+            if name.casefold() in canonical_names
         )
         completer = QCompleter(names, self)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -150,6 +156,8 @@ class ProcMeansBuilder(QWidget):
         self._source_text = ""
         self._source_kind = "sas"
         self._busy = False
+        self._source_reloading = False
+        self._suppress_decimal_group_refresh = False
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -244,15 +252,18 @@ class ProcMeansBuilder(QWidget):
         source_text: str,
         filter_text: str = "",
         source_kind: str = "sas",
-    ) -> None:
+    ) -> tuple[str, ...]:
         self._source_kind = source_kind
+        removed: tuple[str, ...] = ()
         if metadata is None:
             self._metadata = None
             self._source_text = ""
+            self._source_reloading = False
             self.filter_editor.clear()
         elif source_text != self._source_text:
             self._metadata = metadata
             self._source_text = source_text
+            self._source_reloading = False
             self.filter_editor.setText(self._normalized_filter_text(filter_text))
             for editor in (
                 self.analysis_variables,
@@ -263,23 +274,34 @@ class ProcMeansBuilder(QWidget):
         elif metadata is not self._metadata:
             # A reload can provide a new metadata object for the same source.
             # Keep the Builder-owned filter and pending variable selections.
+            previous = self._all_selected_variables()
+            previous_decimal_groups = self.selected_decimal_groups()
             self._metadata = metadata
-            for editor in (
-                self.analysis_variables,
-                self.by_variables,
-                self.class_variables,
-            ):
-                editor.set_metadata(metadata, preserve=True)
+            self._suppress_decimal_group_refresh = True
+            try:
+                for editor in (
+                    self.analysis_variables,
+                    self.by_variables,
+                    self.class_variables,
+                ):
+                    editor.set_metadata(metadata, preserve=True)
+            finally:
+                self._suppress_decimal_group_refresh = False
+            self._refresh_decimal_groups(previous_decimal_groups)
+            current = {
+                variable.casefold() for variable in self._all_selected_variables()
+            }
+            removed = tuple(
+                variable
+                for variable in previous
+                if variable.casefold() not in current
+            )
         self.source_label.setText(
             f"Source: {source_text}"
             if metadata
             else "Select a fully loaded source dataset."
         )
-        available = metadata is not None and not self._busy
-        self.run_button.setEnabled(available)
-        codegen_available = available and source_kind != "merge"
-        self.sas_code_button.setEnabled(codegen_available)
-        self.r_code_button.setEnabled(codegen_available)
+        self._update_enabled_state()
         tooltip = (
             "Code generation for merged results is not available yet."
             if source_kind == "merge"
@@ -287,27 +309,23 @@ class ProcMeansBuilder(QWidget):
         )
         self.sas_code_button.setToolTip(tooltip)
         self.r_code_button.setToolTip(tooltip)
-        for editor in (
-            self.analysis_variables,
-            self.by_variables,
-            self.class_variables,
-        ):
-            editor.setEnabled(available)
-        self.decimal_groups.setEnabled(available)
-        self.filter_editor.setEnabled(available)
+        return removed
 
     def current_filter_text(self) -> str:
         """Return the Builder-owned filter text."""
         return self.filter_editor.text().strip()
 
-    def apply_current_filter(self, filter_text: str) -> None:
-        """Set the filter editor (kept as a compatibility helper)."""
-        self.filter_editor.setText(self._normalized_filter_text(filter_text))
-
     @staticmethod
     def _normalized_filter_text(filter_text: str) -> str:
         text = filter_text.strip()
         return "" if text.casefold() == "all rows" else text
+
+    def set_source_reloading(self, reloading: bool, message: str = "") -> None:
+        """Temporarily disable source-dependent actions during Dataset Reload."""
+        self._source_reloading = reloading
+        self._update_enabled_state()
+        if message:
+            self.status.setText(message)
 
     def set_default_statistics(self, statistics: list[str]) -> None:
         selected = set(statistics)
@@ -324,17 +342,29 @@ class ProcMeansBuilder(QWidget):
         self.class_variables.clear()
         self.filter_editor.clear()
         self._source_text = ""
+        self._source_reloading = False
         self.status.clear()
         self.cleared.emit()
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
-        self.run_button.setEnabled(not busy and self._metadata is not None)
+        self._update_enabled_state()
+        if message:
+            self.status.setText(message)
+
+    def _update_enabled_state(self) -> None:
+        available = (
+            self._metadata is not None
+            and not self._busy
+            and not self._source_reloading
+        )
         codegen_available = (
-            not busy
+            not self._busy
             and self._metadata is not None
             and self._source_kind != "merge"
+            and not self._source_reloading
         )
+        self.run_button.setEnabled(available)
         self.sas_code_button.setEnabled(codegen_available)
         self.r_code_button.setEnabled(codegen_available)
         for editor in (
@@ -342,14 +372,38 @@ class ProcMeansBuilder(QWidget):
             self.by_variables,
             self.class_variables,
         ):
-            editor.setEnabled(not busy)
-        self.decimal_groups.setEnabled(not busy)
-        self.filter_editor.setEnabled(not busy and self._metadata is not None)
-        if message:
-            self.status.setText(message)
+            editor.setEnabled(available)
+        self.decimal_groups.setEnabled(available)
+        self.filter_editor.setEnabled(available)
 
-    def _refresh_decimal_groups(self) -> None:
-        previous = set(self.selected_decimal_groups())
+    def _all_selected_variables(self) -> tuple[str, ...]:
+        selected: list[str] = []
+        selected_folds: set[str] = set()
+        for variables in (
+            self.analysis_variables.selected_variables(),
+            self.by_variables.selected_variables(),
+            self.class_variables.selected_variables(),
+            self.selected_decimal_groups(),
+        ):
+            for variable in variables:
+                if variable.casefold() not in selected_folds:
+                    selected.append(variable)
+                    selected_folds.add(variable.casefold())
+        return tuple(selected)
+
+    def _refresh_decimal_groups(
+        self, preserved: tuple[str, ...] | None = None
+    ) -> None:
+        if self._suppress_decimal_group_refresh:
+            return
+        previous = {
+            variable.casefold()
+            for variable in (
+                self.selected_decimal_groups()
+                if preserved is None
+                else preserved
+            )
+        }
         values = (
             *self.by_variables.selected_variables(),
             *self.class_variables.selected_variables(),
@@ -358,7 +412,9 @@ class ProcMeansBuilder(QWidget):
         for variable in values:
             item = QListWidgetItem(variable)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if variable in previous else Qt.Unchecked)
+            item.setCheckState(
+                Qt.Checked if variable.casefold() in previous else Qt.Unchecked
+            )
             self.decimal_groups.addItem(item)
 
     def selected_decimal_groups(self) -> tuple[str, ...]:

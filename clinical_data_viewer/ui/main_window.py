@@ -941,7 +941,7 @@ class MainWindow(QMainWindow):
             if isinstance(tab, DatasetTab):
                 tab.set_apply_sas_date_time_formats(enabled)
 
-    def _continue_cache(self, tab: DatasetTab, when_complete=None) -> None:
+    def _continue_cache(self, tab: DatasetTab, when_complete=None, when_failed=None) -> None:
         initial_handle = tab.handle
 
         def progress_changed(progress: CacheProgress) -> None:
@@ -984,6 +984,8 @@ class MainWindow(QMainWindow):
                 when_complete(handle)
 
         def failed(message: str, details: str) -> None:
+            if when_failed is not None:
+                when_failed()
             if self.tabs.indexOf(tab) < 0:
                 return
             tab.cache_notice.setVisible(True)
@@ -1513,6 +1515,25 @@ class MainWindow(QMainWindow):
         tab = self.current_dataset_tab()
         if not tab or tab.reload_in_progress or tab.handle.kind != "sas":
             return
+        if blocker := self.analysis_controller.tab_reload_blocker(tab):
+            QMessageBox.information(self, blocker.title, blocker.message)
+            return
+        if tab in self._compare_input_tabs:
+            QMessageBox.information(
+                self,
+                "Dataset Compare Running",
+                "This dataset is currently being compared. Wait for the comparison "
+                "to finish before reloading it.",
+            )
+            return
+        if tab in self._merge_input_tabs:
+            QMessageBox.information(
+                self,
+                "Merge Running",
+                "This dataset is currently used by a Merge. Wait for the merge "
+                "to finish before reloading it.",
+            )
+            return
         source_path = tab.handle.source_path
         old_directory = tab.handle.temporary_path.parent
         preserved_visible = list(tab.visible_columns)
@@ -1521,6 +1542,7 @@ class MainWindow(QMainWindow):
         applied_where = tab.applied_where
         preserved_column_filters = dict(tab.column_filters)
         tab.reload_in_progress = True
+        self.analysis_controller.source_reload_started(tab)
         tab.setEnabled(False)
         self._sync_active_tab()
         self.task_status.setText(f"Reloading {source_path.name}…")
@@ -1556,21 +1578,30 @@ class MainWindow(QMainWindow):
                         "The dataset was reloaded, but the previous WHERE condition "
                         f"is no longer valid:\n{error}",
                     )
-                    return
-                tab.apply_filter(compiled, applied_where, add_history=False)
-                tab.applied_where = applied_where
-                tab.restore_column_filters(preserved_column_filters)
-                if editor_was_dirty:
-                    tab.where_editor.setPlainText(editor_text)
-                self._refresh_status(tab)
+                else:
+                    tab.apply_filter(compiled, applied_where, add_history=False)
+                    tab.applied_where = applied_where
+                    tab.restore_column_filters(preserved_column_filters)
+                    if editor_was_dirty:
+                        tab.where_editor.setPlainText(editor_text)
+                    self._refresh_status(tab)
+                finally:
+                    # Always release the Builder's reload lock, including when
+                    # the old Dataset WHERE is no longer valid after Reload.
+                    self.analysis_controller.source_reload_completed(tab)
 
             if handle.cache_complete:
                 reapply(handle)
             else:
-                self._continue_cache(tab, reapply)
+                self._continue_cache(
+                    tab,
+                    reapply,
+                    lambda: self.analysis_controller.source_reload_failed(tab),
+                )
 
         def failed(message: str, details: str) -> None:
             tab.reload_in_progress = False
+            self.analysis_controller.source_reload_failed(tab)
             tab.setEnabled(True)
             self._sync_active_tab()
             self._show_error("Reload Failed", message, details)

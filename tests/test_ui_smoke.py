@@ -80,6 +80,72 @@ class UiSmokeTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
+    def test_proc_means_builder_unlocks_after_reload_failure_without_clearing_filter(
+        self,
+    ) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "adlb.sas7bdat"
+            source_path.touch()
+            metadata = DatasetMetadata(
+                "ADLB",
+                1,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("AVAL", kind="numeric"),
+                    VariableMetadata("ANL01FL"),
+                ),
+            )
+            handle = DatasetHandle(
+                source_path,
+                root / "temp" / "adlb.sas7bdat",
+                root / "temp" / "dataset.sqlite",
+                metadata,
+                1,
+                True,
+            )
+            window = MainWindow(
+                AppSettings(),
+                TempManager(root / "viewer-temp"),
+                FilterHistory(root / "history.sqlite"),
+            )
+            tab = window._make_dataset_tab(handle)
+            window.tabs.addTab(tab, "ADLB")
+            window.tabs.setCurrentWidget(tab)
+            window.show_proc_means_builder()
+            builder = window.analysis_panel.builder
+            builder.filter_editor.setText('ANL01FL = "Y"')
+            callbacks = {}
+
+            def fake_submit(owner, function, completed, failed, **kwargs):
+                callbacks["failed"] = failed
+
+            window._submit = fake_submit
+            with patch.object(window, "_show_error") as show_error:
+                window.reload_current()
+                self.assertFalse(builder.run_button.isEnabled())
+                callbacks["failed"]("reload failed", "details")
+                show_error.assert_called_once()
+
+            self.assertTrue(builder.run_button.isEnabled())
+            self.assertEqual(builder.current_filter_text(), 'ANL01FL = "Y"')
+            window.close()
+            application.processEvents()
+
     def test_large_xpt_submission_warning_is_english_and_persists_on_reload(
         self,
     ) -> None:
@@ -848,7 +914,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(builder.current_filter_text(), "")
             builder.set_dataset(numeric_metadata, "adlb.sas7bdat", "AVAL > 1")
             self.assertEqual(builder.current_filter_text(), "")
-            builder.apply_current_filter("AVAL > 1")
+            builder.filter_editor.setText("AVAL > 1")
             self.assertEqual(builder.current_filter_text(), "AVAL > 1")
             builder.set_dataset(numeric_metadata, "Merge Result", "", "merge")
             self.assertFalse(builder.sas_code_button.isEnabled())
