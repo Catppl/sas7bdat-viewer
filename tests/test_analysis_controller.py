@@ -36,9 +36,9 @@ class AnalysisControllerTests(unittest.TestCase):
 
     def test_listing_binding_close_blocker_and_result_release_paths(self) -> None:
         """Listing lifecycle state stays in AnalysisController, not MainWindow."""
+        from clinical_data_viewer.controllers.analysis import ListingResultContext
         from clinical_data_viewer.controllers.analysis_controller import (
             AnalysisController,
-            ListingResultContext,
         )
         from clinical_data_viewer.domain import (
             DatasetHandle,
@@ -145,13 +145,13 @@ class AnalysisControllerTests(unittest.TestCase):
                 "Source: " + str(source.handle.source_path),
             )
 
-            controller._listing_input_tabs.add(source)
+            controller.listing._listing_input_tabs.add(source)
             blocker = controller.tab_close_blocker(source)
             self.assertIsNotNone(blocker)
             self.assertEqual(blocker.title, "Listing Running")
-            controller._listing_input_tabs.clear()
+            controller.listing._listing_input_tabs.clear()
 
-            controller._listing_results[result] = ListingResultContext(
+            controller.listing._listing_results[result] = ListingResultContext(
                 source.handle, adsl.handle, ListingConfig(())
             )
             self.assertEqual(
@@ -169,9 +169,9 @@ class AnalysisControllerTests(unittest.TestCase):
 
     def test_rule_based_binding_close_blocker_and_result_release_paths(self) -> None:
         """Rule-based lifecycle state is owned by AnalysisController."""
+        from clinical_data_viewer.controllers.analysis import RuleBasedResultContext
         from clinical_data_viewer.controllers.analysis_controller import (
             AnalysisController,
-            RuleBasedResultContext,
         )
         from clinical_data_viewer.domain import (
             DatasetHandle,
@@ -277,13 +277,13 @@ class AnalysisControllerTests(unittest.TestCase):
                 "Source: " + str(source.handle.source_path),
             )
 
-            controller._rule_based_input_tabs.add(source)
+            controller.rule_based._rule_based_input_tabs.add(source)
             blocker = controller.tab_close_blocker(source)
             self.assertIsNotNone(blocker)
             self.assertEqual(blocker.title, "Rule-based Table Running")
-            controller._rule_based_input_tabs.clear()
+            controller.rule_based._rule_based_input_tabs.clear()
 
-            controller._rule_based_results[result] = RuleBasedResultContext(
+            controller.rule_based._rule_based_results[result] = RuleBasedResultContext(
                 source.handle,
                 adsl.handle,
                 RuleBasedConfig((RuleBasedRow("row_001", "Any AE"),), "TRT01A"),
@@ -302,11 +302,11 @@ class AnalysisControllerTests(unittest.TestCase):
             panel.deleteLater()
 
     def test_categorical_binding_close_blocker_and_result_release_paths(self) -> None:
-        """Categorical lifecycle state is owned by AnalysisController."""
+        """Categorical lifecycle state is owned by its module controller."""
         from clinical_data_viewer.categorical import CategoricalConfig, CategoricalItem
+        from clinical_data_viewer.controllers.analysis import CategoricalResultContext
         from clinical_data_viewer.controllers.analysis_controller import (
             AnalysisController,
-            CategoricalResultContext,
         )
         from clinical_data_viewer.domain import (
             DatasetHandle,
@@ -414,13 +414,13 @@ class AnalysisControllerTests(unittest.TestCase):
                 "Source: " + str(source.handle.source_path),
             )
 
-            controller._categorical_input_tabs.add(source)
+            controller.categorical._categorical_input_tabs.add(source)
             blocker = controller.tab_close_blocker(source)
             self.assertIsNotNone(blocker)
             self.assertEqual(blocker.title, "Categorical Table Running")
-            controller._categorical_input_tabs.clear()
+            controller.categorical._categorical_input_tabs.clear()
 
-            controller._categorical_results[result] = CategoricalResultContext(
+            controller.categorical._categorical_results[result] = CategoricalResultContext(
                 source.handle,
                 adsl.handle,
                 CategoricalConfig((CategoricalItem("RACE"),), "TRT01A", "USUBJID"),
@@ -441,8 +441,8 @@ class AnalysisControllerTests(unittest.TestCase):
     def test_ae_table_binding_close_blocker_and_result_release_paths(self) -> None:
         """AE Table lifecycle state is owned by AnalysisController."""
         from clinical_data_viewer.ae_table import AeTableConfig
+        from clinical_data_viewer.controllers.analysis import AeTableResultContext
         from clinical_data_viewer.controllers.analysis_controller import (
-            AeTableResultContext,
             AnalysisController,
         )
         from clinical_data_viewer.domain import (
@@ -550,13 +550,13 @@ class AnalysisControllerTests(unittest.TestCase):
                 "Source: " + str(source.handle.source_path),
             )
 
-            controller._ae_table_input_tabs.add(source)
+            controller.ae_table._ae_table_input_tabs.add(source)
             blocker = controller.tab_close_blocker(source)
             self.assertIsNotNone(blocker)
             self.assertEqual(blocker.title, "AE Table Running")
-            controller._ae_table_input_tabs.clear()
+            controller.ae_table._ae_table_input_tabs.clear()
 
-            controller._ae_table_results[result] = AeTableResultContext(
+            controller.ae_table._ae_table_results[result] = AeTableResultContext(
                 source.handle,
                 adsl.handle,
                 AeTableConfig("AEBODSYS", "AEDECOD", "TRT01A"),
@@ -575,10 +575,10 @@ class AnalysisControllerTests(unittest.TestCase):
             panel.deleteLater()
 
     def test_proc_means_binding_close_blocker_and_result_release_paths(self) -> None:
-        """PROC MEANS Builder lifecycle state is owned by AnalysisController."""
+        """PROC MEANS Builder lifecycle state is owned by its module controller."""
+        from clinical_data_viewer.controllers.analysis import ProcMeansResultContext
         from clinical_data_viewer.controllers.analysis_controller import (
             AnalysisController,
-            ProcMeansResultContext,
         )
         from clinical_data_viewer.domain import (
             DatasetHandle,
@@ -685,13 +685,13 @@ class AnalysisControllerTests(unittest.TestCase):
                 panel.builder.source_label.text(), "Source: " + str(source.handle.source_path)
             )
 
-            controller._proc_means_input_tabs.add(source)
+            controller.proc_means._proc_means_input_tabs.add(source)
             blocker = controller.tab_close_blocker(source)
             self.assertIsNotNone(blocker)
             self.assertEqual(blocker.title, "PROC MEANS Running")
-            controller._proc_means_input_tabs.clear()
+            controller.proc_means._proc_means_input_tabs.clear()
 
-            controller._proc_means_results[result] = ProcMeansResultContext(
+            controller.proc_means._proc_means_results[result] = ProcMeansResultContext(
                 source.handle, ProcMeansConfig(("AVAL",))
             )
             self.assertEqual(

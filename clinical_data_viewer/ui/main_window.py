@@ -7,7 +7,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
-    QDialog,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -15,7 +14,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
-    QPushButton,
     QSizePolicy,
     QStyle,
     QTabWidget,
@@ -25,15 +23,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..categorical import (
-    CategoricalConfig,
-    DenominatorConfig,
-)
-from ..categorical.drilldown import (
-    build_cell_filter,
-    build_n1_cell_filter,
-    lookup_cell,
-)
 from ..compare_engine import DatasetComparer, recommend_group_variables
 from ..controllers import AnalysisController
 from ..csv_exporter import CsvExporter
@@ -49,7 +38,6 @@ from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
 from .analysis_panel import AnalysisPanel
-from .categorical_builder import CategoricalBuilderSelection
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
 from .dataset_merge_panel import DatasetMergePanel
@@ -73,13 +61,6 @@ class LoadingPage(QWidget):
         self.progress.setMaximumWidth(420)
         layout.addWidget(self.progress, alignment=Qt.AlignCenter)
         layout.addStretch(1)
-
-
-@dataclass(frozen=True, slots=True)
-class CategoricalResultContext:
-    source: DatasetHandle
-    population: DatasetHandle | None
-    config: CategoricalConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +97,6 @@ class MainWindow(QMainWindow):
         # Each Builder is deliberately bound to the dataset that was active
         # when the user opened it.  Tab navigation must never silently change
         # a calculation's source or discard the Builder's in-progress input.
-        self._builder_sources: dict[str, DatasetTab | None] = {}
         self._merge_sources: dict[DatasetTab, MergeResultContext] = {}
         self._retained_directories: dict[Path, int] = {}
         self._deferred_directory_removals: set[Path] = set()
@@ -1395,313 +1375,6 @@ class MainWindow(QMainWindow):
         self.analysis_controller.show_listing_builder()
         self.analysis_dock.show()
 
-    def _categorical_builder_context(
-        self, selection: CategoricalBuilderSelection
-    ) -> tuple[DatasetTab, DatasetTab | None, CategoricalConfig] | None:
-        tab = self._builder_source("categorical")
-        if tab is None or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
-            QMessageBox.warning(
-                self,
-                "Categorical Table",
-                "The Builder source is unavailable. Open a fully loaded source dataset, then open the Builder again.",
-            )
-            return None
-        population_tab = selection.population_tab
-        if selection.denominator_type == "population" and (
-            not isinstance(population_tab, DatasetTab)
-            or not population_tab.cache_complete
-        ):
-            QMessageBox.warning(
-                self,
-                "Categorical Table",
-                "Open or browse a fully loaded ADSL dataset for Population N.",
-            )
-            return None
-        try:
-            # Keep the Builder's Numerator WHERE independent from the source
-            # DatasetTab WHERE.  The selection contains the editable Builder
-            # snapshot, so running a table never mutates the source tab.
-            numerator_filter = FilterEngine(tab.handle.metadata.variables).compile(
-                selection.numerator_filter_text
-            )
-            population_filter = (
-                FilterEngine(population_tab.handle.metadata.variables).compile(
-                    selection.population_filter_text
-                )
-                if isinstance(population_tab, DatasetTab)
-                else FilterEngine(tab.handle.metadata.variables).compile("")
-            )
-            baseline_filter = FilterEngine(tab.handle.metadata.variables).compile(
-                selection.baseline_filter_text
-            )
-            postbaseline_filter = FilterEngine(tab.handle.metadata.variables).compile(
-                selection.postbaseline_filter_text
-            )
-            config = CategoricalConfig(
-                selection.items,
-                selection.treatment_variable,
-                selection.subject_id_variable,
-                selection.count_type,
-                numerator_filter,
-                selection.numerator_filter_text,
-                DenominatorConfig(
-                    selection.denominator_type,
-                    selection.analysis_value_variable,
-                    population_filter,
-                    selection.population_filter_text,
-                    baseline_filter,
-                    selection.baseline_filter_text,
-                    postbaseline_filter,
-                    selection.postbaseline_filter_text,
-                ),
-                selection.include_total,
-                selection.percent_digits,
-            )
-            config.validate(
-                tab.handle.metadata,
-                population_tab.handle.metadata
-                if isinstance(population_tab, DatasetTab)
-                else None,
-            )
-        except ValueError as error:
-            QMessageBox.warning(self, "Categorical Table", str(error))
-            return None
-        return (
-            tab,
-            population_tab if isinstance(population_tab, DatasetTab) else None,
-            config,
-        )
-
-    def _run_categorical_builder(self, selection: CategoricalBuilderSelection) -> None:
-        source_tab = self._builder_source("categorical")
-        if source_tab is None or not is_analysis_dataset(source_tab.handle):
-            return
-        builder = self.analysis_panel.categorical_builder
-        current_filter = source_tab.current_where_text()
-        builder_filter = builder.current_filter_text()
-        # An empty Builder value can still be offered the current source WHERE
-        # as a convenience.  A non-empty, different value is an intentional
-        # independent Numerator WHERE and must never be silently replaced.
-        if not builder_filter and current_filter:
-            response = QMessageBox.question(
-                self,
-                "Categorical Table",
-                "Numerator WHERE is empty. Use the current dataset WHERE for this "
-                "calculation?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if response == QMessageBox.Yes:
-                builder.apply_current_filter(current_filter)
-        # The confirmation above can change the Builder value after the
-        # selection signal was emitted.  Always build the config from the
-        # final, independent Numerator WHERE shown in the Builder.
-        selection = replace(
-            selection,
-            numerator_filter_text=builder.current_filter_text(),
-        )
-        context = self._categorical_builder_context(selection)
-        if context is None:
-            return
-        source_tab, population_tab, config = context
-        source_handle = source_tab.handle
-        population_handle = population_tab.handle if population_tab else None
-        self._categorical_input_tabs = {source_tab}
-        if population_tab:
-            self._categorical_input_tabs.add(population_tab)
-        builder.set_busy(True, "Calculating categorical table in the background…")
-
-        def completed(handle: DatasetHandle) -> None:
-            self._categorical_input_tabs.clear()
-            builder.set_busy(
-                False, f"Created {handle.metadata.row_count:,} result rows."
-            )
-            result_tab = self._make_dataset_tab(handle)
-            retained = {source_handle.temporary_path.parent}
-            if population_handle is not None:
-                retained.add(population_handle.temporary_path.parent)
-            for directory in retained:
-                self._retain_directory(directory)
-            self._categorical_sources[result_tab] = CategoricalResultContext(
-                source_handle, population_handle, config
-            )
-            index = self.tabs.addTab(result_tab, "Categorical Table Result")
-            self.tabs.setCurrentIndex(index)
-            self._sync_active_tab()
-            result_tab.start()
-
-        def failed(message: str, details: str) -> None:
-            self._categorical_input_tabs.clear()
-            builder.set_busy(False, "Categorical Table failed.")
-            self._show_error("Categorical Table Failed", message, details)
-
-        self._submit(
-            builder,
-            lambda worker: self.categorical_engine.run(
-                source_handle, config, population_handle, worker.report
-            ),
-            completed,
-            failed,
-        )
-
-    def _unique_dataset_tab_title(self, base: str) -> str:
-        existing = {self.tabs.tabText(index) for index in range(self.tabs.count())}
-        if base not in existing:
-            return base
-        suffix = 2
-        while f"{base} ({suffix})" in existing:
-            suffix += 1
-        return f"{base} ({suffix})"
-
-    def _drilldown_categorical(
-        self, tab: DatasetTab, view_row: int, column_name: str, display: str
-    ) -> None:
-        context = self._categorical_sources.get(tab)
-        source_row = tab.model.source_row_id(view_row)
-        if context is None or source_row is None or not display:
-            return
-        cell = lookup_cell(tab.handle, source_row, column_name)
-        if cell is None:
-            return
-        dialog, records, subjects, denominator = self._categorical_drilldown_dialog()
-        dialog.exec()
-        selected = dialog.selected_button
-        if selected not in {records, subjects, denominator}:
-            return
-        is_denominator = selected is denominator
-        target = (
-            context.population
-            if is_denominator and context.config.denominator.type == "population"
-            else context.source
-        )
-        if target is None:
-            QMessageBox.warning(
-                self,
-                "Categorical Table Drill-down",
-                "The required source dataset is no longer available.",
-            )
-            return
-        try:
-            if context.config.denominator.type == "baseline_postbaseline":
-                where_sql, parameters = build_n1_cell_filter(
-                    context.source.metadata,
-                    context.config,
-                    cell,
-                    denominator=is_denominator,
-                )
-            else:
-                where_sql, parameters = build_cell_filter(
-                    target.metadata,
-                    context.config,
-                    cell,
-                    denominator=is_denominator,
-                )
-        except (StopIteration, ValueError) as error:
-            QMessageBox.warning(self, "Categorical Table Drill-down", str(error))
-            return
-        mode = (
-            "Denominator Subjects"
-            if is_denominator
-            else "Numerator Subjects"
-            if selected is subjects
-            else "Numerator Records"
-        )
-        title = self._unique_dataset_tab_title(f"Query: {mode}")
-        self.task_status.setText(f"Building {title}…")
-
-        def completed(handle: DatasetHandle) -> None:
-            if self.tabs.indexOf(tab) < 0:
-                self._remove_dataset_directory(handle.temporary_path.parent)
-                return
-            query_tab = self._make_dataset_tab(handle)
-            index = self.tabs.addTab(query_tab, title)
-            self.tabs.setCurrentIndex(index)
-            query_tab.start()
-
-        self._submit(
-            tab,
-            lambda _worker: self.categorical_query_builder.run(
-                target,
-                where_sql,
-                parameters,
-                title,
-                subject_id_variable=(
-                    context.config.subject_id_variable
-                    if selected is subjects or is_denominator
-                    else None
-                ),
-            ),
-            completed,
-            lambda message, details: self._show_error(
-                "Categorical Table Drill-down Failed", message, details
-            ),
-        )
-
-    def _categorical_drilldown_dialog(self):
-        """Create the compact, readable categorical drill-down chooser."""
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Categorical Table Drill-down")
-        dialog.setModal(True)
-        dialog.setMinimumSize(420, 250)
-        dialog.selected_button = None
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("Choose rows to display for this n (%) cell."))
-        records = QPushButton("Show Numerator Records")
-        subjects = QPushButton("Show Numerator Subjects")
-        denominator = QPushButton("Show Denominator Subjects")
-        cancel = QPushButton("Cancel")
-        for button in (records, subjects, denominator):
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-            def choose(_checked=False, selected_button=button):
-                dialog.selected_button = selected_button
-                dialog.accept()
-
-            button.clicked.connect(choose)
-            layout.addWidget(button)
-        cancel.clicked.connect(dialog.reject)
-        layout.addWidget(cancel)
-        return dialog, records, subjects, denominator
-
-    def _open_categorical_long_result(self) -> None:
-        tab = self.current_dataset_tab()
-        context = self._categorical_sources.get(tab) if tab is not None else None
-        if tab is None or tab.handle.kind != "categorical" or context is None:
-            return
-        context_names = tuple(
-            dict.fromkeys(
-                name for item in context.config.items for name in item.context_variables
-            )
-        )
-        fields = {
-            variable.name.casefold(): variable
-            for variable in context.source.metadata.variables
-        }
-        context_variables = tuple(fields[name.casefold()] for name in context_names)
-        title = self._unique_dataset_tab_title("Categorical Table Long Result")
-        self.task_status.setText(f"Building {title}…")
-
-        def completed(handle: DatasetHandle) -> None:
-            if self.tabs.indexOf(tab) < 0:
-                self._remove_dataset_directory(handle.temporary_path.parent)
-                return
-            long_tab = self._make_dataset_tab(handle)
-            index = self.tabs.addTab(long_tab, title)
-            self.tabs.setCurrentIndex(index)
-            long_tab.start()
-
-        self._submit(
-            tab,
-            lambda _worker: self.categorical_long_result_builder.run(
-                tab.handle, context.source, context_variables
-            ),
-            completed,
-            lambda message, details: self._show_error(
-                "Categorical Long Result Failed", message, details
-            ),
-        )
-
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:
         if (
             self.tabs.indexOf(tab) < 0
@@ -1968,11 +1641,7 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         widget = self.tabs.widget(index)
-        bound_builders = [
-            name.replace("_", " ").title()
-            for name, source in self._builder_sources.items()
-            if source is widget
-        ]
+        bound_builders = []
         bound_builders.extend(self.analysis_controller.bound_builder_titles(widget))
         if bound_builders:
             QMessageBox.warning(

@@ -197,9 +197,20 @@ class XptSequentialReader:
                 raise ValueError("The XPT file contains a variable without a name.")
             raw_format = _decode_xpt_text(field.get("nform"))
             format_width = field.get("nfl")
-            decimals = field.get("nfj")
-            if raw_format and format_width:
-                raw_format = f"{raw_format}{format_width}.{decimals or 0}"
+            decimals = int(field.get("num_decimals") or 0)
+            if format_width:
+                width = int(format_width)
+                if raw_format:
+                    # XPORT stores the format name, width, and decimal
+                    # precision in separate fields.  ``nfj`` is the numeric
+                    # justification flag, not the decimal count.
+                    raw_format = f"{raw_format}{width}."
+                    if decimals:
+                        raw_format += str(decimals)
+                elif decimals:
+                    # Numeric formats such as 8.2 have no format name in
+                    # XPORT metadata, but their width/precision are retained.
+                    raw_format = f"{width}.{decimals}"
             variables.append(
                 VariableMetadata(
                     name=name,

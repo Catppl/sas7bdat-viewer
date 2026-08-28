@@ -423,7 +423,6 @@ class UiSmokeTests(unittest.TestCase):
             window.tabs.setCurrentWidget(source_b)
             application.processEvents()
 
-            self.assertEqual(window._builder_sources, {})
             self.assertIs(window.analysis_controller.listing_source, source_a)
             self.assertIs(window.analysis_controller.categorical_source, source_a)
             self.assertIs(window.analysis_controller.rule_based_source, source_a)
@@ -465,7 +464,6 @@ class UiSmokeTests(unittest.TestCase):
                 window.analysis_panel.listing_builder,
             ):
                 builder.clear()
-            self.assertEqual(window._builder_sources, {})
             self.assertIsNone(window.analysis_controller.listing_source)
             self.assertIsNone(window.analysis_controller.categorical_source)
             self.assertIsNone(window.analysis_controller.rule_based_source)
@@ -899,7 +897,7 @@ class UiSmokeTests(unittest.TestCase):
                 categorical.items.width() - 1,
             )
             drilldown_dialog, records_button, subjects_button, denominator_button = (
-                window._categorical_drilldown_dialog()
+                window.analysis_controller._drilldown_dialog()
             )
             self.assertEqual(
                 [

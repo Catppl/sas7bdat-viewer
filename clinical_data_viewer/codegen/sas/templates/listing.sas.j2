@@ -88,7 +88,7 @@ data listing_prep;
 {% endif %}{% endfor %}run;
 
 /* 3. Sort listing records */
-proc sort data=listing_prep out=listing_sorted;
+proc sort data=listing_prep out=_lst_sorted;
     by
 {% for column in sort_columns %}        {% if column.direction == "desc" %}descending {% endif %}_lst_val{{ column.index }}
 {% endfor %}        _listing_row;
@@ -96,7 +96,7 @@ run;
 
 /* 4. Build character result columns and produce the report */
 data {{ output_dataset }};
-    set listing_sorted(
+    set _lst_sorted(
         keep=
 {% for column in columns %}            {% if column.report %}_lst_out{{ column.index }}{% else %}_lst_val{{ column.index }}{% endif %}
 {% endfor %}    );
@@ -123,5 +123,5 @@ proc report data={{ output_dataset }} nowd missing;
 
 /* 5. Clean up */
 proc datasets lib=work nolist;
-    delete lst_main lst_adsl listing_base listing_prep listing_sorted;
+    delete lst_main lst_adsl listing_base listing_prep _lst_sorted;
 quit;

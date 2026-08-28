@@ -225,10 +225,45 @@ class SasReaderTests(unittest.TestCase):
             with XptSequentialReader(source) as reader:
                 variable = reader.variables[0]
                 row = reader.read_chunk(1)
-        self.assertTrue(variable.format.startswith("DATE9."))
+        self.assertEqual(variable.format, "DATE9.")
         self.assertIsNotNone(row)
         assert row is not None
         self.assertEqual(format_sas_value(row.iloc[0]["ADT"], variable), "27AUG2026")
+
+    def test_xpt_preserves_common_format_width_and_decimals(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "formats.xpt"
+            frame = pd.DataFrame(
+                {
+                    "ADT": [24_345.0],
+                    "ADTM": [2_102_533_522.0],
+                    "ATM": [45_296.0],
+                    "AVAL": [8.25],
+                }
+            )
+            pyreadstat.write_xport(
+                frame,
+                source,
+                file_format_version=5,
+                variable_format={
+                    "ADT": "DATE9.",
+                    "ADTM": "DATETIME20.",
+                    "ATM": "TIME10.",
+                    "AVAL": "8.2",
+                },
+            )
+            with XptSequentialReader(source) as reader:
+                formats = {variable.name: variable.format for variable in reader.variables}
+
+        self.assertEqual(
+            formats,
+            {
+                "ADT": "DATE9.",
+                "ADTM": "DATETIME20.",
+                "ATM": "TIME10.",
+                "AVAL": "8.2",
+            },
+        )
 
     def test_xpt_unknown_total_uses_bounded_sequential_skip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -270,7 +270,7 @@ class SasListingGenerator:
                     _mapping(configuration["targets"], "targets")["sas"],
                     "targets.sas",
                 ).get("output_dataset")
-                or "work.listing_sorted"
+                or "work.listing"
             ),
             "line_size": int(
                 _mapping(configuration["report"], "report").get("line_size", 132)

@@ -146,6 +146,14 @@ class SasListingGeneratorTests(unittest.TestCase):
         self.assertIn("length USUBJID $200", code)
         self.assertIn("listing.sas.j2", generator.environment.list_templates())
 
+    def test_final_output_is_not_removed_by_cleanup(self) -> None:
+        code = SasListingGenerator().generate(configuration())
+        self.assertIn("proc sort data=listing_prep out=_lst_sorted;", code)
+        self.assertIn("set _lst_sorted(", code)
+        cleanup = code.split("proc datasets lib=work nolist;", 1)[1]
+        self.assertIn("_lst_sorted", cleanup)
+        self.assertNotIn("listing_sorted;", cleanup)
+
     def test_adsl_merge_has_left_merge_keep_and_missing_key_protection(self) -> None:
         code = SasListingGenerator().generate(configuration(merge=True))
         self.assertIn("set adsl.ADSL(", code)
