@@ -8,6 +8,10 @@ from datetime import UTC, date, datetime
 from ..domain import VariableMetadata
 from ..sas_value_formatter import format_sas_value
 
+_DEFAULT_CHARACTER_LENGTH = 200
+_MAX_CHARACTER_LENGTH = 32_767
+_FORMAT_WIDTH = re.compile(r"(?P<width>\d+)$")
+
 
 class ListingExpressionError(ValueError):
     pass
@@ -136,7 +140,7 @@ class ExpressionParser:
         if upper in {"PUT", "INPUT"}:
             arguments.append(self.concat())
             self.consume(",")
-            if self.current.kind != "name":
+            if self.current.kind not in {"name", "number"}:
                 raise ListingExpressionError(
                     f"{upper}() requires a SAS format/informat."
                 )
@@ -195,8 +199,110 @@ def infer_kind(expression: dict[str, object]) -> str:
         return "character"
     if kind in {"binary", "unary"}:
         return "numeric"
-    name = str(expression["name"])
+    name = str(expression["name"]).upper()
     return "numeric" if name in {"INPUT", "COALESCE"} else "character"
+
+
+def _metadata_for(
+    expression: dict[str, object], metadata: dict[str, VariableMetadata]
+) -> VariableMetadata | None:
+    if expression.get("type") != "variable":
+        return None
+    return metadata.get(str(expression.get("name", "")).casefold())
+
+
+def _format_width(format_text: str) -> int | None:
+    normalized = str(format_text or "").strip()
+    if not normalized:
+        return None
+    base = normalized.rstrip(".").split(".", 1)[0]
+    match = _FORMAT_WIDTH.search(base)
+    if match is None:
+        return None
+    return int(match.group("width"))
+
+
+def _display_length(
+    expression: dict[str, object], metadata: dict[str, VariableMetadata]
+) -> int:
+    length = infer_length(expression, metadata)
+    if length is not None:
+        return length
+    variable = _metadata_for(expression, metadata)
+    if variable is not None:
+        return _format_width(variable.format) or 32
+    return 32
+
+
+def infer_length(
+    expression: dict[str, object], metadata: dict[str, VariableMetadata]
+) -> int | None:
+    """Infer a safe character length for an expression.
+
+    Direct character variables retain their metadata length.  Derived
+    character expressions reserve room for their inputs and explicit PUT()
+    formats, with a bounded fallback when the source metadata is incomplete.
+    Numeric expressions do not have a character length.
+    """
+    if infer_kind(expression) != "character":
+        return None
+    node = str(expression.get("type", ""))
+    if node == "literal":
+        length = len(str(expression.get("value", "")))
+    elif node == "variable":
+        variable = _metadata_for(expression, metadata)
+        length = (
+            variable.length
+            if variable is not None and variable.length
+            else _DEFAULT_CHARACTER_LENGTH
+        )
+    elif node == "concat":
+        length = _display_length(expression["left"], metadata) + _display_length(
+            expression["right"], metadata
+        )
+    elif node == "function":
+        name = str(expression.get("name", "")).upper()
+        arguments = [
+            argument
+            for argument in expression.get("arguments", ())
+            if argument.get("type") != "format"
+        ]
+        if name == "PUT":
+            format_node = expression["arguments"][1]
+            length = _format_width(str(format_node.get("value", ""))) or 32
+        elif name in {"STRIP", "UPCASE", "LOWCASE", "SCAN"} and arguments:
+            length = _display_length(arguments[0], metadata)
+        elif name == "SUBSTR" and arguments:
+            length = _display_length(arguments[0], metadata)
+            if len(expression.get("arguments", ())) >= 3:
+                length_node = expression["arguments"][2]
+                if length_node.get("type") == "literal":
+                    try:
+                        length = int(length_node["value"])
+                    except (TypeError, ValueError):
+                        pass
+        elif name == "COALESCEC":
+            length = max(
+                (
+                    infer_length(argument, metadata) or _DEFAULT_CHARACTER_LENGTH
+                    for argument in arguments
+                ),
+                default=_DEFAULT_CHARACTER_LENGTH,
+            )
+        elif name in {"CATS", "CATX"}:
+            value_arguments = arguments[1:] if name == "CATX" else arguments
+            length = sum(
+                _display_length(argument, metadata)
+                for argument in value_arguments
+            )
+            if name == "CATX" and arguments:
+                length += _display_length(arguments[0], metadata)
+            length = length or _DEFAULT_CHARACTER_LENGTH
+        else:
+            length = _DEFAULT_CHARACTER_LENGTH
+    else:
+        length = _DEFAULT_CHARACTER_LENGTH
+    return max(1, min(_MAX_CHARACTER_LENGTH, int(length)))
 
 
 _EPOCH_DATE = date(1960, 1, 1)

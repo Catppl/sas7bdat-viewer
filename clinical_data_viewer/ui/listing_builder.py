@@ -108,6 +108,9 @@ class ListingBuilder(QWidget):
         form.addRow("Duplicates", self.duplicate_policy)
         self.rename_map = QLineEdit()
         self.rename_map.setPlaceholderText("e.g. AGE=AGE_ADSL, SEX=SEX_ADSL")
+        self._rename_map_user_edited = False
+        self._rename_map_syncing = False
+        self.rename_map.textChanged.connect(self._rename_map_changed)
         form.addRow("Rename map", self.rename_map)
         layout.addWidget(merge)
         filter_box = QGroupBox("Data Filter")
@@ -200,6 +203,7 @@ class ListingBuilder(QWidget):
                 self._filter_text = filter_text.strip()
                 self._filter_snapshot = self._filter_text
                 self.data_filter.setPlainText(self._filter_text)
+            self._refresh_rename_map()
         self.source_label.setText(f"Source: {source_text}")
         available = metadata is not None and not self._busy
         self.run.setEnabled(available)
@@ -236,28 +240,43 @@ class ListingBuilder(QWidget):
     def _names(text: str) -> tuple[str, ...]:
         return tuple(item for item in text.replace(",", " ").split() if item)
 
+    def _rename_map_changed(self, _text: str = "") -> None:
+        if not self._rename_map_syncing:
+            self._rename_map_user_edited = True
+
+    def _set_automatic_rename_map(self, text: str) -> None:
+        self._rename_map_syncing = True
+        try:
+            self.rename_map.setText(text)
+        finally:
+            self._rename_map_syncing = False
+
     def _refresh_rename_map(self):
         if self.duplicate_policy.currentData() != "rename" or self._metadata is None:
+            if not self._rename_map_user_edited:
+                self._set_automatic_rename_map("")
             return
         tab = self.adsl.currentData()
         metadata = getattr(getattr(tab, "handle", None), "metadata", None)
         if metadata is None:
+            if not self._rename_map_user_edited:
+                self._set_automatic_rename_map("")
             return
         source = {variable.name.casefold() for variable in self._metadata.variables}
         by = self.by.text().strip().casefold()
-        selected = set(self._names(self.keep.text())) or {
-            variable.name for variable in metadata.variables
+        selected = {name.casefold() for name in self._names(self.keep.text())} or {
+            variable.name.casefold() for variable in metadata.variables
         }
-        selected -= set(self._names(self.drop.text()))
+        selected -= {name.casefold() for name in self._names(self.drop.text())}
         duplicates = [
             variable.name
             for variable in metadata.variables
             if variable.name.casefold() in source
             and variable.name.casefold() != by
-            and variable.name in selected
+            and variable.name.casefold() in selected
         ]
-        if duplicates and not self.rename_map.text().strip():
-            self.rename_map.setText(
+        if not self._rename_map_user_edited:
+            self._set_automatic_rename_map(
                 ", ".join(f"{name}={name}_ADSL" for name in duplicates)
             )
 
@@ -470,7 +489,8 @@ class ListingBuilder(QWidget):
         self.merge_enabled.setChecked(False)
         self.keep.clear()
         self.drop.clear()
-        self.rename_map.clear()
+        self._rename_map_user_edited = False
+        self._set_automatic_rename_map("")
         self.status.clear()
         self._metadata = None
         self.variable_picker.clear()

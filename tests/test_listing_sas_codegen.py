@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 
 from clinical_data_viewer.codegen.sas import SasListingGenerator
@@ -119,8 +120,8 @@ def configuration(*, merge: bool = False) -> dict[str, object]:
         "report": {"line_size": 132, "width_method": "equal_visible_columns"},
         "calculation": {
             "reference_engine": "python_listing_v1",
-            "visible_output_type": "character",
-            "visible_character_length": 200,
+            "output_type": "expression_inferred",
+            "character_length": "metadata_or_expression_inferred",
         },
         "targets": {
             "sas": {
@@ -143,8 +144,24 @@ class SasListingGeneratorTests(unittest.TestCase):
         self.assertIn("column\n        USUBJID\n        AESTDY", code)
         report = code.split("proc report data=work.listing_sorted", 1)[1]
         self.assertNotIn("        ADY\n    ;\n", report)
-        self.assertIn("length USUBJID $200", code)
+        self.assertIn("length _lst_val1 $20", code)
+        self.assertIn("length _lst_val2 $57", code)
+        self.assertNotIn("_lst_out", code)
         self.assertIn("listing.sas.j2", generator.environment.list_templates())
+
+    def test_report_order_data_is_only_used_for_order_and_group(self) -> None:
+        code = SasListingGenerator().generate(configuration())
+        subject = code.split("define USUBJID /", 1)[1].split(";", 1)[0]
+        display = code.split("define AESTDY /", 1)[1].split(";", 1)[0]
+        self.assertIn("order=data", subject)
+        self.assertNotIn("order=data", display)
+
+        cfg = configuration()
+        cfg["columns"][1]["report"]["type"] = "group"
+        code = SasListingGenerator().generate(cfg)
+        grouped = code.split("define AESTDY /", 1)[1].split(";", 1)[0]
+        self.assertIn("group", grouped)
+        self.assertIn("order=data", grouped)
 
     def test_final_output_is_not_removed_by_cleanup(self) -> None:
         code = SasListingGenerator().generate(configuration())
@@ -201,3 +218,39 @@ class SasListingGeneratorTests(unittest.TestCase):
         self.assertIn("if ADY = 0 then _lst_val4 = .;", code)
         self.assertIn("label RATIO = 'Ratio';", code)
         self.assertIn("data work.listing_sorted;", code)
+
+    def test_numeric_report_columns_keep_numeric_type_and_format(self) -> None:
+        cfg = configuration()
+        cfg["columns"][0] = {
+            "expression": {
+                "text": "ADY",
+                "ast": _variable_expression("ADY", "numeric"),
+            },
+            "output_name": "ADY_OUT",
+            "label": "Study Day",
+            "format": "8.2",
+            "sort": {"order": 1, "direction": "asc"},
+            "report": {"include": True, "type": "display", "width_percent": 0},
+            "post_process": {"division_by_zero": "error"},
+        }
+        code = SasListingGenerator().generate(cfg)
+        self.assertIn("_lst_val1 = ADY;", code)
+        self.assertNotIn("length _lst_val1 $", code)
+        self.assertIn("format ADY_OUT 8.2;", code)
+        self.assertIn("format=8.2", code)
+
+    def test_width_allocation_stays_within_line_size(self) -> None:
+        cfg = configuration()
+        cfg["report"]["line_size"] = 40
+        cfg["columns"][2]["report"]["include"] = True
+        code = SasListingGenerator().generate(cfg)
+        report = code.split("proc report", 1)[1].split("/* 5. Clean up */", 1)[0]
+        widths = [int(value) for value in re.findall(r"width=(\d+)", report)]
+        self.assertEqual(len(widths), 3)
+        self.assertLessEqual(sum(widths) + len(widths) - 1, 40)
+
+    def test_reserved_output_names_are_rejected(self) -> None:
+        cfg = configuration()
+        cfg["columns"][0]["output_name"] = "_source_row"
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            SasListingGenerator().generate(cfg)

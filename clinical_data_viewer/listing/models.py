@@ -4,6 +4,13 @@ from dataclasses import dataclass, field
 
 from ..filter_engine import CompiledFilter
 
+LISTING_RESERVED_NAMES = frozenset({"_source_row", "_listing_row"})
+
+
+def is_reserved_listing_name(name: str) -> bool:
+    normalized = str(name).strip().casefold()
+    return normalized in LISTING_RESERVED_NAMES or normalized.startswith("_lst_")
+
 
 @dataclass(frozen=True, slots=True)
 class ListingColumn:
@@ -48,9 +55,9 @@ class ListingConfig:
                 raise ValueError("Listing column expression cannot be empty.")
             if not column.output_name.strip():
                 raise ValueError("Listing column Output Name cannot be empty.")
-            if column.output_name.casefold().startswith("_lst_"):
+            if is_reserved_listing_name(column.output_name):
                 raise ValueError(
-                    'Listing Output Name cannot start with reserved prefix "_lst_".'
+                    'Listing Output Name cannot use reserved names "_source_row", "_listing_row", or reserved prefix "_lst_".'
                 )
             key = column.output_name.casefold()
             if key in names:

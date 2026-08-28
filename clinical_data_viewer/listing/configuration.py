@@ -101,8 +101,8 @@ def build_listing_configuration(
         },
         "calculation": {
             "reference_engine": "python_listing_v1",
-            "visible_output_type": "character",
-            "visible_character_length": 200,
+            "output_type": "expression_inferred",
+            "character_length": "metadata_or_expression_inferred",
         },
         "targets": {
             "sas": {

@@ -6,12 +6,19 @@ from pathlib import Path
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import quote_identifier
 from ..temp_manager import TempManager
+from .models import is_reserved_listing_name
 
 
 class ListingResultWriter:
     def __init__(self, database_path: Path, variables: tuple[VariableMetadata, ...]):
         self.database_path = database_path
         self.variables = variables
+        reserved = next(
+            (variable.name for variable in variables if is_reserved_listing_name(variable.name)),
+            None,
+        )
+        if reserved is not None:
+            raise ValueError(f'Listing output variable "{reserved}" uses a reserved name.')
         self.connection = sqlite3.connect(database_path)
         definitions = ", ".join(
             f"{quote_identifier(variable.name)} {'REAL' if variable.kind == 'numeric' else 'TEXT'}"

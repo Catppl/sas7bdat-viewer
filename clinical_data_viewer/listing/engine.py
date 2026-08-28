@@ -8,8 +8,8 @@ from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import FilterEngine, quote_identifier
 from ..temp_manager import TempManager
 from .configuration import write_listing_configuration
-from .expressions import _display, evaluate, infer_kind, parse_expression
-from .models import ListingConfig
+from .expressions import evaluate, infer_kind, infer_length, parse_expression
+from .models import ListingConfig, is_reserved_listing_name
 from .result_store import ListingResultWriter
 
 
@@ -80,6 +80,10 @@ class ListingEngine:
                 if not target:
                     raise ValueError(
                         f'Resolve duplicate ADSL variable "{variable.name}" by Ignore or Rename.'
+                    )
+                if is_reserved_listing_name(target):
+                    raise ValueError(
+                        f'ADSL rename target "{target}" uses a reserved Listing name.'
                     )
                 if target.casefold() in used:
                     raise ValueError(
@@ -242,20 +246,30 @@ class ListingEngine:
             infer_kind(expression)
         notify("Preparing Listing source data…")
         directory = self.temp_manager.create_dataset_directory()
-        output_variables = tuple(
-            VariableMetadata(
-                column.output_name,
-                column.label or column.output_name,
-                "character" if column.include_in_report else infer_kind(expression),
-                200
-                if column.include_in_report or infer_kind(expression) == "character"
-                else None,
-                "" if column.include_in_report else column.format,
+        output_variables = []
+        for column, expression in zip(config.columns, expressions, strict=True):
+            kind = infer_kind(expression)
+            source_variable = (
+                fields.get(str(expression.get("name", "")).casefold())
+                if expression["type"] == "variable"
+                else None
             )
-            for column, expression in zip(config.columns, expressions, strict=True)
-        )
-        writer = ListingResultWriter(directory / "dataset.sqlite", output_variables)
+            format_text = column.format.strip() or (
+                source_variable.format if source_variable is not None else ""
+            )
+            output_variables.append(
+                VariableMetadata(
+                    column.output_name,
+                    column.label or column.output_name,
+                    kind,
+                    infer_length(expression, fields) if kind == "character" else None,
+                    format_text,
+                )
+            )
+        output_variables = tuple(output_variables)
+        writer: ListingResultWriter | None = None
         try:
+            writer = ListingResultWriter(directory / "dataset.sqlite", output_variables)
             connection = writer.connection
             self._base_table(connection, source, config, adsl, metadata)
             # Validate/execute the existing Viewer WHERE grammar against the resolved schema.
@@ -280,32 +294,16 @@ class ListingEngine:
                         config.columns, expressions, strict=True
                     )
                 )
-                displayed = []
-                for value, column, expression in zip(
-                    raw_values, config.columns, expressions, strict=True
-                ):
-                    if column.include_in_report:
-                        variable = (
-                            fields.get(str(expression.get("name", "")).casefold())
-                            if expression["type"] == "variable"
-                            else None
-                        )
-                        displayed.append(_display(value, variable, column.format))
-                    else:
-                        displayed.append(value)
                 keys = []
                 for index, column in enumerate(config.columns):
                     if column.sort_order is not None:
                         value = raw_values[index]
                         keys.append((column.sort_order, column.sort_direction, value))
-                rows.append((tuple(displayed), source_row, tuple(keys)))
+                rows.append((raw_values, source_row, tuple(keys)))
             notify("Sorting Listing records…")
 
             def normalize(value):
-                return (
-                    value is not None,
-                    value if not isinstance(value, str) else value.casefold(),
-                )
+                return (value is not None, value)
 
             ordered = rows
             # Stable multi-key sorting: source row is the final deterministic tie breaker.
@@ -339,5 +337,8 @@ class ListingEngine:
                 configuration_path=path,
             )
         except BaseException:
-            writer.abort(self.temp_manager, directory)
+            if writer is not None:
+                writer.abort(self.temp_manager, directory)
+            else:
+                self.temp_manager.remove_dataset(directory)
             raise

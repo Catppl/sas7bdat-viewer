@@ -74,8 +74,7 @@ data listing_prep;
     set listing_base;
 {% if data_filter %}    if not ({{ data_filter }}) then delete;
 {% endif %}
-{% for column in columns %}{% if column.kind == "character" %}    length _lst_val{{ column.index }} $200;
-{% endif %}{% if column.report %}    length _lst_out{{ column.index }} $200;
+{% for column in columns %}{% if column.kind == "character" %}    length _lst_val{{ column.index }} ${{ column.length }};
 {% endif %}{% endfor %}
 {% for column in columns %}{% if column.division_missing %}    /* {{ column.output }}: division by zero is returned as missing. */
     if {{ column.division_denominator }} = 0 then _lst_val{{ column.index }} = .;
@@ -84,8 +83,7 @@ data listing_prep;
     _lst_val{{ column.index }} = {{ column.expression }};
 {% else %}    _lst_val{{ column.index }} = {{ column.expression }};
 {% endif %}
-{% if column.report %}    _lst_out{{ column.index }} = {% if column.kind == "character" %}_lst_val{{ column.index }}{% elif column.format %}strip(put(_lst_val{{ column.index }}, {{ column.format }})){% else %}{{ column.char_expression }}{% endif %};
-{% endif %}{% endfor %}run;
+{% endfor %}run;
 
 /* 3. Sort listing records */
 proc sort data=listing_prep out=_lst_sorted;
@@ -94,30 +92,32 @@ proc sort data=listing_prep out=_lst_sorted;
 {% endfor %}        _listing_row;
 run;
 
-/* 4. Build character result columns and produce the report */
+/* 4. Build result columns and produce the report */
 data {{ output_dataset }};
     set _lst_sorted(
         keep=
-{% for column in columns %}            {% if column.report %}_lst_out{{ column.index }}{% else %}_lst_val{{ column.index }}{% endif %}
+{% for column in columns %}            _lst_val{{ column.index }}
 {% endfor %}    );
-{% for column in columns %}{% if column.report %}    length {{ column.output | sas_name }} $200;
-    {{ column.output | sas_name }} = _lst_out{{ column.index }};
-{% else %}    {{ column.output | sas_name }} = _lst_val{{ column.index }};
-{% if not column.report and column.format %}    format {{ column.output | sas_name }} {{ column.format }};
-{% endif %}{% endif %}{% if column.label %}    label {{ column.output | sas_name }} = {{ column.label | sas_string }};
+    rename
+{% for column in columns %}        _lst_val{{ column.index }} = {{ column.output | sas_name }}
+{% endfor %}    ;
+{% for column in columns %}{% if column.format %}    format {{ column.output | sas_name }} {{ column.format }};
+{% endif %}{% if column.label %}    label {{ column.output | sas_name }} = {{ column.label | sas_string }};
 {% endif %}{% endfor %}    keep
 {% for column in columns %}        {{ column.output | sas_name }}
 {% endfor %}    ;
 run;
 
 options linesize={{ line_size }};
-proc report data={{ output_dataset }} nowd missing;
+proc report data={{ output_dataset }} nowd missing spacing=1;
     column
 {% for column in report_columns %}        {{ column.output | sas_name }}
 {% endfor %}    ;
 {% for column in report_columns %}    define {{ column.output | sas_name }} /
         {{ column.report_type }}
-        width={{ column.width }}
+{% if column.report_type in ["order", "group"] %}        order=data
+{% endif %}{% if column.format %}        format={{ column.format }}
+{% endif %}        width={{ column.width }}
         {{ column.label | sas_string }};
 {% endfor %}run;
 

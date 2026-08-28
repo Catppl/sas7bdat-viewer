@@ -90,8 +90,8 @@ class ListingEngineTests(unittest.TestCase):
                     for item in result.metadata.variables
                 ],
                 [
-                    ("USUBJID", "character", 200),
-                    ("AESTDY", "character", 200),
+                    ("USUBJID", "character", 20),
+                    ("AESTDY", "character", 47),
                     ("ADY", "numeric", None),
                 ],
             )
@@ -108,6 +108,12 @@ class ListingEngineTests(unittest.TestCase):
             self.assertEqual(configuration["type"], "listing")
             self.assertEqual(
                 configuration["columns"][1]["expression"]["ast"]["type"], "concat"
+            )
+            self.assertEqual(
+                configuration["calculation"]["output_type"], "expression_inferred"
+            )
+            self.assertNotIn(
+                "visible_output_type", configuration["calculation"]
             )
 
     def test_adsl_left_merge_filter_duplicate_rename_and_missing_keys(self):
@@ -180,7 +186,7 @@ class ListingEngineTests(unittest.TestCase):
             result = ListingEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
                 self.assertEqual(
-                    connection.execute('SELECT "RATIO" FROM dataset').fetchone()[0], ""
+                    connection.execute('SELECT "RATIO" FROM dataset').fetchone()[0], None
                 )
 
     def test_duplicate_adsl_key_blocks_a_left_merge(self):
@@ -217,7 +223,7 @@ class ListingEngineTests(unittest.TestCase):
                 row = connection.execute(
                     'SELECT "ITEM", "CALC" FROM dataset'
                 ).fetchone()
-            self.assertEqual(row, ("01JAN1960 / 2", "6"))
+            self.assertEqual(row, ("01JAN1960 / 2", 6.0))
 
     def test_input_date_and_output_format_keep_a_numeric_internal_value(self):
         variables = (VariableMetadata("USUBJID"), VariableMetadata("AESTDTC"))
@@ -236,10 +242,30 @@ class ListingEngineTests(unittest.TestCase):
             )
             result = ListingEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
-                displayed = connection.execute(
+                raw_value = connection.execute(
                     'SELECT "AESTDT" FROM dataset'
                 ).fetchone()[0]
-            self.assertEqual(displayed, "03FEB2022")
+            self.assertEqual(raw_value, 22_679.0)
+            self.assertEqual(result.metadata.variables[0].kind, "numeric")
+            self.assertEqual(result.metadata.variables[0].format, "DATE9.")
+
+    def test_put_numeric_format_infers_character_length_without_coercing_source(self):
+        variables = (
+            VariableMetadata("USUBJID"),
+            VariableMetadata("AVAL", kind="numeric"),
+        )
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            source = handle(root, "adlb", variables, (("01", 12.5),))
+            config = ListingConfig(
+                (ListingColumn("PUT(AVAL, 8.2)", "AVAL_TEXT"),)
+            )
+            result = ListingEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                value = connection.execute('SELECT "AVAL_TEXT" FROM dataset').fetchone()[0]
+            self.assertEqual(value, "12.50")
+            self.assertEqual(result.metadata.variables[0].kind, "character")
+            self.assertEqual(result.metadata.variables[0].length, 8)
 
     def test_no_sort_warning_and_source_order_are_stable(self):
         variables = (VariableMetadata("USUBJID"),)
@@ -288,3 +314,54 @@ class ListingEngineTests(unittest.TestCase):
         config = ListingConfig((ListingColumn("USUBJID", "_lst_out1"),))
         with self.assertRaisesRegex(ValueError, "reserved prefix"):
             config.validate_basic()
+
+    def test_reserved_internal_output_names_are_rejected(self):
+        for name in ("_source_row", "_listing_row", "_SOURCE_ROW"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "reserved"):
+                ListingConfig((ListingColumn("USUBJID", name),)).validate_basic()
+
+    def test_result_writer_rejects_reserved_output_names(self):
+        from clinical_data_viewer.listing.result_store import ListingResultWriter
+
+        with tempfile.TemporaryDirectory() as path:
+            database = Path(path) / "dataset.sqlite"
+            with self.assertRaisesRegex(ValueError, "reserved"):
+                ListingResultWriter(
+                    database, (VariableMetadata("_source_row"),)
+                )
+            self.assertFalse(database.exists())
+
+    def test_adsl_reserved_rename_target_is_rejected(self):
+        variables = (VariableMetadata("USUBJID"), VariableMetadata("AGE", kind="numeric"))
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            source = handle(root, "adae", variables, (("01", 30),))
+            adsl = handle(root, "adsl", variables, (("01", 40),))
+            config = ListingConfig(
+                (ListingColumn("AGE_ADSL", "AGE_ADSL"),),
+                merge_adsl=ListingMergeAdsl(
+                    True,
+                    "USUBJID",
+                    ("AGE",),
+                    (),
+                    "rename",
+                    (("AGE", "_listing_row"),),
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "reserved"):
+                ListingEngine(TempManager(root / "temp")).resolved_metadata(
+                    source, config, adsl
+                )
+
+    def test_character_sort_uses_raw_case_sensitive_values(self):
+        variables = (VariableMetadata("VALUE", length=10),)
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            source = handle(root, "adae", variables, (("a",), ("B",), ("b",), ("A",)))
+            config = ListingConfig(
+                (ListingColumn("VALUE", "VALUE", sort_order=1),)
+            )
+            result = ListingEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                values = connection.execute('SELECT "VALUE" FROM dataset').fetchall()
+            self.assertEqual(values, [("A",), ("B",), ("a",), ("b",)])

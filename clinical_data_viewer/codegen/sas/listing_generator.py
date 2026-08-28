@@ -5,6 +5,9 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
+from ...domain import VariableMetadata
+from ...listing.expressions import infer_length
+from ...listing.models import is_reserved_listing_name
 from ...resources import resource_path
 from .filter_renderer import sas_filter_expression, sas_name, sas_string
 
@@ -38,7 +41,38 @@ def _kind(expression: Mapping[str, object]) -> str:
         return "character"
     if node in {"binary", "unary"}:
         return "numeric"
-    return "numeric" if expression["name"] in {"INPUT", "COALESCE"} else "character"
+    return (
+        "numeric"
+        if str(expression["name"]).upper() in {"INPUT", "COALESCE"}
+        else "character"
+    )
+
+
+def _variable_block(
+    variables: Mapping[str, object], name: object
+) -> Mapping[str, object]:
+    target = str(name).casefold()
+    for variable_name, value in variables.items():
+        if str(variable_name).casefold() == target:
+            return _mapping(value, "variable metadata")
+    return {}
+
+
+def _variable_metadata(
+    variables: Mapping[str, object]
+) -> dict[str, VariableMetadata]:
+    resolved: dict[str, VariableMetadata] = {}
+    for name, value in variables.items():
+        block = _mapping(value, "variables")
+        length = block.get("length")
+        resolved[str(name).casefold()] = VariableMetadata(
+            str(name),
+            str(block.get("label") or ""),
+            str(block.get("type") or block.get("kind") or "character"),
+            int(length) if length is not None else None,
+            str(block.get("format") or ""),
+        )
+    return resolved
 
 
 def _literal(value: object) -> str:
@@ -57,9 +91,7 @@ def _expression(
     elif node == "variable":
         result = sas_name(expression["name"])
         if character and _kind(expression) == "numeric":
-            variable = _mapping(
-                variables.get(str(expression["name"]), {}), "variable metadata"
-            )
+            variable = _variable_block(variables, expression["name"])
             format_text = str(variable.get("format") or "").strip()
             return (
                 f"strip(put({result}, {format_text}))"
@@ -123,6 +155,21 @@ def _division_denominator(
     if expression.get("type") != "binary" or expression.get("operator") != "/":
         return None
     return _expression(_mapping(expression["right"], "binary.right"), variables)
+
+
+def _allocate_widths(line_size: int, count: int) -> list[int]:
+    """Allocate equal PROC REPORT widths without exceeding LINESIZE."""
+    spacing = max(0, count - 1)
+    minimum = 8
+    available = line_size - spacing
+    if available < count * minimum:
+        required = count * minimum + spacing
+        raise ValueError(
+            f"Listing report line size {line_size} is too small for {count} "
+            f"columns; at least {required} characters are required."
+        )
+    width, remainder = divmod(available, count)
+    return [width + (index < remainder) for index in range(count)]
 
 
 class SasListingGenerator:
@@ -191,6 +238,10 @@ class SasListingGenerator:
                         raise ValueError(f"Unresolved duplicate ADSL variable: {name}.")
                 else:
                     output = str(name)
+                if is_reserved_listing_name(output):
+                    raise ValueError(
+                        f'ADSL rename target "{output}" uses a reserved Listing name.'
+                    )
                 adsl_projection.append({"source": str(name), "output": output})
         data_filter = _mapping(configuration["data_filter"], "data_filter")
         if data_filter.get("language") != "sas_like":
@@ -198,6 +249,7 @@ class SasListingGenerator:
         columns = list(configuration["columns"])
         if not columns:
             raise ValueError("Listing configuration has no columns.")
+        variable_metadata = _variable_metadata(variables)
         prepared = []
         report_columns = []
         sort_columns = []
@@ -207,16 +259,27 @@ class SasListingGenerator:
                 _mapping(column["expression"], "expression")["ast"], "expression.ast"
             )
             output = str(column["output_name"])
+            if is_reserved_listing_name(output):
+                raise ValueError(
+                    f'Listing Output Name "{output}" uses a reserved name.'
+                )
             report = _mapping(column["report"], "report")
             sort = _mapping(column["sort"], "sort")
             post = _mapping(column["post_process"], "post_process")
             kind = _kind(expression)
+            format_text = str(column.get("format") or "").strip()
+            if not format_text and expression.get("type") == "variable":
+                format_text = variable_metadata.get(
+                    str(expression.get("name", "")).casefold(),
+                    VariableMetadata("_"),
+                ).format
             item = {
                 "index": index,
                 "output": output,
                 "label": str(column.get("label") or output),
-                "format": str(column.get("format") or ""),
+                "format": format_text,
                 "kind": kind,
+                "length": infer_length(expression, variable_metadata),
                 "expression": _expression(expression, variables),
                 "char_expression": _expression(expression, variables, character=True),
                 "report": bool(report.get("include")),
@@ -242,12 +305,12 @@ class SasListingGenerator:
         if not report_columns:
             raise ValueError("Listing needs at least one PROC REPORT column.")
         sort_columns.sort(key=lambda item: item["order"])
-        width = max(
-            8,
-            int(_mapping(configuration["report"], "report").get("line_size", 132))
-            // len(report_columns),
+        line_size = int(
+            _mapping(configuration["report"], "report").get("line_size", 132)
         )
-        for item in report_columns:
+        for item, width in zip(
+            report_columns, _allocate_widths(line_size, len(report_columns)), strict=True
+        ):
             item["width"] = width
         context = {
             "source": source,
@@ -272,9 +335,7 @@ class SasListingGenerator:
                 ).get("output_dataset")
                 or "work.listing"
             ),
-            "line_size": int(
-                _mapping(configuration["report"], "report").get("line_size", 132)
-            ),
+            "line_size": line_size,
         }
         try:
             return self.environment.get_template("listing.sas.j2").render(**context)
