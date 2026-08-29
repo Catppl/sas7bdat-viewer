@@ -52,6 +52,22 @@ class AnalysisControllerTests(unittest.TestCase):
         facade.proc_means.source_reload_completed.assert_called_once_with(source)
         facade.proc_means.source_reload_failed.assert_called_once_with(source)
 
+    def test_source_reload_lifecycle_is_forwarded_to_categorical_module(self) -> None:
+        from clinical_data_viewer.controllers.analysis_controller import (
+            AnalysisController,
+        )
+
+        facade = SimpleNamespace(proc_means=Mock(), categorical=Mock())
+        source = object()
+
+        AnalysisController.source_reload_started(facade, source)
+        AnalysisController.source_reload_completed(facade, source)
+        AnalysisController.source_reload_failed(facade, source)
+
+        facade.categorical.source_reload_started.assert_called_once_with(source)
+        facade.categorical.source_reload_completed.assert_called_once_with(source)
+        facade.categorical.source_reload_failed.assert_called_once_with(source)
+
     def test_listing_binding_close_blocker_and_result_release_paths(self) -> None:
         """Listing lifecycle state stays in AnalysisController, not MainWindow."""
         from clinical_data_viewer.controllers.analysis import ListingResultContext

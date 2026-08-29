@@ -12,6 +12,7 @@ from clinical_data_viewer.categorical import (
     CategoricalItem,
     CategoricalLongResultBuilder,
     DenominatorConfig,
+    MissingTreatmentError,
 )
 from clinical_data_viewer.categorical.drilldown import (
     CategoricalCell,
@@ -23,7 +24,6 @@ from clinical_data_viewer.categorical.drilldown import (
 from clinical_data_viewer.domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from clinical_data_viewer.filter_engine import FilterEngine
 from clinical_data_viewer.temp_manager import TempManager
-
 
 SOURCE_VARIABLES = (
     VariableMetadata("USUBJID"),
@@ -78,6 +78,324 @@ def make_handle(
 
 
 class CategoricalEngineTests(unittest.TestCase):
+    def test_distinct_subject_count_excludes_blank_and_null_subjects(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (
+                    ("S1", "A", "WHITE", "ALB", 1, 1.0, "Y"),
+                    ("", "A", "WHITE", "ALB", 1, 2.0, "Y"),
+                    (None, "A", "WHITE", "ALB", 1, 3.0, "Y"),
+                ),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                row = connection.execute(
+                    "SELECT freq, denom FROM categorical_long "
+                    "WHERE level_json = ? AND treatment_json = ?",
+                    ('"WHITE"', '"A"'),
+                ).fetchone()
+            self.assertEqual(row, (1, 1))
+
+    def test_missing_character_item_levels_are_displayed_as_one_level(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (
+                    ("S1", "A", "", "ALB", 1, 1.0, "Y"),
+                    ("S2", "A", None, "ALB", 1, 2.0, "Y"),
+                ),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE", include_missing_level=True),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                rows = connection.execute(
+                    'SELECT "ITEM_LEVEL", "TRT_1" FROM dataset'
+                ).fetchall()
+                long_rows = connection.execute(
+                    "SELECT level_json, treatment_json, freq FROM categorical_long"
+                ).fetchall()
+            self.assertIn(("\u00a0\u00a0\u00a0\u00a0(Missing)", "2 (100.0)"), rows)
+            self.assertEqual(
+                long_rows,
+                [("null", '"A"', 2), ("null", None, 2)],
+            )
+
+    def test_zero_frequency_cells_are_materialized_and_drilldownable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (("S1", "A", "WHITE", "ALB", 1, 1.0, "Y"),),
+            )
+            adsl = make_handle(
+                root,
+                "adsl",
+                ADSL_VARIABLES,
+                (("S1", "A", "WHITE", "Y"), ("S2", "B", "BLACK", "Y")),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("population"),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                row = connection.execute(
+                    'SELECT _source_row, "TRT_2" FROM dataset WHERE "ITEM_LEVEL" = ?',
+                    ("\u00a0\u00a0\u00a0\u00a0WHITE",),
+                ).fetchone()
+            assert row is not None
+            self.assertEqual(row[1], "0 (0.0)")
+            cell = lookup_cell(result, row[0], "TRT_2")
+            self.assertIsNotNone(cell)
+            assert cell is not None
+            where, parameters = build_cell_filter(source.metadata, config, cell)
+            query = CategoricalQueryBuilder(TempManager(root / "query")).run(
+                source, where, parameters, "zero"
+            )
+            with closing(sqlite3.connect(query.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT count(*) FROM dataset").fetchone()[0],
+                    0,
+                )
+
+    def test_population_can_use_a_different_treatment_variable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRTA"),
+                VariableMetadata("RACE"),
+            )
+            population_variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT01A"),
+                VariableMetadata("SAFFL"),
+            )
+            source = make_handle(
+                root, "adae", source_variables, (("S1", "A", "WHITE"),)
+            )
+            adsl = make_handle(
+                root,
+                "adsl",
+                population_variables,
+                (("S1", "A", "Y"), ("S2", "B", "Y")),
+            )
+            population_filter = FilterEngine(population_variables).compile('SAFFL = "Y"')
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRTA",
+                "USUBJID",
+                denominator=DenominatorConfig(
+                    "population",
+                    population_filter=population_filter,
+                    population_treatment_variable="TRT01A",
+                ),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                rows = connection.execute(
+                    'SELECT "TRT_1", "TRT_2" FROM dataset WHERE "ITEM_LEVEL" = ?',
+                    ("\u00a0\u00a0\u00a0\u00a0WHITE",),
+                ).fetchone()
+            self.assertEqual(rows, ("1 (100.0)", "0 (0.0)"))
+
+            cell = CategoricalCell("RACE", {}, "WHITE", "B")
+            denominator_where, denominator_params = build_cell_filter(
+                adsl.metadata, config, cell, denominator=True
+            )
+            denominator_query = CategoricalQueryBuilder(
+                TempManager(root / "denominator-query")
+            ).run(adsl, denominator_where, denominator_params, "denominator")
+            with closing(sqlite3.connect(denominator_query.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT count(*) FROM dataset").fetchone()[0],
+                    1,
+                )
+
+    def test_item_label_is_used_in_wide_header(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (("S1", "A", "WHITE", "ALB", 1, 1.0, "Y"),),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE", label="Race category"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                header = connection.execute(
+                    'SELECT "ITEM_LEVEL" FROM dataset WHERE "ITEM_LEVEL" NOT LIKE ? LIMIT 1',
+                    ("%WHITE%",),
+                ).fetchone()
+            self.assertEqual(header, ("Race category",))
+
+    def test_nonmissing_denominator_zero_is_displayed_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (
+                    ("S1", "A", "WHITE", "ALB", 1, 1.0, "Y"),
+                    ("S2", "B", "BLACK", "ALB", 1, None, "Y"),
+                ),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                row = connection.execute(
+                    'SELECT "TRT_2" FROM dataset WHERE "ITEM_LEVEL" = ?',
+                    ("\u00a0\u00a0\u00a0\u00a0WHITE",),
+                ).fetchone()
+            self.assertEqual(row, ("0 (—)",))
+
+    def test_population_missing_treatment_also_blocks_calculation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (("S1", "A", "WHITE", "ALB", 1, 1.0, "Y"),),
+            )
+            adsl = make_handle(
+                root,
+                "adsl",
+                ADSL_VARIABLES,
+                (("S1", None, "WHITE", "Y"),),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("population"),
+            )
+            with self.assertRaises(MissingTreatmentError):
+                CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+
+    def test_population_context_matching_is_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT"),
+                VariableMetadata("PARAMCD"),
+                VariableMetadata("RACE"),
+            )
+            population_variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT01A"),
+                VariableMetadata("paramcd"),
+            )
+            source = make_handle(
+                root,
+                "adae",
+                source_variables,
+                (("S1", "A", "ALB", "WHITE"),),
+            )
+            adsl = make_handle(
+                root,
+                "adsl",
+                population_variables,
+                (("S1", "A", "ALB"),),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE", context_variables=("PARAMCD",)),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig(
+                    "population", population_treatment_variable="TRT01A"
+                ),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                row = connection.execute(
+                    'SELECT "TRT_1" FROM dataset WHERE "ITEM_LEVEL" = ?',
+                    ("\u00a0\u00a0\u00a0\u00a0WHITE",),
+                ).fetchone()
+            self.assertEqual(row, ("1 (100.0)",))
+
+    def test_population_treatment_type_mismatch_is_rejected(self) -> None:
+        source = DatasetMetadata(
+            "ADAE",
+            0,
+            (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRTA", kind="character"),
+                VariableMetadata("RACE"),
+            ),
+        )
+        population = DatasetMetadata(
+            "ADSL",
+            0,
+            (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT01AN", kind="numeric"),
+            ),
+        )
+        config = CategoricalConfig(
+            (CategoricalItem("RACE"),),
+            "TRTA",
+            "USUBJID",
+            denominator=DenominatorConfig(
+                "population", population_treatment_variable="TRT01AN"
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "same type"):
+            config.validate(source, population)
+
+    def test_missing_treatment_blocks_source_and_population_calculation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (("S1", None, "WHITE", "ALB", 1, 1.0, "Y"),),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("RACE"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+            )
+            with self.assertRaises(MissingTreatmentError):
+                CategoricalEngine(TempManager(root / "temp")).run(source, config)
+
     def test_numerator_and_population_filters_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -204,7 +522,7 @@ class CategoricalEngineTests(unittest.TestCase):
             self.assertEqual(long_row, (1, 2, 50.0))
             self.assertIn(("RACE", "", "", ""), rows)
             self.assertIn(("\u00a0\u00a0\u00a0\u00a0WHITE", "1 (50.0)", "1 (100.0)", "2 (66.7)"), rows)
-            self.assertIn(("\u00a0\u00a0\u00a0\u00a0BLACK", "1 (50.0)", "", "1 (33.3)"), rows)
+            self.assertIn(("\u00a0\u00a0\u00a0\u00a0BLACK", "1 (50.0)", "0 (0.0)", "1 (33.3)"), rows)
             with closing(sqlite3.connect(result.database_path)) as connection:
                 result_row = connection.execute(
                     'SELECT _source_row FROM dataset WHERE "ITEM_LEVEL" = ?',
@@ -366,4 +684,14 @@ class CategoricalEngineTests(unittest.TestCase):
             denominator=DenominatorConfig("baseline_postbaseline", "AVAL"),
         )
         with self.assertRaisesRegex(ValueError, "record count"):
+            config.validate(DatasetMetadata("ADLB", 0, SOURCE_VARIABLES))
+
+    def test_custom_level_order_is_explicitly_reserved(self) -> None:
+        config = CategoricalConfig(
+            (CategoricalItem("RACE", level_order=("WHITE", "BLACK")),),
+            "TRT",
+            "USUBJID",
+            denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+        )
+        with self.assertRaisesRegex(ValueError, "level order"):
             config.validate(DatasetMetadata("ADLB", 0, SOURCE_VARIABLES))

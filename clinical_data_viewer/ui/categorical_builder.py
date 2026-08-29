@@ -43,6 +43,8 @@ class CategoricalBuilderSelection:
     postbaseline_filter_text: str
     include_total: bool
     percent_digits: int
+    # Optional to preserve positional compatibility with older callers.
+    population_treatment_variable: str = ""
 
 
 class CategoricalItemEditor(QWidget):
@@ -91,19 +93,70 @@ class CategoricalItemEditor(QWidget):
 
     def set_metadata(
         self, metadata: DatasetMetadata | None, *, preserve: bool = False
-    ) -> None:
+    ) -> tuple[str, ...]:
         if metadata is self._metadata:
-            return
+            return ()
         existing = dict(self._configs) if preserve else {}
         self._metadata = metadata
+        if metadata is None:
+            self._configs.clear()
+            self.items.clear()
+            self.editor.clear()
+            self.contexts.set_metadata(None)
+            self.setEnabled(False)
+            return ()
         self.contexts.set_metadata(metadata, preserve=preserve)
+        removed: list[str] = []
+        available = {
+            variable.name.casefold(): variable for variable in metadata.variables
+        }
         if preserve:
-            self._configs = existing
+            configs: dict[str, CategoricalItem] = {}
+            for config in existing.values():
+                variable = available.get(config.variable.casefold())
+                if variable is None:
+                    removed.append(config.variable)
+                    continue
+                valid_contexts: list[str] = []
+                for context in config.context_variables:
+                    resolved = available.get(context.casefold())
+                    if resolved is None:
+                        removed.append(f"{config.variable}.{context}")
+                    elif resolved.name.casefold() not in {
+                        name.casefold() for name in valid_contexts
+                    }:
+                        valid_contexts.append(resolved.name)
+                configs[variable.name] = CategoricalItem(
+                    variable.name,
+                    config.label,
+                    tuple(valid_contexts),
+                    config.include_missing_level,
+                    config.level_order,
+                )
+            self._configs = configs
+            current = self.items.currentItem().text() if self.items.currentItem() else ""
+            self.items.clear()
+            self.items.addItems(self._configs)
+            if current:
+                index = self.items.findItems(current, Qt.MatchFixedString)
+                if index:
+                    self.items.setCurrentItem(index[0])
+            self._load_current(self.items.currentItem(), None)
         else:
             self._configs.clear()
             self.items.clear()
             self.editor.clear()
         self.setEnabled(metadata is not None)
+        return tuple(removed)
+
+    def clear_selection(self) -> None:
+        """Clear configured Items while retaining the currently bound metadata."""
+        self._configs.clear()
+        self.items.clear()
+        self.editor.clear()
+        self.label_editor.clear()
+        self.contexts.set_variables(())
+        self.include_missing.setChecked(False)
 
     def selected_items(self) -> tuple[CategoricalItem, ...]:
         self._save_current()
@@ -187,7 +240,9 @@ class CategoricalBuilder(QWidget):
         self._filter_text = ""
         self._source_filter_snapshot = ""
         self._busy = False
+        self._source_reloading = False
         self._adsl_user_selected = False
+        self._population_treatment_user_selected = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -254,12 +309,17 @@ class CategoricalBuilder(QWidget):
         population_layout = QFormLayout(self.population_page)
         adsl_row = QHBoxLayout()
         self.adsl = QComboBox()
-        self.adsl.currentIndexChanged.connect(self._mark_adsl_user_selection)
+        self.adsl.currentIndexChanged.connect(self._adsl_changed)
         adsl_row.addWidget(self.adsl, 1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self.browse_adsl_requested)
         adsl_row.addWidget(browse)
         population_layout.addRow("ADSL dataset", adsl_row)
+        self.population_treatment = QComboBox()
+        self.population_treatment.currentIndexChanged.connect(
+            self._mark_population_treatment_user_selection
+        )
+        population_layout.addRow("ADSL treatment variable", self.population_treatment)
         self.population_where = QLineEdit()
         self.population_where.setPlaceholderText('e.g. SAFFL = "Y"')
         population_layout.addRow("Population WHERE", self.population_where)
@@ -298,36 +358,49 @@ class CategoricalBuilder(QWidget):
         self.set_dataset(None, "")
 
     def set_dataset(
-        self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = ""
-    ) -> None:
+        self,
+        metadata: DatasetMetadata | None,
+        source_text: str,
+        filter_text: str = "",
+        *,
+        inherit_filter: bool = True,
+    ) -> tuple[str, ...]:
+        removed: list[str] = []
         if metadata is not None and metadata is not self._metadata:
             previous_metadata = self._metadata
             self._metadata = metadata
-            if self._filter_text == self._source_filter_snapshot:
+            if inherit_filter and self._filter_text == self._source_filter_snapshot:
                 self._filter_text = filter_text.strip()
                 self._source_filter_snapshot = self._filter_text
                 self._set_numerator_where(self._filter_text)
             names = [variable.name for variable in metadata.variables]
-            for combo, values in (
-                (self.treatment, names),
-                (self.subject, names),
-                (self.nonmissing_value, names),
-                (self.n1_value, names),
+            available = {name.casefold(): name for name in names}
+            for combo, role in (
+                (self.treatment, "Treatment variable"),
+                (self.subject, "Subject ID variable"),
+                (self.nonmissing_value, "Analysis value variable"),
+                (self.n1_value, "Analysis value variable"),
             ):
                 current = combo.currentText()
+                resolved = available.get(current.casefold()) if current else None
+                if current and resolved is None:
+                    removed.append(f"{role}: {current}")
                 combo.clear()
-                combo.addItems(values)
-                if current:
-                    index = combo.findText(current, Qt.MatchFixedString)
+                combo.addItems(names)
+                if resolved:
+                    index = combo.findText(resolved, Qt.MatchFixedString)
                     if index >= 0:
                         combo.setCurrentIndex(index)
-            self.items.set_metadata(metadata, preserve=previous_metadata is not None)
+            removed.extend(
+                self.items.set_metadata(metadata, preserve=previous_metadata is not None)
+            )
+            self._population_treatment_user_selected = False
+            self._refresh_population_treatment_variables()
         self.source_label.setText(
             f"Source: {source_text}" if metadata else "Select a fully loaded source dataset."
         )
-        enabled = metadata is not None and not self._busy
-        self.setEnabled(enabled or self._busy)
-        self.run_button.setEnabled(enabled)
+        self._update_enabled_state(metadata_available=metadata is not None)
+        return tuple(removed)
 
     def set_adsl_sources(self, datasets: list[tuple[object, str]]) -> None:
         current = self.adsl.currentData()
@@ -350,10 +423,11 @@ class CategoricalBuilder(QWidget):
                     for index, (_tab, label) in enumerate(datasets)
                     if label.split(" — ", 1)[0].casefold() == "adsl"
                 ),
-                current_index if current_index >= 0 else 0,
+                max(current_index, 0),
             )
             self.adsl.setCurrentIndex(adsl_index)
         self.adsl.blockSignals(False)
+        self._refresh_population_treatment_variables()
 
     def select_adsl(self, tab: object) -> None:
         index = self.adsl.findData(tab)
@@ -361,9 +435,42 @@ class CategoricalBuilder(QWidget):
             self._adsl_user_selected = True
             self.adsl.setCurrentIndex(index)
 
-    def _mark_adsl_user_selection(self, _index: int) -> None:
+    def _adsl_changed(self, _index: int) -> None:
         if not self.adsl.signalsBlocked():
             self._adsl_user_selected = True
+            self._population_treatment_user_selected = False
+            self._refresh_population_treatment_variables()
+
+    def _mark_population_treatment_user_selection(self, _index: int) -> None:
+        if not self.population_treatment.signalsBlocked():
+            self._population_treatment_user_selected = True
+
+    def _refresh_population_treatment_variables(self) -> None:
+        selected = (
+            self.population_treatment.currentText()
+            if self._population_treatment_user_selected
+            else ""
+        )
+        tab = self.adsl.currentData()
+        metadata = getattr(getattr(tab, "handle", None), "metadata", None)
+        names = [variable.name for variable in metadata.variables] if metadata else []
+        self.population_treatment.blockSignals(True)
+        self.population_treatment.clear()
+        self.population_treatment.addItems(names)
+        preferred = selected if selected in names else self.treatment.currentText()
+        index = self.population_treatment.findText(preferred, Qt.MatchFixedString)
+        if index < 0:
+            index = next(
+                (
+                    position
+                    for position, name in enumerate(names)
+                    if name.casefold().startswith("trt")
+                ),
+                -1,
+            )
+        if index >= 0:
+            self.population_treatment.setCurrentIndex(index)
+        self.population_treatment.blockSignals(False)
 
     def current_filter_text(self) -> str:
         return self._filter_text
@@ -400,13 +507,30 @@ class CategoricalBuilder(QWidget):
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
-        self.run_button.setEnabled(self._metadata is not None and not busy)
+        self._update_enabled_state()
         if message:
             self.status.setText(message)
 
+    def set_source_reloading(self, reloading: bool, message: str = "") -> None:
+        """Temporarily disable source-dependent actions during Dataset Reload."""
+        self._source_reloading = reloading
+        self._update_enabled_state()
+        if message:
+            self.status.setText(message)
+
+    def _update_enabled_state(self, *, metadata_available: bool | None = None) -> None:
+        available = (
+            (self._metadata is not None if metadata_available is None else metadata_available)
+            and not self._busy
+            and not self._source_reloading
+        )
+        self.setEnabled(available or self._busy)
+        self.run_button.setEnabled(available)
+        self.denominator_type.setEnabled(available)
+        self._sync_denominator_page()
+
     def clear(self) -> None:
-        self.items.set_metadata(None)
-        self.items.set_metadata(self._metadata)
+        self.items.clear_selection()
         self._filter_text = ""
         self._source_filter_snapshot = ""
         self._set_numerator_where("")
@@ -426,6 +550,9 @@ class CategoricalBuilder(QWidget):
         self.include_total.setChecked(True)
         self.percent_digits.setValue(1)
         self._adsl_user_selected = False
+        self._population_treatment_user_selected = False
+        self._source_reloading = False
+        self._refresh_population_treatment_variables()
         self.status.clear()
         self.cleared.emit()
 
@@ -461,5 +588,6 @@ class CategoricalBuilder(QWidget):
             self.postbaseline_where.text().strip(),
             self.include_total.isChecked(),
             self.percent_digits.value(),
+            population_treatment_variable=self.population_treatment.currentText(),
         )
         self.run_requested.emit(selection)

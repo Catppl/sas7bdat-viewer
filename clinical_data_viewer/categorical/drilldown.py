@@ -163,7 +163,13 @@ def build_cell_filter(
         clauses.append((config.denominator.population_filter.sql, config.denominator.population_filter.parameters))
     else:
         clauses.append((config.numerator_filter.sql, config.numerator_filter.parameters))
-    treatment = _field(metadata, config.treatment_variable)
+    treatment_name = config.treatment_variable
+    if denominator and config.denominator.type == "population":
+        treatment_name = (
+            config.denominator.population_treatment_variable
+            or config.treatment_variable
+        )
+    treatment = _field(metadata, treatment_name)
     if cell.treatment is not None:
         clauses.append(_exact_clause(treatment, cell.treatment))
     for name, value in cell.context.items():

@@ -287,14 +287,23 @@ class AnalysisController(QObject):
     def source_reload_started(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module before a dataset handle is replaced."""
         self.proc_means.source_reload_started(tab)
+        categorical = getattr(self, "categorical", None)
+        if categorical is not None:
+            categorical.source_reload_started(tab)
 
     def source_reload_completed(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module after a reload fully completes."""
         self.proc_means.source_reload_completed(tab)
+        categorical = getattr(self, "categorical", None)
+        if categorical is not None:
+            categorical.source_reload_completed(tab)
 
     def source_reload_failed(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module that a reload failed."""
         self.proc_means.source_reload_failed(tab)
+        categorical = getattr(self, "categorical", None)
+        if categorical is not None:
+            categorical.source_reload_failed(tab)
 
     def take_result_release_paths(self, tab: object) -> tuple[Path, ...]:
         """Detach an analysis result and return source directories to release."""

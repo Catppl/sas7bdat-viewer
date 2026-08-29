@@ -35,6 +35,9 @@ class DenominatorConfig:
         default_factory=lambda: CompiledFilter("", ())
     )
     postbaseline_filter_text: str = ""
+    # Population N may use a differently named treatment variable in ADSL
+    # (for example, TRT01A versus TRTA in the source dataset).
+    population_treatment_variable: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +109,10 @@ class CategoricalConfig:
         item_names: set[str] = set()
         for item in self.items:
             source_field(item.variable, "Item variable")
+            if item.level_order:
+                raise ValueError(
+                    "Custom categorical level order is reserved and not supported yet."
+                )
             folded = item.variable.casefold()
             if folded in item_names:
                 raise ValueError(f'Item variable "{item.variable}" is selected twice.')
@@ -122,7 +129,10 @@ class CategoricalConfig:
             population_known = {
                 variable.name.casefold(): variable for variable in population.variables
             }
-            required = [self.treatment_variable]
+            population_treatment = (
+                denom.population_treatment_variable or self.treatment_variable
+            )
+            required = [population_treatment]
             if self.count_type == "distinct_subject":
                 required.append(self.subject_id_variable)
             required.extend(
@@ -136,6 +146,27 @@ class CategoricalConfig:
                     "Population N requires these variables in ADSL: "
                     + ", ".join(dict.fromkeys(unknown))
                 )
+            source_treatment = known[self.treatment_variable.casefold()]
+            population_treatment_field = population_known[population_treatment.casefold()]
+            if source_treatment.kind != population_treatment_field.kind:
+                raise ValueError(
+                    f'Population treatment variable "{population_treatment}" must have the same type in source and ADSL.'
+                )
+            if self.count_type == "distinct_subject":
+                source_subject = known[self.subject_id_variable.casefold()]
+                population_subject = population_known[self.subject_id_variable.casefold()]
+                if source_subject.kind != population_subject.kind:
+                    raise ValueError(
+                        f'Subject ID variable "{self.subject_id_variable}" must have the same type in source and ADSL.'
+                    )
+            for item in self.items:
+                for context in item.context_variables:
+                    source_context = known[context.casefold()]
+                    population_context = population_known[context.casefold()]
+                    if source_context.kind != population_context.kind:
+                        raise ValueError(
+                            f'Population context variable "{context}" must have the same type in source and ADSL.'
+                        )
         elif denom.type == "nonmissing":
             source_field(denom.analysis_value_variable, "Non-missing analysis value")
         else:

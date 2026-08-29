@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -191,7 +192,7 @@ class SasReaderTests(unittest.TestCase):
                 complete = reader.continue_cache(initial)
             self.assertTrue(complete.cache_complete)
             self.assertEqual(complete.metadata.row_count, 5)
-            with sqlite3.connect(complete.database_path) as connection:
+            with closing(sqlite3.connect(complete.database_path)) as connection:
                 rows = connection.execute(
                     'SELECT "USUBJID", "AGE", "TERM" FROM dataset ORDER BY _source_row'
                 ).fetchall()

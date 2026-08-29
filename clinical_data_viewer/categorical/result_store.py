@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sqlite3
 import json
+import sqlite3
 from contextlib import closing
 from pathlib import Path
 
@@ -70,12 +70,14 @@ class CategoricalResultWriter:
         )
         self.connection.execute(
             "CREATE TABLE categorical_long ("
+            "row_order INTEGER NOT NULL, trt_order INTEGER NOT NULL, "
             "item_variable TEXT NOT NULL, item_label TEXT NOT NULL, "
             "context_json TEXT NOT NULL, level_json TEXT NOT NULL, "
             "treatment_json TEXT, freq INTEGER NOT NULL, denom INTEGER NOT NULL, "
             "pct REAL)"
         )
         self.row_count = 0
+        self._long_row_order = 0
 
     def _insert_display_row(
         self,
@@ -131,10 +133,15 @@ class CategoricalResultWriter:
                     treatment_json[treatment],
                 ),
             )
-        for treatment, (freq, denom) in long_cells.items():
+        self._long_row_order += 1
+        for trt_order, (treatment, (freq, denom)) in enumerate(
+            long_cells.items(), start=1
+        ):
             self.connection.execute(
-                "INSERT INTO categorical_long VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO categorical_long VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
+                    self._long_row_order,
+                    trt_order,
                     item,
                     item_label,
                     context_json,
@@ -169,14 +176,12 @@ class CategoricalResultWriter:
                 f"Categorical Table - {source.metadata.name}",
                 self.row_count,
                 self.variables,
-                display_column_names=tuple(
-                    [
-                        (self.item_level_column, "Item / Level"),
-                        *(
-                            (column, f"{label} n (%)")
-                            for _key, column, label in self.treatment_columns
-                        ),
-                    ]
+                display_column_names=(
+                    (self.item_level_column, "Item / Level"),
+                    *(
+                        (column, f"{label} n (%)")
+                        for _key, column, label in self.treatment_columns
+                    ),
                 ),
                 categorical_item_level_column=self.item_level_column,
             ),
@@ -242,7 +247,7 @@ class CategoricalLongResultBuilder:
                 cursor = connection.execute(
                     "SELECT item_variable, item_label, context_json, level_json, "
                     "treatment_json, freq, denom, pct FROM categorical_long "
-                    "ORDER BY rowid"
+                    "ORDER BY row_order, trt_order"
                 )
                 while rows := cursor.fetchmany(2_000):
                     values = []

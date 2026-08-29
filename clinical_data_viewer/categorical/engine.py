@@ -5,7 +5,7 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import closing
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from ..domain import DatasetHandle, VariableMetadata
 from ..filter_engine import quote_identifier
@@ -16,12 +16,18 @@ from .result_store import CategoricalResultWriter
 ProgressCallback = Callable[[str], None]
 
 
+class MissingTreatmentError(ValueError):
+    """Calculation is blocked when an analysis treatment value is missing."""
+
+
 def _missing(value: object, variable: VariableMetadata) -> bool:
     return value is None or (variable.kind == "character" and value == "")
 
 
-def _canonical(value: object) -> object:
+def _canonical(value: object, variable: VariableMetadata | None = None) -> object:
     """Use one stable representation for SQLite values, missing included."""
+    if variable is not None and _missing(value, variable):
+        return None
     if value is None:
         return None
     if isinstance(value, float) and value.is_integer():
@@ -42,10 +48,13 @@ def _count_value(
     key: tuple[object, ...],
     subject: object,
     count_type: str,
+    subject_variable: VariableMetadata | None = None,
 ) -> None:
     if count_type == "record":
         accumulator[key] = int(accumulator.get(key, 0)) + 1
-    elif subject is not None:
+    elif subject is not None and (
+        subject_variable is None or not _missing(subject, subject_variable)
+    ):
         values = accumulator.setdefault(key, set())
         assert isinstance(values, set)
         values.add(subject)
@@ -103,6 +112,10 @@ class CategoricalEngine:
         context_variables = tuple(source_fields[name.casefold()] for name in context_names)
         treatments = self._treatment_levels(source, config, source_fields)
         if config.denominator.type == "population" and population is not None:
+            population_treatment_name = (
+                config.denominator.population_treatment_variable
+                or config.treatment_variable
+            )
             treatments = self._merged_treatments(
                 treatments,
                 self._treatment_levels(
@@ -111,8 +124,10 @@ class CategoricalEngine:
                     population_fields,
                     config.denominator.population_filter.sql,
                     config.denominator.population_filter.parameters,
+                    population_fields[population_treatment_name.casefold()],
                 ),
             )
+        treatments.sort(key=lambda entry: self._treatment_sort_key(entry[1]))
         directory = self.temp_manager.create_dataset_directory()
         writer = CategoricalResultWriter(
             directory / "dataset.sqlite",
@@ -155,6 +170,15 @@ class CategoricalEngine:
         known = {key for key, _value, _label in first}
         return first + [entry for entry in second if entry[0] not in known]
 
+    @staticmethod
+    def _treatment_sort_key(value: object) -> tuple[object, ...]:
+        if value is None:
+            return (1, 0, "")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return (0, 0, float(value), str(value))
+        text = str(value)
+        return (0, 1, text.casefold(), text)
+
     def _treatment_levels(
         self,
         handle: DatasetHandle,
@@ -162,15 +186,22 @@ class CategoricalEngine:
         fields: dict[str, VariableMetadata],
         where_sql: str | None = None,
         parameters: tuple[object, ...] = (),
+        treatment: VariableMetadata | None = None,
     ) -> list[tuple[str, object, str]]:
-        treatment = fields[config.treatment_variable.casefold()]
+        treatment = treatment or fields[config.treatment_variable.casefold()]
         sql = where_sql if where_sql is not None else config.numerator_filter.sql
         params = parameters if where_sql is not None else config.numerator_filter.parameters
         where = f" WHERE {sql}" if sql else ""
         query = f"SELECT DISTINCT {quote_identifier(treatment.name)} FROM dataset{where}"
         with closing(self._connection(handle)) as connection:
-            values = [_canonical(row[0]) for row in connection.execute(query, params)]
-        values.sort(key=lambda value: (value is None, str(value)))
+            values = []
+            for (raw_value,) in connection.execute(query, params):
+                if _missing(raw_value, treatment):
+                    raise MissingTreatmentError(
+                        "Missing treatment values were found. Modify the Dataset or Population WHERE before running."
+                    )
+                values.append(_canonical(raw_value, treatment))
+        values.sort(key=self._treatment_sort_key)
         return [(_json(value), value, _display(value)) for value in values]
 
     @staticmethod
@@ -232,23 +263,39 @@ class CategoricalEngine:
         values: dict[tuple[object, ...], int | set[object]] = {}
         with closing(self._connection(source)) as connection:
             for row in connection.execute(query, config.numerator_filter.parameters):
-                level = _canonical(row[positions[item.name]])
+                level = _canonical(row[positions[item.name]], item)
                 if _missing(level, item) and not item_config.include_missing_level:
                     continue
                 context_key = _json(
                     {
-                        context.name: _canonical(row[positions[context.name]])
-                        for context in contexts
+                        name: _canonical(row[positions[context.name]], context)
+                        for name, context in zip(item_config.context_variables, contexts)
                     }
                 )
-                treatment_key = _json(_canonical(row[positions[treatment.name]]))
+                treatment_key = _json(
+                    _canonical(row[positions[treatment.name]], treatment)
+                )
                 level_key = _json(level)
                 identifier = (
-                    _canonical(row[positions[subject.name]]) if subject is not None else None
+                    _canonical(row[positions[subject.name]], subject)
+                    if subject is not None
+                    else None
                 )
-                _count_value(values, (context_key, treatment_key, level_key), identifier, config.count_type)
+                _count_value(
+                    values,
+                    (context_key, treatment_key, level_key),
+                    identifier,
+                    config.count_type,
+                    subject,
+                )
                 if config.include_total:
-                    _count_value(values, (context_key, None, level_key), identifier, config.count_type)
+                    _count_value(
+                        values,
+                        (context_key, None, level_key),
+                        identifier,
+                        config.count_type,
+                        subject,
+                    )
         return _materialize_counts(values)
 
     def _population_denominator(
@@ -258,7 +305,11 @@ class CategoricalEngine:
         item_config: CategoricalItem,
         fields: dict[str, VariableMetadata],
     ) -> dict[tuple[str, str], int]:
-        treatment = fields[config.treatment_variable.casefold()]
+        population_treatment_name = (
+            config.denominator.population_treatment_variable
+            or config.treatment_variable
+        )
+        treatment = fields[population_treatment_name.casefold()]
         contexts = tuple(fields[name.casefold()] for name in item_config.context_variables)
         subject = fields.get(config.subject_id_variable.casefold())
         columns, positions = self._selected_columns(treatment, contexts, None, subject)
@@ -268,19 +319,39 @@ class CategoricalEngine:
         values: dict[tuple[object, ...], int | set[object]] = {}
         with closing(self._connection(population)) as connection:
             for row in connection.execute(query, config.denominator.population_filter.parameters):
+                if _missing(row[positions[treatment.name]], treatment):
+                    raise MissingTreatmentError(
+                        "Missing treatment values were found in denominator data."
+                    )
                 context_key = _json(
                     {
-                        context.name: _canonical(row[positions[context.name]])
-                        for context in contexts
+                        name: _canonical(row[positions[context.name]], context)
+                        for name, context in zip(item_config.context_variables, contexts)
                     }
                 )
-                treatment_key = _json(_canonical(row[positions[treatment.name]]))
-                identifier = (
-                    _canonical(row[positions[subject.name]]) if subject is not None else None
+                treatment_key = _json(
+                    _canonical(row[positions[treatment.name]], treatment)
                 )
-                _count_value(values, (context_key, treatment_key), identifier, config.count_type)
+                identifier = (
+                    _canonical(row[positions[subject.name]], subject)
+                    if subject is not None
+                    else None
+                )
+                _count_value(
+                    values,
+                    (context_key, treatment_key),
+                    identifier,
+                    config.count_type,
+                    subject,
+                )
                 if config.include_total:
-                    _count_value(values, (context_key, None), identifier, config.count_type)
+                    _count_value(
+                        values,
+                        (context_key, None),
+                        identifier,
+                        config.count_type,
+                        subject,
+                    )
         return _materialize_counts(values)
 
     def _nonmissing_denominator(
@@ -305,17 +376,33 @@ class CategoricalEngine:
                     continue
                 context_key = _json(
                     {
-                        context.name: _canonical(row[positions[context.name]])
-                        for context in contexts
+                        name: _canonical(row[positions[context.name]], context)
+                        for name, context in zip(item_config.context_variables, contexts)
                     }
                 )
-                treatment_key = _json(_canonical(row[positions[treatment.name]]))
-                identifier = (
-                    _canonical(row[positions[subject.name]]) if subject is not None else None
+                treatment_key = _json(
+                    _canonical(row[positions[treatment.name]], treatment)
                 )
-                _count_value(values, (context_key, treatment_key), identifier, config.count_type)
+                identifier = (
+                    _canonical(row[positions[subject.name]], subject)
+                    if subject is not None
+                    else None
+                )
+                _count_value(
+                    values,
+                    (context_key, treatment_key),
+                    identifier,
+                    config.count_type,
+                    subject,
+                )
                 if config.include_total:
-                    _count_value(values, (context_key, None), identifier, config.count_type)
+                    _count_value(
+                        values,
+                        (context_key, None),
+                        identifier,
+                        config.count_type,
+                        subject,
+                    )
         return _materialize_counts(values)
 
     def _n1_item(
@@ -352,20 +439,24 @@ class CategoricalEngine:
         def group_key(row: tuple[object, ...]) -> tuple[str, str, object]:
             context = _json(
                 {
-                    field.name: _canonical(row[positions[field.name]])
-                    for field in contexts
+                    name: _canonical(row[positions[field.name]], field)
+                    for name, field in zip(item_config.context_variables, contexts)
                 }
             )
             return (
                 context,
-                _json(_canonical(row[positions[treatment.name]])),
-                _canonical(row[positions[subject.name]]),
+                _json(_canonical(row[positions[treatment.name]], treatment)),
+                _canonical(row[positions[subject.name]], subject),
             )
 
         eligible: set[tuple[str, str, object]] = set()
         base_query = f"SELECT {select} FROM dataset" + (f" WHERE {base_sql}" if base_sql else "")
         with closing(self._connection(source)) as connection:
             for row in connection.execute(base_query, base_params):
+                if _missing(row[positions[treatment.name]], treatment):
+                    raise MissingTreatmentError(
+                        "Missing treatment values were found. Modify the Dataset WHERE before running."
+                    )
                 if not _missing(row[positions[analysis.name]], analysis) and not _missing(
                     row[positions[subject.name]], subject
                 ):
@@ -375,6 +466,10 @@ class CategoricalEngine:
         post_query = f"SELECT {select} FROM dataset" + (f" WHERE {post_sql}" if post_sql else "")
         with closing(self._connection(source)) as connection:
             for row in connection.execute(post_query, post_params):
+                if _missing(row[positions[treatment.name]], treatment):
+                    raise MissingTreatmentError(
+                        "Missing treatment values were found. Modify the Dataset WHERE before running."
+                    )
                 if _missing(row[positions[analysis.name]], analysis) or group_key(row) not in eligible:
                     continue
                 context_key, treatment_key, identifier = group_key(row)
@@ -383,6 +478,7 @@ class CategoricalEngine:
                     (context_key, treatment_key),
                     identifier,
                     config.count_type,
+                    subject,
                 )
                 if config.include_total:
                     _count_value(
@@ -390,8 +486,9 @@ class CategoricalEngine:
                         (context_key, None),
                         identifier,
                         config.count_type,
+                        subject,
                     )
-                level = _canonical(row[positions[item.name]])
+                level = _canonical(row[positions[item.name]], item)
                 if _missing(level, item) and not item_config.include_missing_level:
                     continue
                 level_key = _json(level)
@@ -400,6 +497,7 @@ class CategoricalEngine:
                     (context_key, treatment_key, level_key),
                     identifier,
                     config.count_type,
+                    subject,
                 )
                 if config.include_total:
                     _count_value(
@@ -407,6 +505,7 @@ class CategoricalEngine:
                         (context_key, None, level_key),
                         identifier,
                         config.count_type,
+                        subject,
                     )
         return _materialize_counts(numerator_values), _materialize_counts(denominator_values)
 
@@ -445,7 +544,8 @@ class CategoricalEngine:
             context_text = ", ".join(
                 f"{name}={_display(context.get(name))}" for name in context_names
             )
-            header = item.variable if not context_text else f"{item.variable} — {context_text}"
+            item_title = item.label or item.variable
+            header = item_title if not context_text else f"{item_title} — {context_text}"
             writer.add_header(header)
             for level_key in levels:
                 level = json.loads(level_key)
@@ -453,9 +553,7 @@ class CategoricalEngine:
                 long_cells: dict[str | None, tuple[int, int]] = {}
                 treatment_json: dict[str | None, str] = {}
                 for treatment_key in all_treatments:
-                    frequency = rows[(context_key, level_key)].get(treatment_key)
-                    if frequency is None:
-                        continue
+                    frequency = rows[(context_key, level_key)].get(treatment_key, 0)
                     denom = denominator.get((context_key, treatment_key), 0)
                     cells[treatment_key] = (
                         self._format_cell(frequency, denom, config.percent_digits),

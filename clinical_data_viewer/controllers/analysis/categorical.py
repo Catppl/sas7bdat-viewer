@@ -100,15 +100,48 @@ class CategoricalController(AnalysisModuleController):
         self._categorical_source = None
         self._set_categorical_dataset(None)
 
-    def _set_categorical_dataset(self, tab: DatasetTab | None) -> None:
+    def source_reload_started(self, tab: DatasetTab) -> None:
+        """Freeze Categorical Builder while its fixed source is reloading."""
+        if self._categorical_source is tab:
+            self._panel.categorical_builder.set_source_reloading(
+                True,
+                "Source is reloading. Categorical Table is temporarily unavailable.",
+            )
+
+    def source_reload_completed(self, tab: DatasetTab) -> None:
+        """Refresh Categorical metadata without replacing independent filters."""
+        if self._categorical_source is not tab:
+            return
+        removed = self._set_categorical_dataset(tab, inherit_filter=False)
+        message = "Source reloaded."
+        if removed:
+            message += " Removed unavailable selections: " + ", ".join(removed) + "."
+        self._panel.categorical_builder.set_source_reloading(False, message)
+
+    def source_reload_failed(self, tab: DatasetTab) -> None:
+        """Restore Categorical Builder after a failed source reload."""
+        if self._categorical_source is tab:
+            if not getattr(tab, "cache_complete", False):
+                self._panel.categorical_builder.set_source_reloading(
+                    True,
+                    "Source cache is incomplete; reload the dataset before using Categorical Table.",
+                )
+                return
+            self._panel.categorical_builder.set_source_reloading(
+                False, "Source reload failed; Builder configuration was retained."
+            )
+
+    def _set_categorical_dataset(
+        self, tab: DatasetTab | None, *, inherit_filter: bool = True
+    ) -> tuple[str, ...]:
         builder = self._panel.categorical_builder
         if tab is None:
-            builder.set_dataset(None, "")
-            return
-        builder.set_dataset(
+            return builder.set_dataset(None, "")
+        return builder.set_dataset(
             tab.handle.metadata,
             str(tab.handle.source_path),
             tab.current_where_text(),
+            inherit_filter=inherit_filter,
         )
 
     def _categorical_context(
@@ -166,6 +199,7 @@ class CategoricalController(AnalysisModuleController):
                     selection.baseline_filter_text,
                     postbaseline_filter,
                     selection.postbaseline_filter_text,
+                    selection.population_treatment_variable,
                 ),
                 selection.include_total,
                 selection.percent_digits,
@@ -190,17 +224,6 @@ class CategoricalController(AnalysisModuleController):
         if source_tab is None or not is_analysis_dataset(source_tab.handle):
             return
         builder = self._panel.categorical_builder
-        current_filter = source_tab.current_where_text()
-        if not builder.current_filter_text() and current_filter:
-            response = QMessageBox.question(
-                self._parent_widget(),
-                "Categorical Table",
-                "Numerator WHERE is empty. Use the current dataset WHERE for this calculation?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if response == QMessageBox.Yes:
-                builder.apply_current_filter(current_filter)
         selection = replace(
             selection, numerator_filter_text=builder.current_filter_text()
         )
