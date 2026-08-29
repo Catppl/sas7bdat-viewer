@@ -433,6 +433,16 @@ class MainWindow(QMainWindow):
     def unique_analysis_tab_title(self, base: str) -> str:
         return self._unique_dataset_tab_title(base)
 
+    def _unique_dataset_tab_title(self, base: str) -> str:
+        """Return a non-conflicting title for a generated dataset tab."""
+        existing = {self.tabs.tabText(index) for index in range(self.tabs.count())}
+        if base not in existing:
+            return base
+        suffix = 2
+        while f"{base} ({suffix})" in existing:
+            suffix += 1
+        return f"{base} ({suffix})"
+
     def discard_analysis_result(self, handle: DatasetHandle) -> None:
         self._remove_dataset_directory(handle.temporary_path.parent)
 

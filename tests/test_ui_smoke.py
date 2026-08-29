@@ -146,6 +146,158 @@ class UiSmokeTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
+    def test_proc_means_builder_result_double_click_completes_drilldown(self) -> None:
+        """A Builder result cell reaches the query-result callback without errors."""
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        import sqlite3
+        from types import SimpleNamespace
+
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.data_store import DataStore
+        from clinical_data_viewer.filter_engine import FilterEngine
+        from clinical_data_viewer.filter_engine import CompiledFilter
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.proc_means import ProcMeansConfig, ProcMeansEngine
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.controllers.analysis import ProcMeansResultContext
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "source"
+            source_dir.mkdir()
+            source_db = source_dir / "dataset.sqlite"
+            with sqlite3.connect(source_db) as connection:
+                connection.execute(
+                    'CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, '
+                    '"USUBJID" TEXT, "PARAMCD" TEXT, "TRT01AN" REAL, '
+                    '"AVAL" REAL, "ANL01FL" TEXT)'
+                )
+                connection.execute(
+                    'INSERT INTO dataset("USUBJID", "PARAMCD", "TRT01AN", '
+                    '"AVAL", "ANL01FL") VALUES (?, ?, ?, ?, ?)',
+                    ("S1", "ALB", 1, 1.5, "Y"),
+                )
+                connection.execute(
+                    'INSERT INTO dataset("USUBJID", "PARAMCD", "TRT01AN", '
+                    '"AVAL", "ANL01FL") VALUES (?, ?, ?, ?, ?)',
+                    ("S2", "ALB", 1, 2.5, "Y"),
+                )
+            source_path = root / "ADLB.sas7bdat"
+            source_path.touch()
+            source = DatasetHandle(
+                source_path,
+                source_dir / source_path.name,
+                source_db,
+                DatasetMetadata(
+                    "ADLB",
+                    1,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("PARAMCD"),
+                        VariableMetadata("TRT01AN", kind="numeric"),
+                        VariableMetadata("AVAL", kind="numeric"),
+                        VariableMetadata("ANL01FL"),
+                    ),
+                ),
+                1,
+                True,
+            )
+
+            manager = TempManager(root / "viewer-temp")
+            config = ProcMeansConfig(
+                ("AVAL",),
+                ("PARAMCD",),
+                ("TRT01AN",),
+                ("mean",),
+                FilterEngine(source.metadata.variables).compile('ANL01FL = "Y"'),
+                'ANL01FL = "Y"',
+            )
+            result = ProcMeansEngine(manager).run(source, config)
+
+            window = MainWindow(
+                AppSettings(),
+                manager,
+                FilterHistory(root / "history.sqlite"),
+            )
+            result_tab = window._make_dataset_tab(result)
+            window.tabs.addTab(result_tab, "PROC MEANS Result")
+            page = DataStore().query_page(
+                result.database_path,
+                result.metadata,
+                result_tab.visible_columns,
+                CompiledFilter("", ()),
+                None,
+                0,
+                100,
+            )
+            result_tab.model.set_page(
+                0,
+                page.rows,
+                page.filtered_count,
+                row_decimal_bases=page.row_decimal_bases,
+                source_rows=page.source_rows,
+            )
+            window.analysis_controller.proc_means._proc_means_results[result_tab] = (
+                ProcMeansResultContext(source, config)
+            )
+            submitted: list[object] = []
+
+            def submit(owner, function, completed, failed):
+                try:
+                    value = function(SimpleNamespace(report=lambda _message: None))
+                except BaseException as error:  # pragma: no cover - assertion below
+                    failed(str(error), "")
+                    submitted.append(error)
+                else:
+                    completed(value)
+                    submitted.append(value)
+
+            window.submit_analysis_task = submit
+            mean_column = result_tab.visible_columns.index("MEAN")
+            index = result_tab.model.index(0, mean_column)
+            window._load_page = lambda *_args: None
+
+            # Verify the real table double-click signal path first.
+            result_tab.table.doubleClicked.emit(index)
+            self.assertEqual(window.tabs.count(), 2)
+            self.assertEqual(window.tabs.tabText(1), "Query: Mean: 2.0")
+            query_tab = window.tabs.widget(1)
+            self.assertEqual(
+                query_tab.current_where_text(),
+                '(ANL01FL = "Y") and PARAMCD = "ALB" and '
+                'TRT01AN = 1 and not missing(AVAL)',
+            )
+            self.assertEqual(query_tab.handle.metadata.row_count, 2)
+
+            # The context-menu action and double-click share this signal path.
+            result_tab.table._context_index = index
+            self.assertTrue(result_tab.table._context_variable_is_proc_means_statistic())
+            result_tab.table._context_index = result_tab.model.index(
+                0, result_tab.visible_columns.index("PARAMCD")
+            )
+            self.assertFalse(result_tab.table._context_variable_is_proc_means_statistic())
+            result_tab.table._context_index = index
+            result_tab.table.drilldown_requested.emit(index)
+
+            self.assertEqual(len(submitted), 2)
+            self.assertFalse(
+                any(isinstance(value, BaseException) for value in submitted)
+            )
+            # The second entry point gets a unique Query title.
+            self.assertEqual(window.tabs.count(), 3)
+            self.assertEqual(window.tabs.tabText(2), "Query: Mean: 2.0 (2)")
+            window.close()
+            application.processEvents()
+
     def test_large_xpt_submission_warning_is_english_and_persists_on_reload(
         self,
     ) -> None:

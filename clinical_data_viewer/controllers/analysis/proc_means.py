@@ -269,6 +269,12 @@ class ProcMeansController(AnalysisModuleController):
         analysis_column = metadata.proc_means_analysis_column
         statistic_key = dict(metadata.proc_means_statistic_keys).get(statistic_column)
         if context is None or analysis_column is None or statistic_key is None:
+            QMessageBox.information(
+                self._parent_widget(),
+                "PROC MEANS Drill-down",
+                "PROC MEANS Drill-down is unavailable for this result tab.\n"
+                "Please re-run PROC MEANS Builder and try again.",
+            )
             return
         if display in {"", "—"}:
             QMessageBox.information(

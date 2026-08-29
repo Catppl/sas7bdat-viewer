@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
@@ -755,6 +755,62 @@ class AnalysisControllerTests(unittest.TestCase):
 
             panel.builder.clear()
             self.assertIsNone(controller.proc_means_source)
+            panel.deleteLater()
+
+    def test_proc_means_drilldown_without_context_reports_unavailable(self) -> None:
+        """A stale result tab explains why its PROC MEANS drill-down cannot run."""
+        from clinical_data_viewer.controllers.analysis_controller import (
+            AnalysisController,
+        )
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.analysis_panel import AnalysisPanel
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+
+        class Host:
+            browse_listing_adsl_dataset = staticmethod(lambda: None)
+            browse_rule_based_adsl_dataset = staticmethod(lambda: None)
+            browse_ae_table_adsl_dataset = staticmethod(lambda: None)
+            browse_categorical_adsl_dataset = staticmethod(lambda: None)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            handle = DatasetHandle(
+                root / "result.query",
+                root / "result.tmp",
+                root / "dataset.sqlite",
+                DatasetMetadata(
+                    "PROC MEANS Result",
+                    1,
+                    (
+                        VariableMetadata("ANALYSIS_VARIABLE"),
+                        VariableMetadata("MEAN", kind="numeric"),
+                    ),
+                    proc_means_analysis_column="ANALYSIS_VARIABLE",
+                    proc_means_statistic_keys=(("MEAN", "mean"),),
+                ),
+                1,
+                True,
+                kind="proc_means",
+            )
+            panel = AnalysisPanel()
+            controller = AnalysisController(
+                Host(), panel, TempManager(root / "temp"), AppSettings()
+            )
+            tab = DatasetTab(handle, 100)
+            with patch(
+                "clinical_data_viewer.controllers.analysis.proc_means.QMessageBox.information"
+            ) as information:
+                controller.proc_means.drilldown_proc_means(tab, 0, "MEAN", "1.0")
+
+            information.assert_called_once()
+            self.assertIn("unavailable", information.call_args.args[2].lower())
+            tab.deleteLater()
             panel.deleteLater()
 
 
