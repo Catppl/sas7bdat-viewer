@@ -56,6 +56,7 @@ class CategoricalItemEditor(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._metadata: DatasetMetadata | None = None
+        self._metadata_available = False
         self._configs: dict[str, CategoricalItem] = {}
         self._updating = False
         layout = QVBoxLayout(self)
@@ -227,6 +228,7 @@ class CategoricalItemEditor(QWidget):
 
 class CategoricalBuilder(QWidget):
     run_requested = Signal(object)
+    sas_code_requested = Signal(object)
     validation_error = Signal(str)
     browse_adsl_requested = Signal()
     cleared = Signal()
@@ -241,6 +243,7 @@ class CategoricalBuilder(QWidget):
         self._source_filter_snapshot = ""
         self._busy = False
         self._source_reloading = False
+        self._source_kind = ""
         self._adsl_user_selected = False
         self._population_treatment_user_selected = False
         outer = QVBoxLayout(self)
@@ -349,6 +352,9 @@ class CategoricalBuilder(QWidget):
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
         buttons.addWidget(clear)
+        self.sas_code_button = QPushButton("SAS Code Generator…")
+        self.sas_code_button.clicked.connect(self._generate_sas_code)
+        buttons.addWidget(self.sas_code_button)
         self.run_button = QPushButton("Run Categorical Table")
         self.run_button.setDefault(True)
         self.run_button.clicked.connect(self._run)
@@ -364,6 +370,7 @@ class CategoricalBuilder(QWidget):
         filter_text: str = "",
         *,
         inherit_filter: bool = True,
+        source_kind: str = "sas",
     ) -> tuple[str, ...]:
         removed: list[str] = []
         if metadata is not None and metadata is not self._metadata:
@@ -399,6 +406,8 @@ class CategoricalBuilder(QWidget):
         self.source_label.setText(
             f"Source: {source_text}" if metadata else "Select a fully loaded source dataset."
         )
+        self._metadata_available = metadata is not None
+        self._source_kind = source_kind if metadata is not None else ""
         self._update_enabled_state(metadata_available=metadata is not None)
         return tuple(removed)
 
@@ -520,12 +529,25 @@ class CategoricalBuilder(QWidget):
 
     def _update_enabled_state(self, *, metadata_available: bool | None = None) -> None:
         available = (
-            (self._metadata is not None if metadata_available is None else metadata_available)
+            (
+                self._metadata_available
+                if metadata_available is None
+                else metadata_available
+            )
             and not self._busy
             and not self._source_reloading
         )
         self.setEnabled(available or self._busy)
         self.run_button.setEnabled(available)
+        codegen_available = available and self._source_kind == "sas"
+        self.sas_code_button.setEnabled(codegen_available)
+        self.sas_code_button.setToolTip(
+            ""
+            if codegen_available
+            else "SAS code generation for merged Categorical sources is not available yet."
+            if available and self._source_kind == "merge"
+            else ""
+        )
         self.denominator_type.setEnabled(available)
         self._sync_denominator_page()
 
@@ -564,15 +586,15 @@ class CategoricalBuilder(QWidget):
             self.count_type.setCurrentIndex(record_index)
         self.count_type.setEnabled(not is_n1)
 
-    def _run(self) -> None:
+    def _selection(self) -> CategoricalBuilderSelection | None:
         items = self.items.selected_items()
         if not items:
             self.validation_error.emit("Select at least one categorical Item.")
-            return
+            return None
         if not self.treatment.currentText():
             self.validation_error.emit("Select a Treatment variable.")
-            return
-        selection = CategoricalBuilderSelection(
+            return None
+        return CategoricalBuilderSelection(
             items,
             self.current_filter_text(),
             self.treatment.currentText(),
@@ -590,4 +612,15 @@ class CategoricalBuilder(QWidget):
             self.percent_digits.value(),
             population_treatment_variable=self.population_treatment.currentText(),
         )
+
+    def _run(self) -> None:
+        selection = self._selection()
+        if selection is None:
+            return
         self.run_requested.emit(selection)
+
+    def _generate_sas_code(self) -> None:
+        selection = self._selection()
+        if selection is None:
+            return
+        self.sas_code_requested.emit(selection)

@@ -23,7 +23,7 @@
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。存在手工行高亮时会额外增加 `HIGHLIGHT` 列记录颜色名称，因为 CSV 本身不能保存单元格背景色。
 - 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
-- `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（固定 ADSL）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total 和单元格 drill-down。
+- `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（独立 ADSL treatment/WHERE）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total、单元格 drill-down、配置 JSON v1 和 SAS Code Generator。
 - `Tools > Rule-based Table Builder` 可按多条 Item/Row Filter 生成 distinct `USUBJID` 的临床 `n (%)` 宽表，第一版支持 Population N、Non-missing N 和 Same-universe 三种独立分母，并可从 `View > Open Rule-based Long Result` 打开长表。
 - `Tools > AE Table Builder` 可按 SOC/PT 自动生成 Any AE、System Organ Class 和 Preferred Term 的 distinct `USUBJID` `n (%)` 宽表，同时保存长表、钻取结果和 `ae_table_config.json` v1。
 - `Tools > Listing Generator` 可按“可选 ADSL LEFT merge → Data Filter → derived columns → Sort → PROC REPORT”生成记录级 QC Listing；Python reference result 作为普通临时 Tab 打开，SAS 代码由 Jinja2 模板生成。
@@ -270,7 +270,9 @@ Query Tab 复用 Variables、WHERE、表头筛选、排序、查找、复制和 
 
 Item 可分别设置 context/group variables，例如 `PARAMCD + AVISIT`，以及是否展示 `(Missing)` level。Population N 使用 distinct subject 是临床表格的默认选择；若改为 record count 且 ADSL 并非每受试者一条记录，百分比可能超过 100%，Builder 会明确显示该计数口径。
 
-同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。关闭 Categorical Result Tab 不会清空 Builder 配置；只有点击 Builder 底部 `Clear` 才会清除 Item、WHERE、分母和表格设置。所有结果、Query 和 ADSL/source 缓存仅在会话中保留；关闭结果 Tab 会清理对应临时 SQLite。当前版本不提供 Categorical JSON 保存/加载，后续会在配置界面稳定后补充。
+同时会在同一会话 SQLite 中保存权威 long-format 结果：`ITEM`、`ITEM_LABEL`、context variables、`LEVEL`、`TRT`、`FREQ`、`DENOM`、`PCT`。在默认 Result Tab 激活时，可用 `View > Open Categorical Long Result` 打开独立的长表 Tab；它同样支持 WHERE、列选择、排序和 CSV。双击默认结果中的 `n (%)` 单元格可选择查看 Numerator Records、Numerator Subjects 或 Denominator Subjects，生成独立的临时 Query Tab。关闭 Categorical Result Tab 不会清空 Builder 配置；只有点击 Builder 底部 `Clear` 才会清除 Item、WHERE、分母和表格设置。
+
+成功运行后，结果临时目录同时保存 `dataset.sqlite` 和 `categorical_config.json` v1；JSON 记录完整 variable metadata、Numerator/Population/Baseline/Postbaseline Filter AST、Item/Context、count、resolved treatment 顺序、三种 denominator、Total、排序和显示契约，并与 Result Tab 同生命周期。真实 SAS7BDAT/XPT source 可直接点击 Builder 的 `SAS Code Generator…`；Generator 仅消费同一 JSON contract，并使用 Jinja2 按 Rule-based Generator 的人类可读风格生成短名称、显式 treatment conditional counts、每个 Item 独立的计算段以及最终 `item + col1-colN` 和 long result。Merge Result 仍可运行 Python Categorical Table，但因没有真实 SAS source，代码生成按钮会禁用。Viewer 只预览/保存 SAS，不执行程序；生成代码仍需在真实 SAS 环境验收。
 
 ## AE Table Builder 模块
 
@@ -706,6 +708,7 @@ Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 ```text
 clinical_data_viewer/
   compare_engine/     分组流式读取、加权成本、Hungarian 匹配、逐变量比较和临时结果
+  categorical/        Categorical 配置、Python reference engine、SQLite wide/long 与 JSON v1
   listing/            Listing 配置、表达式 AST、Python reference engine、SQLite result 与 JSON
   proc_means/         Builder 配置、分组统计、long-format SQLite 和配置 JSON
   codegen/sas/        SAS Jinja2 生成器与 SAS 专用模板

@@ -11,6 +11,7 @@ from ...categorical import (
     CategoricalEngine,
     CategoricalLongResultBuilder,
     DenominatorConfig,
+    build_categorical_configuration,
 )
 from ...categorical.drilldown import (
     CategoricalQueryBuilder,
@@ -18,11 +19,14 @@ from ...categorical.drilldown import (
     build_n1_cell_filter,
     lookup_cell,
 )
+from ...codegen.sas import SasCategoricalGenerator
 from ...dataset_utils import is_analysis_dataset
 from ...domain import DatasetHandle
 from ...filter_engine import FilterEngine
 from ...ui.categorical_builder import CategoricalBuilderSelection
 from ...ui.dataset_tab import DatasetTab
+from ...ui.sas_code_dialog import SasCodeDialog
+from ...workers import Worker
 from ._base import AnalysisModuleController
 
 
@@ -46,6 +50,7 @@ class CategoricalController(AnalysisModuleController):
             temp_manager
         )
         self._categorical_query_builder = CategoricalQueryBuilder(temp_manager)
+        self._sas_categorical_generator = SasCategoricalGenerator()
         self._categorical_source: DatasetTab | None = None
         self._categorical_input_tabs: set[DatasetTab] = set()
         self._categorical_results: dict[DatasetTab, CategoricalResultContext] = {}
@@ -142,6 +147,7 @@ class CategoricalController(AnalysisModuleController):
             str(tab.handle.source_path),
             tab.current_where_text(),
             inherit_filter=inherit_filter,
+            source_kind=tab.handle.kind,
         )
 
     def _categorical_context(
@@ -267,6 +273,63 @@ class CategoricalController(AnalysisModuleController):
             completed,
             failed,
         )
+
+    def generate_categorical_sas_code(
+        self, selection: CategoricalBuilderSelection
+    ) -> None:
+        """Generate readable Categorical SAS from the current Builder snapshot."""
+
+        selection = replace(
+            selection,
+            numerator_filter_text=self._panel.categorical_builder.current_filter_text(),
+        )
+        context = self._categorical_context(selection)
+        if context is None:
+            return
+        source_tab, population_tab, config = context
+        if source_tab.handle.kind != "sas":
+            return
+        source_handle = source_tab.handle
+        population_handle = population_tab.handle if population_tab else None
+        builder = self._panel.categorical_builder
+        self._categorical_input_tabs = {source_tab}
+        if population_tab is not None:
+            self._categorical_input_tabs.add(population_tab)
+        builder.set_busy(True, "Resolving Categorical treatment levels…")
+
+        def completed(code: str) -> None:
+            self._categorical_input_tabs.clear()
+            builder.set_busy(False, "SAS code generated.")
+            safe_name = self._safe_source_name(source_handle)
+            SasCodeDialog(
+                code,
+                str(source_handle.source_path),
+                f"{safe_name}_categorical.sas",
+                self._parent_widget(),
+            ).exec()
+
+        def failed(message: str, details: str) -> None:
+            self._categorical_input_tabs.clear()
+            builder.set_busy(False, "SAS Code Generator failed.")
+            self._host.show_analysis_error(
+                "Categorical SAS Code Generator Failed", message, details
+            )
+
+        def generate(_worker: Worker) -> str:
+            levels = self._categorical_engine.resolve_treatment_levels(
+                source_handle,
+                config,
+                population_handle,
+            )
+            configuration = build_categorical_configuration(
+                source_handle,
+                config,
+                population_handle,
+                levels,
+            )
+            return self._sas_categorical_generator.generate(configuration)
+
+        self._host.submit_analysis_task(builder, generate, completed, failed)
 
     def drilldown_categorical(
         self, tab: DatasetTab, view_row: int, column_name: str, display: str

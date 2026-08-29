@@ -173,6 +173,9 @@ class AnalysisController(QObject):
 
         categorical_builder = self._panel.categorical_builder
         categorical_builder.run_requested.connect(self.categorical.run_categorical)
+        categorical_builder.sas_code_requested.connect(
+            self.categorical.generate_categorical_sas_code
+        )
         categorical_builder.validation_error.connect(
             lambda message: QMessageBox.warning(
                 self._parent_widget(), "Categorical Table", message
@@ -344,6 +347,11 @@ class AnalysisController(QObject):
 
     def run_categorical(self, selection: CategoricalBuilderSelection) -> None:
         self.categorical.run_categorical(selection)
+
+    def generate_categorical_sas_code(
+        self, selection: CategoricalBuilderSelection
+    ) -> None:
+        self.categorical.generate_categorical_sas_code(selection)
 
     def drilldown_categorical(
         self, tab: DatasetTab, view_row: int, column_name: str, display: str

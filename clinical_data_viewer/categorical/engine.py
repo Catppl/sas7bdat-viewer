@@ -5,11 +5,13 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import closing
+from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal
 
 from ..domain import DatasetHandle, VariableMetadata
 from ..filter_engine import quote_identifier
 from ..temp_manager import TempManager
+from .configuration import write_categorical_configuration
 from .models import CategoricalConfig, CategoricalItem
 from .result_store import CategoricalResultWriter
 
@@ -110,24 +112,7 @@ class CategoricalEngine:
             )
         )
         context_variables = tuple(source_fields[name.casefold()] for name in context_names)
-        treatments = self._treatment_levels(source, config, source_fields)
-        if config.denominator.type == "population" and population is not None:
-            population_treatment_name = (
-                config.denominator.population_treatment_variable
-                or config.treatment_variable
-            )
-            treatments = self._merged_treatments(
-                treatments,
-                self._treatment_levels(
-                    population,
-                    config,
-                    population_fields,
-                    config.denominator.population_filter.sql,
-                    config.denominator.population_filter.parameters,
-                    population_fields[population_treatment_name.casefold()],
-                ),
-            )
-        treatments.sort(key=lambda entry: self._treatment_sort_key(entry[1]))
+        treatments = self.resolve_treatment_levels(source, config, population)
         directory = self.temp_manager.create_dataset_directory()
         writer = CategoricalResultWriter(
             directory / "dataset.sqlite",
@@ -148,9 +133,28 @@ class CategoricalEngine:
                     source_fields,
                     population_fields,
                 )
-                self._write_item(writer, config, item, numerator, denominator, treatments)
+                self._write_item(
+                    writer,
+                    config,
+                    item,
+                    numerator,
+                    denominator,
+                    treatments,
+                    source_fields,
+                )
             notify(f"Finalizing Categorical Table… {writer.row_count:,} rows")
-            return writer.finish(directory, source)
+            configuration_path = directory / "categorical_config.json"
+            write_categorical_configuration(
+                configuration_path,
+                source,
+                config,
+                population,
+                treatments,
+            )
+            return replace(
+                writer.finish(directory, source),
+                configuration_path=configuration_path,
+            )
         except BaseException:
             writer.abort(self.temp_manager, directory)
             raise
@@ -162,6 +166,41 @@ class CategoricalEngine:
             if handle is not None
             else {}
         )
+
+    def resolve_treatment_levels(
+        self,
+        source: DatasetHandle,
+        config: CategoricalConfig,
+        population: DatasetHandle | None = None,
+    ) -> list[tuple[str, object, str]]:
+        """Resolve the exact treatment order shared by results, JSON, and SAS."""
+
+        if not source.cache_complete:
+            raise ValueError("The source dataset must finish loading first.")
+        if population is not None and not population.cache_complete:
+            raise ValueError("The ADSL dataset must finish loading first.")
+        config.validate(source.metadata, population.metadata if population else None)
+        source_fields = self._fields(source)
+        treatments = self._treatment_levels(source, config, source_fields)
+        if config.denominator.type == "population" and population is not None:
+            population_fields = self._fields(population)
+            population_treatment_name = (
+                config.denominator.population_treatment_variable
+                or config.treatment_variable
+            )
+            treatments = self._merged_treatments(
+                treatments,
+                self._treatment_levels(
+                    population,
+                    config,
+                    population_fields,
+                    config.denominator.population_filter.sql,
+                    config.denominator.population_filter.parameters,
+                    population_fields[population_treatment_name.casefold()],
+                ),
+            )
+        treatments.sort(key=lambda entry: self._treatment_sort_key(entry[1]))
+        return treatments
 
     @staticmethod
     def _merged_treatments(
@@ -175,6 +214,19 @@ class CategoricalEngine:
         if value is None:
             return (1, 0, "")
         if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return (0, 0, float(value), str(value))
+        text = str(value)
+        return (0, 1, text.casefold(), text)
+
+    @staticmethod
+    def _value_sort_key(
+        value: object, variable: VariableMetadata
+    ) -> tuple[object, ...]:
+        """Sort raw categorical values consistently across Python and SAS."""
+
+        if _missing(value, variable):
+            return (1, 0, "")
+        if variable.kind == "numeric":
             return (0, 0, float(value), str(value))
         text = str(value)
         return (0, 1, text.casefold(), text)
@@ -527,6 +579,7 @@ class CategoricalEngine:
         numerator: dict[tuple[str, str, str], int],
         denominator: dict[tuple[str, str], int],
         treatments: list[tuple[str, object, str]],
+        fields: dict[str, VariableMetadata],
     ) -> None:
         all_treatments = [key for key, _value, _label in treatments]
         if config.include_total:
@@ -535,7 +588,25 @@ class CategoricalEngine:
         for (context_key, treatment_key, level_key), freq in numerator.items():
             rows[(context_key, level_key)][treatment_key] = freq
         context_names = item.context_variables
-        ordered = sorted(rows, key=lambda key: (key[0], key[1]))
+        item_variable = fields[item.variable.casefold()]
+        context_variables = tuple(
+            fields[name.casefold()] for name in item.context_variables
+        )
+
+        def row_sort_key(key: tuple[str, str]) -> tuple[object, ...]:
+            context = json.loads(key[0])
+            level = json.loads(key[1])
+            return (
+                *(
+                    self._value_sort_key(context.get(name), variable)
+                    for name, variable in zip(
+                        item.context_variables, context_variables
+                    )
+                ),
+                self._value_sort_key(level, item_variable),
+            )
+
+        ordered = sorted(rows, key=row_sort_key)
         grouped: dict[str, list[str]] = defaultdict(list)
         for context_key, level_key in ordered:
             grouped[context_key].append(level_key)

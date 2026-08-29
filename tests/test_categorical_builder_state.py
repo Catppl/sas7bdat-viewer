@@ -163,6 +163,74 @@ class CategoricalBuilderStateTests(unittest.TestCase):
         builder.deleteLater()
         self.application.processEvents()
 
+    def test_sas_codegen_button_tracks_source_kind_and_busy_state(self) -> None:
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.categorical_builder import CategoricalBuilder
+
+        metadata = DatasetMetadata(
+            "ADAE",
+            1,
+            (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRTA"),
+                VariableMetadata("RACE"),
+            ),
+        )
+        builder = CategoricalBuilder()
+        builder.set_dataset(metadata, "adae.sas7bdat", source_kind="merge")
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        self.assertIn("merged Categorical", builder.sas_code_button.toolTip())
+
+        builder.set_dataset(metadata, "adae.sas7bdat", source_kind="sas")
+        self.assertTrue(builder.sas_code_button.isEnabled())
+        builder.set_busy(True)
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        builder.set_busy(False)
+        self.assertTrue(builder.sas_code_button.isEnabled())
+        builder.set_dataset(None, "")
+        builder.set_busy(True)
+        builder.set_busy(False)
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        builder.deleteLater()
+        self.application.processEvents()
+
+    def test_sas_codegen_emits_the_current_builder_snapshot(self) -> None:
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.categorical_builder import CategoricalBuilder
+
+        metadata = DatasetMetadata(
+            "ADAE",
+            1,
+            (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRTA"),
+                VariableMetadata("RACE"),
+                VariableMetadata("AVAL", kind="numeric"),
+            ),
+        )
+        builder = CategoricalBuilder()
+        builder.set_dataset(metadata, "adae.sas7bdat", source_kind="sas")
+        builder.items.editor.setText("RACE")
+        builder.items._add()
+        builder.treatment.setCurrentText("TRTA")
+        builder.subject.setCurrentText("USUBJID")
+        builder.denominator_type.setCurrentIndex(
+            builder.denominator_type.findData("nonmissing")
+        )
+        builder.nonmissing_value.setCurrentText("AVAL")
+        builder.numerator_where.setPlainText('TRTA = "A"')
+        emitted = []
+        builder.sas_code_requested.connect(emitted.append)
+
+        builder.sas_code_button.click()
+
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(emitted[0].items[0].variable, "RACE")
+        self.assertEqual(emitted[0].numerator_filter_text, 'TRTA = "A"')
+        self.assertEqual(emitted[0].denominator_type, "nonmissing")
+        builder.deleteLater()
+        self.application.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()

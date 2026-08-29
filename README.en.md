@@ -72,7 +72,7 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 | --- | --- | --- |
 | PROC MEANS Simple | Right-click a numeric column → `PROC MEANS (Simple)` | Statistics for the current filtered result. `n (Subjects)` is distinct nonmissing `USUBJID`; `N (Values)` is the number of nonmissing analysis values. |
 | PROC MEANS Builder | `Tools > PROC MEANS Builder` | Multiple Analysis/BY/CLASS variables, Decimal Group Variables, statistics, a long-format temporary result tab, and configuration JSON. |
-| Categorical Table | `Tools > Categorical Table Builder` | Multiple categorical items, treatment `n (%)`, denominator strategies, Total, and temporary result tabs. |
+| Categorical Table | `Tools > Categorical Table Builder` | Multiple categorical items, treatment `n (%)`, denominator strategies, Total, drill-down, JSON v1, and SAS code generation. |
 | AE Table | `Tools > AE Table Builder` | Automatically discovers Any AE → SOC → PT rows, counts distinct `USUBJID`, supports Population/Same-universe denominators, long result, drill-down, and JSON v1. |
 | SAS/R code | `SAS Code Generator…` or `R Code Generator…` in Builder | Read-only code preview and Save As; SAS/R is not executed by the viewer. |
 | Row comparison | Select multiple row numbers with `Ctrl`, then right-click Compare | Highlights only different columns in the selected rows. |
@@ -146,7 +146,9 @@ Open `Tools > Categorical Table Builder` to configure one or more categorical It
 | Non-missing N | The current analysis dataset + Numerator WHERE, restricted to a configurable non-missing analysis-value variable. |
 | Baseline + Postbaseline n1 | The current analysis dataset + Numerator WHERE, with the required baseline and postbaseline WHERE predicates layered on top. A postbaseline record is eligible only when the same treatment/context/subject has an eligible baseline record. Record-count mode does not deduplicate. |
 
-Each Item can have its own context variables, such as `PARAMCD + AVISIT`, and may opt into a `(Missing)` level. The same session SQLite retains an authoritative long table with `ITEM`, `ITEM_LABEL`, context variables, `LEVEL`, `TRT`, `FREQ`, `DENOM`, and `PCT`. With the default Result tab active, select `View > Open Categorical Long Result` to open it as an independent normal Viewer tab with WHERE, sorting, visible-column selection, and CSV export. Double-clicking a populated `n (%)` cell offers Numerator Records, Numerator Subjects, and Denominator Subjects as independent temporary query tabs. Closing the Categorical Result tab does not clear the Builder configuration; only the Builder's bottom `Clear` button clears its Items, WHERE, denominator, and table settings. Categorical configuration JSON save/load is intentionally deferred; only the session result/configuration is retained while the result tab remains open.
+Each Item can have its own context variables, such as `PARAMCD + AVISIT`, and may opt into a `(Missing)` level. The same session SQLite retains an authoritative long table with `ITEM`, `ITEM_LABEL`, context variables, `LEVEL`, `TRT`, `FREQ`, `DENOM`, and `PCT`. With the default Result tab active, select `View > Open Categorical Long Result` to open it as an independent normal Viewer tab with WHERE, sorting, visible-column selection, and CSV export. Double-clicking a populated `n (%)` cell offers Numerator Records, Numerator Subjects, and Denominator Subjects as independent temporary query tabs. Closing the Categorical Result tab does not clear the Builder configuration; only the Builder's bottom `Clear` button clears its Items, WHERE, denominator, and table settings.
+
+Every successful run stores `dataset.sqlite` and `categorical_config.json` v1 in the same session-temporary result directory. The JSON is the stable cross-language business contract for variable metadata, Filter ASTs, Items and Contexts, count type, resolved treatment order, Population/Non-missing/n1 denominators, Total, sorting, and display rounding. Physical SAS7BDAT/XPT sources can use `SAS Code Generator…` directly from the Builder. Its Jinja2 template follows the readable Rule-based generator style: short WORK names, explicit treatment conditional counts, an independent section per Item, and final `item + col1-colN` plus long output. Merge Results remain valid Python Categorical sources, but their SAS generator is disabled because they do not represent a physical SAS source. The viewer previews/saves code and does not execute SAS; real-SAS validation is still required.
 
 ## AE Table Builder module
 
@@ -339,6 +341,7 @@ Keep the EXE and `_internal` directory together. The build is unsigned, so Windo
 ```text
 clinical_data_viewer/
   compare_engine/     streaming grouping, weighted matching, comparison, temp results
+  categorical/        Categorical config, Python reference engine, SQLite wide/long, JSON v1
   listing/            Listing config, expression AST, Python reference engine, SQLite result, JSON
   proc_means/         Builder configuration, grouped statistics, SQLite results, JSON
   codegen/sas/        SAS Jinja2 generator and templates
