@@ -7,6 +7,8 @@ from PySide6.QtWidgets import QHeaderView, QStyle, QStyleOptionHeader
 
 class FilterHeaderView(QHeaderView):
     filter_requested = Signal(int)
+    FILTER_BUTTON_WIDTH = 22
+    RESIZE_GUTTER_WIDTH = 10
 
     def __init__(self, parent=None) -> None:
         super().__init__(Qt.Horizontal, parent)
@@ -18,10 +20,11 @@ class FilterHeaderView(QHeaderView):
         self.viewport().update()
 
     def _button_rect(self, section: int) -> QRect:
+        section_right = self.sectionViewportPosition(section) + self.sectionSize(section)
         return QRect(
-            self.sectionViewportPosition(section) + self.sectionSize(section) - 22,
+            section_right - self.RESIZE_GUTTER_WIDTH - self.FILTER_BUTTON_WIDTH,
             0,
-            22,
+            self.FILTER_BUTTON_WIDTH,
             self.height(),
         )
 
@@ -63,13 +66,26 @@ class FilterHeaderView(QHeaderView):
             font.setBold(True)
             painter.setFont(font)
             painter.drawText(
-                rect.adjusted(6, 0, -22, 0),
+                rect.adjusted(
+                    6,
+                    0,
+                    -(self.FILTER_BUTTON_WIDTH + self.RESIZE_GUTTER_WIDTH),
+                    0,
+                ),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 option.text,
             )
         else:
             self.style().drawControl(QStyle.CE_Header, option, painter, self)
-        button = QRect(rect.right() - 21, rect.top(), 21, rect.height())
+        button = QRect(
+            rect.right()
+            - self.RESIZE_GUTTER_WIDTH
+            - self.FILTER_BUTTON_WIDTH
+            + 1,
+            rect.top(),
+            self.FILTER_BUTTON_WIDTH,
+            rect.height(),
+        )
         active = logical_index in self._filtered_sections
         painter.save()
         painter.setPen(QColor("#0878c9" if active else "#627d98"))

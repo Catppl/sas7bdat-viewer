@@ -221,7 +221,6 @@ class DatasetTab(QWidget):
         self.cache_failed = False
         self.reload_in_progress = False
         self._pending_selection: tuple[int, int] | None = None
-        self._compared_rows: tuple[int, ...] | None = None
         self._page_size = page_size
         self.apply_sas_date_time_formats = apply_sas_date_time_formats
 
@@ -384,7 +383,6 @@ class DatasetTab(QWidget):
         self.model.sort_requested.connect(self._sort_requested)
         self.model.page_loaded.connect(self._finish_pending_selection)
         self.table.setModel(self.model)
-        self.table.selectionModel().selectionChanged.connect(self._selection_changed)
         if old_model:
             old_model.deleteLater()
 
@@ -857,11 +855,9 @@ class DatasetTab(QWidget):
     def show_comparison_highlights(
         self, variables: tuple[str, ...], rows: tuple[int, ...] = ()
     ) -> None:
-        self._compared_rows = rows
         self.model.set_highlighted_cells(set(rows), set(variables))
 
     def clear_comparison_highlights(self) -> None:
-        self._compared_rows = None
         self.model.clear_highlights()
 
     def _set_manual_row_highlight(self, rows: list[int], color_name: str) -> None:
@@ -874,11 +870,3 @@ class DatasetTab(QWidget):
 
     def manual_highlights_for_export(self) -> dict[int, str]:
         return self.model.manual_highlights_for_export()
-
-    def _selection_changed(self) -> None:
-        if self._compared_rows is None:
-            return
-        current = tuple(self.table.selected_row_numbers())
-        if current != self._compared_rows:
-            self.clear_comparison_highlights()
-            self.comparison_invalidated.emit()

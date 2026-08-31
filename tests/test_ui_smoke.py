@@ -89,8 +89,13 @@ class UiSmokeTests(unittest.TestCase):
             window.analysis_panel.locate_variable_requested.emit("AEDECOD")
             application.processEvents()
             self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
-            self.assertEqual(owner.model.highlighted_rows, set())
-            self.assertEqual(owner.model.highlighted_columns, set())
+            self.assertEqual(owner.model.highlighted_rows, {0, 1})
+            self.assertEqual(owner.model.highlighted_columns, {"USUBJID", "AEDECOD"})
+
+            owner.table.selectRow(2)
+            application.processEvents()
+            self.assertEqual(owner.model.highlighted_rows, {0, 1})
+            self.assertEqual(owner.model.highlighted_columns, {"USUBJID", "AEDECOD"})
 
             window.tabs.setCurrentWidget(other)
             application.processEvents()
@@ -112,6 +117,18 @@ class UiSmokeTests(unittest.TestCase):
             application.processEvents()
             self.assertIs(window.tabs.currentWidget(), owner)
             self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
+
+            owner.show_comparison_highlights(result.differing_variables, (0, 1))
+            window.analysis_panel.clear_comparison_requested.emit()
+            application.processEvents()
+            self.assertEqual(owner.model.highlighted_rows, set())
+            self.assertEqual(owner.model.highlighted_columns, set())
+            self.assertIsNone(window._comparison_owner)
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 0)
+
+            window._comparison_owner = owner
+            owner.show_comparison_highlights(result.differing_variables, (0, 1))
+            window.analysis_panel.show_comparison(result, owner.handle.metadata)
 
             window.close_tab(window.tabs.indexOf(owner))
             application.processEvents()
@@ -1305,19 +1322,30 @@ class UiSmokeTests(unittest.TestCase):
             application.processEvents()
             requested_filters: list[str] = []
             numeric_tab.column_filter_requested.connect(requested_filters.append)
-            filter_x = (
+            filter_button = numeric_tab.filter_header._button_rect(2)
+            section_right = (
                 numeric_tab.filter_header.sectionViewportPosition(2)
                 + numeric_tab.filter_header.sectionSize(2)
-                - 10
+            )
+            self.assertEqual(
+                section_right - filter_button.right() - 1,
+                numeric_tab.filter_header.RESIZE_GUTTER_WIDTH,
             )
             QTest.mouseClick(
                 numeric_tab.filter_header.viewport(),
                 Qt.LeftButton,
                 Qt.NoModifier,
-                QPoint(filter_x, 5),
+                filter_button.center(),
             )
             self.assertEqual(requested_filters, ["AVAL"])
             self.assertIsNone(numeric_tab.model.sort_spec)
+            QTest.mouseClick(
+                numeric_tab.filter_header.viewport(),
+                Qt.LeftButton,
+                Qt.NoModifier,
+                QPoint(section_right - 3, 5),
+            )
+            self.assertEqual(requested_filters, ["AVAL"])
             vertical_header = numeric_tab.table.verticalHeader()
             first_y = (
                 vertical_header.sectionViewportPosition(0)
@@ -1382,6 +1410,7 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(numeric_tab.table.manual_highlight_row_numbers(), [1])
             numeric_tab.table.selectRow(0)
             self.assertEqual(numeric_tab.table.manual_highlight_row_numbers(), [0])
+            numeric_tab.clear_comparison_highlights()
             numeric_tab.model.set_manual_row_highlight({0}, QColor("#e8ddff"))
             manual_option = QStyleOptionViewItem()
             numeric_tab.table.itemDelegate().initStyleOption(
