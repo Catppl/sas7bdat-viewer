@@ -32,26 +32,8 @@ data lst_adsl;
     set adsl.{{ adsl.dataset }}(
         keep={{ by | sas_name }}{% for variable in adsl_projection %} {{ variable.source | sas_name }}{% endfor %}
     );
-    if missing({{ by | sas_name }}) then delete;
 {% for variable in adsl_projection %}{% if variable.source != variable.output %}    rename {{ variable.source | sas_name }} = {{ variable.output | sas_name }};
 {% endif %}{% endfor %}run;
-
-proc sql noprint;
-    select count(*) into :_lst_adsl_dup trimmed
-    from (
-        select {{ by | sas_name }}
-        from lst_adsl
-        group by {{ by | sas_name }}
-        having count(*) > 1
-    );
-quit;
-
-data _null_;
-    if &_lst_adsl_dup > 0 then do;
-        put "ERROR: ADSL is not unique by {{ by }}.";
-        abort cancel;
-    end;
-run;
 
 proc sort data=lst_adsl;
     by {{ by | sas_name }};
@@ -110,15 +92,8 @@ run;
 
 options linesize={{ line_size }};
 proc report data={{ output_dataset }} nowd missing spacing=1;
-    column
-{% for column in report_columns %}        {{ column.output | sas_name }}
-{% endfor %}    ;
-{% for column in report_columns %}    define {{ column.output | sas_name }} /
-        {{ column.report_type }}
-{% if column.report_type in ["order", "group"] %}        order=data
-{% endif %}{% if column.format %}        format={{ column.format }}
-{% endif %}        width={{ column.width }}
-        {{ column.label | sas_string }};
+    column{% for column in report_columns %} {{ column.output | sas_name }}{% endfor %};
+{% for column in report_columns %}    define {{ column.output | sas_name }} / {{ column.report_type }}{% if column.report_type in ["order", "group"] %} order=data{% endif %}{% if column.noprint %} noprint{% endif %}{% if column.format %} format={{ column.format }}{% endif %}{% if not column.noprint %} style(column)=[cellwidth={{ column.width_percent }}%]{% endif %} {{ column.label | sas_string }};
 {% endfor %}run;
 
 /* 5. Clean up */

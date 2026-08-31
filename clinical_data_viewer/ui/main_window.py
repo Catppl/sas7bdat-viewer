@@ -314,7 +314,9 @@ class MainWindow(QMainWindow):
         self.analysis_dock.hide()
         self.analysis_action.toggled.connect(self.analysis_dock.setVisible)
         self.analysis_dock.visibilityChanged.connect(self.analysis_action.setChecked)
-        self.analysis_panel.locate_variable_requested.connect(self._locate_variable)
+        self.analysis_panel.locate_variable_requested.connect(
+            self._locate_comparison_variable
+        )
         self.analysis_panel.settings_requested.connect(self.show_settings)
         self.analysis_panel.recalculate_requested.connect(self._recalculate_statistics)
         self.analysis_panel.clear_comparison_requested.connect(
@@ -1288,6 +1290,16 @@ class MainWindow(QMainWindow):
         if tab:
             tab.locate_variable(variable)
 
+    def _locate_comparison_variable(self, variable: str) -> None:
+        """Locate a Row Comparison variable without discarding its result."""
+
+        owner = self._comparison_owner
+        if owner is not None and self.tabs.indexOf(owner) >= 0:
+            self.tabs.setCurrentWidget(owner)
+            owner.locate_variable(variable)
+            return
+        self._locate_variable(variable)
+
     def _show_column_filter(self, tab: DatasetTab, variable_name: str) -> None:
         if self.tabs.indexOf(tab) < 0 or not tab.cache_complete:
             return
@@ -1507,19 +1519,17 @@ class MainWindow(QMainWindow):
         self.analysis_panel.clear_comparison()
 
     def _analysis_invalidated(self, tab: DatasetTab) -> None:
+        # A filter/reload can make saved view-row highlights unsafe, but the
+        # comparison result remains useful until it is replaced or its source
+        # dataset is closed.
         tab.clear_comparison_highlights()
-        if self._comparison_owner is tab:
-            self._comparison_owner = None
-        if tab is self.current_dataset_tab():
-            self.analysis_panel.clear_comparison()
-            if self._statistics_owner is tab:
-                self.analysis_panel.mark_statistics_stale()
+        if tab is self.current_dataset_tab() and self._statistics_owner is tab:
+            self.analysis_panel.mark_statistics_stale()
 
     def _comparison_invalidated(self, tab: DatasetTab) -> None:
+        # Sorting changes view-row positions.  Clear only the positional
+        # highlights; keep the comparison table and its owning dataset.
         tab.clear_comparison_highlights()
-        if self._comparison_owner is tab:
-            self._comparison_owner = None
-            self.analysis_panel.clear_comparison()
 
     def reload_current(self) -> None:
         tab = self.current_dataset_tab()
@@ -1751,8 +1761,6 @@ class MainWindow(QMainWindow):
 
     def _sync_active_tab(self, _index: int | None = None) -> None:
         tab = self.current_dataset_tab()
-        if self._comparison_owner is not None and self._comparison_owner is not tab:
-            self._clear_row_comparison()
         if self._statistics_owner is not None and self._statistics_owner is not tab:
             self._statistics_owner = None
             self._last_statistics_request = None

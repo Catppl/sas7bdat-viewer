@@ -97,7 +97,7 @@ def build_listing_configuration(
         "sort": {"stable_tie_breaker": "_listing_row"},
         "report": {
             "line_size": config.line_size,
-            "width_method": "equal_visible_columns",
+            "width_method": "metadata_weighted_visible_columns",
         },
         "calculation": {
             "reference_engine": "python_listing_v1",

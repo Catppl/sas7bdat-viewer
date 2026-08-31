@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,7 +16,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -148,12 +148,12 @@ class ListingBuilder(QWidget):
             0: 28,
             2: 88,
             4: 68,
-            5: 46,
+            5: 72,
             6: 58,
             7: 82,
             8: 66,
             9: 48,
-            10: 76,
+            10: 150,
         }.items():
             self.table.setColumnWidth(index, width)
         columns_layout.addWidget(self.table)
@@ -325,9 +325,7 @@ class ListingBuilder(QWidget):
             (4, format_text),
         ):
             self.table.setCellWidget(row, column, QLineEdit(text))
-        sort = QSpinBox()
-        sort.setRange(0, 999)
-        sort.setSpecialValueText("")
+        sort = self._sort_editor()
         self.table.setCellWidget(row, 5, sort)
         direction = QComboBox()
         direction.addItems(("ASC", "DESC"))
@@ -342,19 +340,39 @@ class ListingBuilder(QWidget):
         post = QCheckBox()
         post.setToolTip("Division by zero → Missing")
         self.table.setCellWidget(row, 9, post)
+        self.table.setCellWidget(row, 10, self._action_buttons(row))
+
+    @staticmethod
+    def _sort_editor(value: int = 0) -> QLineEdit:
+        editor = QLineEdit(str(value) if value else "")
+        editor.setValidator(QIntValidator(1, 999, editor))
+        editor.setPlaceholderText("1")
+        editor.setToolTip("Sort priority: enter 1, 2, 3, ...; leave blank for no sort")
+        editor.setMinimumWidth(64)
+        return editor
+
+    def _action_buttons(self, row: int) -> QWidget:
         actions = QWidget()
         layout = QHBoxLayout(actions)
         layout.setContentsMargins(0, 0, 0, 0)
-        for title, callback in (
-            ("↑", lambda: self._move_row(row, -1)),
-            ("↓", lambda: self._move_row(row, 1)),
-            ("×", lambda: self._delete_row(row)),
+        layout.setSpacing(3)
+        for title, tooltip, width, callback in (
+            ("Up", "Move this column up", 36, lambda: self._move_row(row, -1)),
+            ("Down", "Move this column down", 44, lambda: self._move_row(row, 1)),
+            ("Remove", "Remove this column", 58, lambda: self._delete_row(row)),
         ):
             button = QPushButton(title)
-            button.setMaximumWidth(24)
+            button.setToolTip(tooltip)
+            button.setStyleSheet("min-width: 0; padding: 3px 4px;")
+            button.setFixedWidth(width)
             button.clicked.connect(callback)
             layout.addWidget(button)
-        self.table.setCellWidget(row, 10, actions)
+        return actions
+
+    @staticmethod
+    def _sort_value(editor: QLineEdit) -> int:
+        text = editor.text().strip()
+        return int(text) if text else 0
 
     def _delete_row(self, row):
         values = [
@@ -383,7 +401,7 @@ class ListingBuilder(QWidget):
             self.table.cellWidget(row, 2).text(),
             self.table.cellWidget(row, 3).text(),
             self.table.cellWidget(row, 4).text(),
-            self.table.cellWidget(row, 5).value(),
+            self._sort_value(self.table.cellWidget(row, 5)),
             self.table.cellWidget(row, 6).currentText(),
             self.table.cellWidget(row, 7).currentText(),
             self.table.cellWidget(row, 8).isChecked(),
@@ -400,10 +418,7 @@ class ListingBuilder(QWidget):
             (4, values[3]),
         ):
             self.table.setCellWidget(row, column, QLineEdit(text))
-        sort = QSpinBox()
-        sort.setRange(0, 999)
-        sort.setSpecialValueText("")
-        sort.setValue(values[4])
+        sort = self._sort_editor(values[4])
         self.table.setCellWidget(row, 5, sort)
         direction = QComboBox()
         direction.addItems(("ASC", "DESC"))
@@ -419,19 +434,7 @@ class ListingBuilder(QWidget):
         post = QCheckBox()
         post.setChecked(values[8])
         self.table.setCellWidget(row, 9, post)
-        actions = QWidget()
-        layout = QHBoxLayout(actions)
-        layout.setContentsMargins(0, 0, 0, 0)
-        for title, callback in (
-            ("↑", lambda: self._move_row(row, -1)),
-            ("↓", lambda: self._move_row(row, 1)),
-            ("×", lambda: self._delete_row(row)),
-        ):
-            button = QPushButton(title)
-            button.setMaximumWidth(24)
-            button.clicked.connect(callback)
-            layout.addWidget(button)
-        self.table.setCellWidget(row, 10, actions)
+        self.table.setCellWidget(row, 10, self._action_buttons(row))
 
     def _renumber(self):
         for row in range(self.table.rowCount()):
@@ -448,7 +451,7 @@ class ListingBuilder(QWidget):
                     self.table.cellWidget(row, 2).text().strip(),
                     self.table.cellWidget(row, 3).text().strip(),
                     self.table.cellWidget(row, 4).text().strip(),
-                    self.table.cellWidget(row, 5).value() or None,
+                    self._sort_value(self.table.cellWidget(row, 5)) or None,
                     self.table.cellWidget(row, 6).currentText(),
                     self.table.cellWidget(row, 7).currentText(),
                     self.table.cellWidget(row, 8).isChecked(),

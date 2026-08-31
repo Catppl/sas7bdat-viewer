@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
@@ -157,19 +159,57 @@ def _division_denominator(
     return _expression(_mapping(expression["right"], "binary.right"), variables)
 
 
-def _allocate_widths(line_size: int, count: int) -> list[int]:
-    """Allocate equal PROC REPORT widths without exceeding LINESIZE."""
-    spacing = max(0, count - 1)
-    minimum = 8
-    available = line_size - spacing
-    if available < count * minimum:
-        required = count * minimum + spacing
-        raise ValueError(
-            f"Listing report line size {line_size} is too small for {count} "
-            f"columns; at least {required} characters are required."
-        )
-    width, remainder = divmod(available, count)
-    return [width + (index < remainder) for index in range(count)]
+_FORMAT_WIDTH = re.compile(r"(?P<width>\d+)(?:\.\d+)?\.?$")
+
+
+def _format_width(format_text: object) -> int | None:
+    match = _FORMAT_WIDTH.search(str(format_text or "").strip())
+    return int(match.group("width")) if match is not None else None
+
+
+def _report_width_weight(column: Mapping[str, object]) -> int:
+    """Estimate display characters without leaking sizing logic into SAS."""
+    label_length = len(str(column.get("label") or column.get("output") or ""))
+    if column.get("kind") == "character":
+        content_length = int(column.get("length") or 20)
+    else:
+        content_length = _format_width(column.get("format")) or 12
+    return max(8, min(80, max(label_length, content_length)))
+
+
+def _allocate_width_percentages(weights: list[int]) -> list[str]:
+    """Allocate metadata-weighted percentages totalling exactly 99%."""
+    count = len(weights)
+    if count == 0:
+        return []
+    increment = Decimal("0.01")
+    total = Decimal(99)
+    equal_width = (total / count).quantize(increment, rounding=ROUND_DOWN)
+    if equal_width <= 0:
+        raise ValueError("Listing has too many visible PROC REPORT columns.")
+
+    minimum = min(Decimal(5), equal_width)
+    widths = [minimum] * count
+    remaining_width = total - sum(widths, Decimal(0))
+    safe_weights = [max(1, int(weight)) for weight in weights]
+    total_weight = Decimal(sum(safe_weights))
+    raw_extras = [
+        remaining_width * Decimal(weight) / total_weight for weight in safe_weights
+    ]
+    extras = [
+        extra.quantize(increment, rounding=ROUND_DOWN) for extra in raw_extras
+    ]
+    widths = [width + extra for width, extra in zip(widths, extras, strict=True)]
+
+    remaining_steps = int((total - sum(widths, Decimal(0))) / increment)
+    remainder_order = sorted(
+        range(count),
+        key=lambda index: (raw_extras[index] - extras[index], -index),
+        reverse=True,
+    )
+    for index in remainder_order[:remaining_steps]:
+        widths[index] += increment
+    return [format(value, "f").rstrip("0").rstrip(".") for value in widths]
 
 
 class SasListingGenerator:
@@ -251,7 +291,7 @@ class SasListingGenerator:
             raise ValueError("Listing configuration has no columns.")
         variable_metadata = _variable_metadata(variables)
         prepared = []
-        report_columns = []
+        visible_report_columns = []
         sort_columns = []
         for index, raw in enumerate(columns, 1):
             column = _mapping(raw, "column")
@@ -293,7 +333,7 @@ class SasListingGenerator:
                 )
             prepared.append(item)
             if item["report"]:
-                report_columns.append(item)
+                visible_report_columns.append(item)
             if sort.get("order") is not None:
                 sort_columns.append(
                     {
@@ -302,16 +342,38 @@ class SasListingGenerator:
                         "direction": str(sort.get("direction", "asc")).lower(),
                     }
                 )
-        if not report_columns:
+        if not visible_report_columns:
             raise ValueError("Listing needs at least one PROC REPORT column.")
         sort_columns.sort(key=lambda item: item["order"])
+        sort_indexes = {item["index"] for item in sort_columns}
+        report_columns = []
+        for item in sort_columns:
+            report_columns.append(
+                {
+                    **item,
+                    "report_type": "order",
+                    "noprint": not item["report"],
+                }
+            )
+        report_columns.extend(
+            {**item, "noprint": False}
+            for item in visible_report_columns
+            if item["index"] not in sort_indexes
+        )
         line_size = int(
             _mapping(configuration["report"], "report").get("line_size", 132)
         )
-        for item, width in zip(
-            report_columns, _allocate_widths(line_size, len(report_columns)), strict=True
+        displayed_report_columns = [
+            item for item in report_columns if not item["noprint"]
+        ]
+        for item, width_percent in zip(
+            displayed_report_columns,
+            _allocate_width_percentages(
+                [_report_width_weight(item) for item in displayed_report_columns]
+            ),
+            strict=True,
         ):
-            item["width"] = width
+            item["width_percent"] = width_percent
         context = {
             "source": source,
             "adsl": adsl,

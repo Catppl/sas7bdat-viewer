@@ -12,6 +12,114 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
+    def test_row_comparison_persists_until_replaced_or_source_tab_closes(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            ComparedRow,
+            DatasetHandle,
+            DatasetMetadata,
+            RowComparisonResult,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        def make_handle(root: Path, name: str) -> DatasetHandle:
+            dataset_directory = root / "temp" / name
+            dataset_directory.mkdir(parents=True, exist_ok=True)
+            metadata = DatasetMetadata(
+                name.upper(),
+                3,
+                (
+                    VariableMetadata("STUDYID"),
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("AEDECOD"),
+                ),
+            )
+            return DatasetHandle(
+                root / f"{name}.sas7bdat",
+                dataset_directory / f"{name}.tmp",
+                dataset_directory / "dataset.sqlite",
+                metadata,
+                3,
+                True,
+            )
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+            )
+            owner = window._make_dataset_tab(make_handle(root, "adae"))
+            other = window._make_dataset_tab(make_handle(root, "adsl"))
+            window.tabs.addTab(owner, "ADAE")
+            window.tabs.addTab(other, "ADSL")
+            owner.model.set_page(
+                0,
+                (
+                    ("STUDY01", "SUB001", "HEADACHE"),
+                    ("STUDY01", "SUB002", "NAUSEA"),
+                    ("STUDY01", "SUB003", "FATIGUE"),
+                ),
+                3,
+            )
+            result = RowComparisonResult(
+                (
+                    ComparedRow(0, ("STUDY01", "SUB001", "HEADACHE")),
+                    ComparedRow(1, ("STUDY01", "SUB002", "NAUSEA")),
+                ),
+                ("USUBJID", "AEDECOD"),
+            )
+            window._comparison_owner = owner
+            owner.show_comparison_highlights(result.differing_variables, (0, 1))
+            window.analysis_panel.show_comparison(result, owner.handle.metadata)
+            window.tabs.setCurrentWidget(owner)
+
+            window.analysis_panel.locate_variable_requested.emit("AEDECOD")
+            application.processEvents()
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
+            self.assertEqual(owner.model.highlighted_rows, set())
+            self.assertEqual(owner.model.highlighted_columns, set())
+
+            window.tabs.setCurrentWidget(other)
+            application.processEvents()
+            self.assertIs(window._comparison_owner, owner)
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
+
+            owner.comparison_invalidated.emit()
+            application.processEvents()
+            self.assertEqual(owner.model.highlighted_rows, set())
+            self.assertIs(window._comparison_owner, owner)
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
+
+            owner.analysis_invalidated.emit()
+            application.processEvents()
+            self.assertIs(window._comparison_owner, owner)
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
+
+            window.analysis_panel.locate_variable_requested.emit("USUBJID")
+            application.processEvents()
+            self.assertIs(window.tabs.currentWidget(), owner)
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 2)
+
+            window.close_tab(window.tabs.indexOf(owner))
+            application.processEvents()
+            self.assertIsNone(window._comparison_owner)
+            self.assertEqual(window.analysis_panel.comparison_table.rowCount(), 0)
+            window.close()
+            application.processEvents()
+
     def test_sas_temporal_display_setting_updates_open_new_and_reloaded_tabs(
         self,
     ) -> None:

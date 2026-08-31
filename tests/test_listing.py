@@ -112,6 +112,10 @@ class ListingEngineTests(unittest.TestCase):
             self.assertEqual(
                 configuration["calculation"]["output_type"], "expression_inferred"
             )
+            self.assertEqual(
+                configuration["report"]["width_method"],
+                "metadata_weighted_visible_columns",
+            )
             self.assertNotIn(
                 "visible_output_type", configuration["calculation"]
             )

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import re
 import unittest
+from decimal import Decimal
 
 from clinical_data_viewer.codegen.sas import SasListingGenerator
 
 
-def _variable(kind: str, label: str = "", format_text: str = "") -> dict[str, object]:
-    return {"type": kind, "label": label, "length": 20, "format": format_text}
+def _variable(
+    kind: str, label: str = "", format_text: str = "", length: int = 20
+) -> dict[str, object]:
+    return {"type": kind, "label": label, "length": length, "format": format_text}
 
 
 def _variable_expression(name: str, kind: str) -> dict[str, object]:
@@ -117,7 +120,10 @@ def configuration(*, merge: bool = False) -> dict[str, object]:
             },
         ],
         "sort": {"stable_tie_breaker": "_listing_row"},
-        "report": {"line_size": 132, "width_method": "equal_visible_columns"},
+        "report": {
+            "line_size": 132,
+            "width_method": "metadata_weighted_visible_columns",
+        },
         "calculation": {
             "reference_engine": "python_listing_v1",
             "output_type": "expression_inferred",
@@ -141,9 +147,9 @@ class SasListingGeneratorTests(unittest.TestCase):
         self.assertIn("_listing_row", code)
         self.assertIn("_lst_val3", code)
         self.assertIn("descending _lst_val3", code)
-        self.assertIn("column\n        USUBJID\n        AESTDY", code)
+        self.assertIn("column USUBJID ADY AESTDY;", code)
         report = code.split("proc report data=work.listing_sorted", 1)[1]
-        self.assertNotIn("        ADY\n    ;\n", report)
+        self.assertIn("define ADY / order order=data noprint", report)
         self.assertIn("length _lst_val1 $20", code)
         self.assertIn("length _lst_val2 $57", code)
         self.assertNotIn("_lst_out", code)
@@ -162,6 +168,31 @@ class SasListingGeneratorTests(unittest.TestCase):
         grouped = code.split("define AESTDY /", 1)[1].split(";", 1)[0]
         self.assertIn("group", grouped)
         self.assertIn("order=data", grouped)
+        self.assertTrue(
+            all(
+                line.rstrip().endswith(";")
+                for line in code.splitlines()
+                if line.strip().startswith(("column ", "define "))
+            )
+        )
+
+    def test_sort_columns_lead_report_in_priority_order(self) -> None:
+        cfg = configuration()
+        cfg["columns"][0]["sort"] = {"order": 2, "direction": "asc"}
+        cfg["columns"][0]["report"]["type"] = "display"
+        cfg["columns"][2]["sort"] = {"order": 1, "direction": "desc"}
+
+        code = SasListingGenerator().generate(cfg)
+
+        self.assertIn(
+            "by\n        descending _lst_val3\n"
+            "        _lst_val1\n        _listing_row;",
+            code,
+        )
+        self.assertIn("column ADY USUBJID AESTDY;", code)
+        self.assertIn("define ADY / order order=data noprint", code)
+        self.assertIn("define USUBJID / order order=data", code)
+        self.assertNotIn("define USUBJID / order order=data noprint", code)
 
     def test_final_output_is_not_removed_by_cleanup(self) -> None:
         code = SasListingGenerator().generate(configuration())
@@ -171,13 +202,15 @@ class SasListingGeneratorTests(unittest.TestCase):
         self.assertIn("_lst_sorted", cleanup)
         self.assertNotIn("listing_sorted;", cleanup)
 
-    def test_adsl_merge_has_left_merge_keep_and_missing_key_protection(self) -> None:
+    def test_adsl_merge_has_left_merge_keep_without_runtime_key_checks(self) -> None:
         code = SasListingGenerator().generate(configuration(merge=True))
         self.assertIn("set adsl.ADSL(", code)
         self.assertIn("keep=USUBJID SAFFL", code)
-        self.assertIn("if missing(USUBJID) then delete;", code)
         self.assertIn("merge lst_main(in=in_main) lst_adsl", code)
         self.assertIn("if in_main;", code)
+        self.assertNotIn("if missing(USUBJID) then delete;", code)
+        self.assertNotIn("_lst_adsl_dup", code)
+        self.assertNotIn("ADSL is not unique", code)
 
     def test_merge_source_is_rejected(self) -> None:
         cfg = configuration()
@@ -239,15 +272,203 @@ class SasListingGeneratorTests(unittest.TestCase):
         self.assertIn("format ADY_OUT 8.2;", code)
         self.assertIn("format=8.2", code)
 
-    def test_width_allocation_stays_within_line_size(self) -> None:
+    def test_report_column_percentages_total_no_more_than_99(self) -> None:
         cfg = configuration()
         cfg["report"]["line_size"] = 40
         cfg["columns"][2]["report"]["include"] = True
         code = SasListingGenerator().generate(cfg)
         report = code.split("proc report", 1)[1].split("/* 5. Clean up */", 1)[0]
-        widths = [int(value) for value in re.findall(r"width=(\d+)", report)]
+        widths = {
+            name: Decimal(value)
+            for name, value in re.findall(
+                r"define\s+(\w+)\s+/[^\n]*cellwidth=([0-9.]+)%", report
+            )
+        }
         self.assertEqual(len(widths), 3)
-        self.assertLessEqual(sum(widths) + len(widths) - 1, 40)
+        self.assertLessEqual(sum(widths.values()), Decimal(99))
+        self.assertEqual(sum(widths.values()), Decimal(99))
+        self.assertGreater(widths["AESTDY"], widths["USUBJID"])
+        self.assertGreater(widths["USUBJID"], widths["ADY"])
+        self.assertNotRegex(report, r"(?<!cell)width=")
+
+    def test_long_character_metadata_receives_a_wider_percentage(self) -> None:
+        cfg = configuration()
+        cfg["variables"]["LONGTEXT"] = _variable(
+            "character", "Long Narrative", length=500
+        )
+        cfg["columns"].append(
+            {
+                "expression": {
+                    "text": "LONGTEXT",
+                    "ast": _variable_expression("LONGTEXT", "character"),
+                },
+                "output_name": "LONGTEXT",
+                "label": "Long Narrative",
+                "format": "",
+                "sort": {"order": None, "direction": "asc"},
+                "report": {
+                    "include": True,
+                    "type": "display",
+                    "width_percent": 0,
+                },
+                "post_process": {"division_by_zero": "error"},
+            }
+        )
+
+        code = SasListingGenerator().generate(cfg)
+        widths = {
+            name: Decimal(width)
+            for name, width in re.findall(
+                r"define\s+(\w+)\s+/[^\n]*cellwidth=([0-9.]+)%", code
+            )
+        }
+
+        self.assertEqual(sum(widths.values()), Decimal(99))
+        self.assertGreater(widths["LONGTEXT"], widths["AESTDY"])
+        self.assertGreater(widths["LONGTEXT"], widths["USUBJID"])
+
+    def test_six_column_clinical_listing_conversions_merge_and_sort(self) -> None:
+        cfg = configuration(merge=True)
+        cfg["variables"].update(
+            {
+                "AETERM": _variable("character", "Reported Term"),
+                "AESEQ": _variable("numeric", "Sequence"),
+                "ADTM": _variable("numeric", "Analysis Datetime", "DATETIME20."),
+                "TRT01A": _variable("character", "Actual Treatment"),
+            }
+        )
+        cfg["merge_adsl"]["variables"]["TRT01A"] = _variable(
+            "character", "Actual Treatment"
+        )
+        cfg["merge_adsl"]["keep"] = ["SAFFL", "TRT01A"]
+
+        def column(
+            expression_text,
+            expression_ast,
+            output,
+            *,
+            label="",
+            format_text="",
+            sort_order=None,
+            direction="asc",
+            include=True,
+            report_type="display",
+        ):
+            return {
+                "expression": {"text": expression_text, "ast": expression_ast},
+                "output_name": output,
+                "label": label,
+                "format": format_text,
+                "sort": {"order": sort_order, "direction": direction},
+                "report": {
+                    "include": include,
+                    "type": report_type,
+                    "width_percent": 0,
+                },
+                "post_process": {"division_by_zero": "error"},
+            }
+
+        cfg["columns"] = [
+            column(
+                "USUBJID",
+                _variable_expression("USUBJID", "character"),
+                "USUBJID",
+                label="Subject",
+                sort_order=1,
+                report_type="order",
+            ),
+            column(
+                "PUT(ADY, 8.)",
+                {
+                    "type": "function",
+                    "name": "PUT",
+                    "arguments": [
+                        _variable_expression("ADY", "numeric"),
+                        {"type": "format", "value": "8."},
+                    ],
+                },
+                "ADY_TEXT",
+                label="Study Day",
+            ),
+            column(
+                "INPUT(AESTDTC, E8601DA.)",
+                {
+                    "type": "function",
+                    "name": "INPUT",
+                    "arguments": [
+                        _variable_expression("AESTDTC", "character"),
+                        {"type": "format", "value": "E8601DA."},
+                    ],
+                },
+                "AESTDT",
+                label="Start Date",
+                format_text="DATE9.",
+                sort_order=2,
+            ),
+            column(
+                "CATX(' / ', AESTDTC, AETERM)",
+                {
+                    "type": "function",
+                    "name": "CATX",
+                    "arguments": [
+                        {"type": "literal", "value": " / ", "kind": "character"},
+                        _variable_expression("AESTDTC", "character"),
+                        _variable_expression("AETERM", "character"),
+                    ],
+                },
+                "EVENT_TEXT",
+                label="Date / Event",
+            ),
+            column(
+                "PUT(ADTM, DATETIME20.)",
+                {
+                    "type": "function",
+                    "name": "PUT",
+                    "arguments": [
+                        _variable_expression("ADTM", "numeric"),
+                        {"type": "format", "value": "DATETIME20."},
+                    ],
+                },
+                "ADTM_TEXT",
+                label="Analysis Datetime",
+            ),
+            column(
+                "TRT01A",
+                _variable_expression("TRT01A", "character"),
+                "TRT01A",
+                label="Treatment",
+            ),
+            column(
+                "AESEQ",
+                _variable_expression("AESEQ", "numeric"),
+                "AESEQ",
+                sort_order=3,
+                direction="desc",
+                include=False,
+            ),
+        ]
+
+        code = SasListingGenerator().generate(cfg)
+
+        self.assertIn("keep=USUBJID SAFFL TRT01A", code)
+        self.assertIn("_lst_val2 = strip(put(ADY, 8.));", code)
+        self.assertIn("_lst_val3 = input(AESTDTC, E8601DA.);", code)
+        self.assertIn("format AESTDT DATE9.;", code)
+        self.assertIn("_lst_val4 = catx(' / ', AESTDTC, AETERM);", code)
+        self.assertIn("_lst_val5 = strip(put(ADTM, DATETIME20.));", code)
+        self.assertIn(
+            "by\n        _lst_val1\n        _lst_val3\n"
+            "        descending _lst_val7\n        _listing_row;",
+            code,
+        )
+        self.assertIn(
+            "column USUBJID AESTDT AESEQ ADY_TEXT EVENT_TEXT ADTM_TEXT TRT01A;",
+            code,
+        )
+        self.assertIn("define AESEQ / order order=data noprint", code)
+        widths = [Decimal(value) for value in re.findall(r"cellwidth=([0-9.]+)%", code)]
+        self.assertEqual(len(widths), 6)
+        self.assertEqual(sum(widths), Decimal(99))
 
     def test_reserved_output_names_are_rejected(self) -> None:
         cfg = configuration()
