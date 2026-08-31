@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..filter_history import FilterHistory
+from ..filter_history import FilterHistory, format_history_timestamp
 
 
 class HistoryDialog(QDialog):
@@ -79,11 +79,14 @@ class HistoryDialog(QDialog):
         self.table.clear()
         entries = self.history.list(self.dataset_path if self._current_only() else None)
         for entry in entries:
+            executed_at = format_history_timestamp(entry.executed_at)
             item = QTreeWidgetItem(
-                [entry.executed_at, entry.dataset_name, entry.where_text]
+                [executed_at, entry.dataset_name, entry.where_text]
             )
             item.setData(0, Qt.UserRole, entry)
-            item.setToolTip(0, entry.executed_at)
+            item.setToolTip(
+                0, format_history_timestamp(entry.executed_at, include_timezone=True)
+            )
             item.setToolTip(1, entry.dataset_path)
             item.setToolTip(2, entry.where_text)
             self.table.addTopLevelItem(item)

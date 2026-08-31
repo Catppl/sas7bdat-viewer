@@ -13,8 +13,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +34,16 @@ class ProcMeansBuilderSelection:
     decimal_group_variables: tuple[str, ...]
 
 
+class FilterTextEditor(QPlainTextEdit):
+    """Compact wrapping WHERE editor with the former QLineEdit text API."""
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self.setPlainText(text)
+
+
 class VariableTokenEditor(QWidget):
     changed = Signal()
     validation_error = Signal(str)
@@ -44,16 +56,22 @@ class VariableTokenEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)
         row = QHBoxLayout()
+        row.setSpacing(4)
         self.editor = QLineEdit()
+        self.editor.setMinimumWidth(0)
+        self.editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.editor.setPlaceholderText(placeholder)
         self.editor.returnPressed.connect(self._add_from_editor)
         row.addWidget(self.editor, 1)
-        remove = QPushButton("Remove")
-        remove.setMinimumWidth(64)
-        remove.clicked.connect(self._remove_selected)
-        row.addWidget(remove)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setObjectName("variableRemoveButton")
+        self.remove_button.setFixedWidth(72)
+        self.remove_button.clicked.connect(self._remove_selected)
+        row.addWidget(self.remove_button)
         layout.addLayout(row)
         self.values = QListWidget()
+        self.values.setMinimumWidth(0)
+        self.values.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.values.setMaximumHeight(62)
         self.values.itemDoubleClicked.connect(lambda _item: self._remove_selected())
         layout.addWidget(self.values)
@@ -160,16 +178,17 @@ class ProcMeansBuilder(QWidget):
         self._suppress_decimal_group_refresh = False
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        content = QWidget()
-        content.setObjectName("procMeansBuilderContent")
-        layout = QVBoxLayout(content)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.content = QWidget()
+        self.content.setObjectName("procMeansBuilderContent")
+        layout = QVBoxLayout(self.content)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)
-        scroll.setWidget(content)
-        outer_layout.addWidget(scroll, 1)
+        self.scroll_area.setWidget(self.content)
+        outer_layout.addWidget(self.scroll_area, 1)
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         layout.addWidget(self.source_label)
@@ -196,26 +215,41 @@ class ProcMeansBuilder(QWidget):
 
         layout.addWidget(QLabel("Decimal Group Variables"))
         self.decimal_groups = QListWidget()
+        self.decimal_groups.setMinimumWidth(0)
+        self.decimal_groups.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.decimal_groups.setMaximumHeight(72)
         self.decimal_groups.setToolTip(
             "Check zero or more variables already selected as BY or CLASS Variables."
         )
         layout.addWidget(self.decimal_groups)
 
-        statistics_box = QGroupBox("Statistics")
-        statistics_layout = QGridLayout(statistics_box)
+        self.statistics_box = QGroupBox("Statistics")
+        self.statistics_layout = QGridLayout(self.statistics_box)
+        self.statistics_layout.setContentsMargins(4, 6, 4, 6)
+        self.statistics_layout.setHorizontalSpacing(4)
+        self.statistics_layout.setVerticalSpacing(3)
+        self.statistics_layout.setColumnStretch(0, 0)
+        self.statistics_layout.setColumnStretch(1, 1)
         self.statistics: dict[str, QCheckBox] = {}
         for index, (key, label) in enumerate(PROC_MEANS_STATISTICS):
             checkbox = QCheckBox(label)
             self.statistics[key] = checkbox
-            statistics_layout.addWidget(checkbox, index // 2, index % 2)
-        layout.addWidget(statistics_box)
+            self.statistics_layout.addWidget(
+                checkbox, index // 2, index % 2, alignment=Qt.AlignLeft
+            )
+        layout.addWidget(self.statistics_box)
 
         filter_title = QLabel("Filter")
         filter_title.setObjectName("panelTitle")
         layout.addWidget(filter_title)
-        self.filter_editor = QLineEdit()
+        self.filter_editor = FilterTextEditor()
         self.filter_editor.setObjectName("procMeansFilterEditor")
+        self.filter_editor.setMinimumWidth(0)
+        self.filter_editor.setMinimumHeight(56)
+        self.filter_editor.setMaximumHeight(72)
+        self.filter_editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.filter_editor.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.filter_editor.setTabChangesFocus(True)
         self.filter_editor.setPlaceholderText(
             'Optional WHERE condition, e.g. ANL01FL = "Y"'
         )
@@ -226,23 +260,26 @@ class ProcMeansBuilder(QWidget):
         layout.addWidget(self.status)
         buttons = QGridLayout()
         buttons.setContentsMargins(6, 0, 6, 6)
-        settings = QPushButton("Settings…")
-        settings.clicked.connect(self.settings_requested)
-        buttons.addWidget(settings, 0, 0)
-        clear = QPushButton("Clear")
-        clear.clicked.connect(self.clear)
-        buttons.addWidget(clear, 0, 1)
-        self.sas_code_button = QPushButton("SAS Code Generator…")
-        self.sas_code_button.clicked.connect(self._generate_sas_code)
-        buttons.addWidget(self.sas_code_button, 1, 0, 1, 1)
-        self.r_code_button = QPushButton("R Code Generator…")
-        self.r_code_button.clicked.connect(self._generate_r_code)
-        buttons.addWidget(self.r_code_button, 1, 1, 1, 1)
+        buttons.setHorizontalSpacing(5)
+        buttons.setVerticalSpacing(4)
+        self.settings_button = QPushButton("Settings…")
+        self.settings_button.clicked.connect(self.settings_requested)
+        buttons.addWidget(self.settings_button, 0, 0)
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.clicked.connect(self.clear)
+        buttons.addWidget(self.clear_button, 0, 1)
         self.run_button = QPushButton("Run")
         self.run_button.setDefault(True)
         self.run_button.clicked.connect(self._run)
-        buttons.addWidget(self.run_button, 0, 2, 2, 1)
-        buttons.setColumnStretch(2, 1)
+        buttons.addWidget(self.run_button, 0, 2)
+        self.sas_code_button = QPushButton("SAS Code Generator…")
+        self.sas_code_button.clicked.connect(self._generate_sas_code)
+        buttons.addWidget(self.sas_code_button, 1, 0, 1, 3)
+        self.r_code_button = QPushButton("R Code Generator…")
+        self.r_code_button.clicked.connect(self._generate_r_code)
+        buttons.addWidget(self.r_code_button, 2, 0, 1, 3)
+        for column in range(3):
+            buttons.setColumnStretch(column, 1)
         outer_layout.addLayout(buttons)
         self.set_dataset(None, "")
 

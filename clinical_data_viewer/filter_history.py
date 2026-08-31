@@ -4,7 +4,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 
 
@@ -15,6 +15,44 @@ class HistoryEntry:
     dataset_name: str
     where_text: str
     executed_at: str
+
+
+def format_history_timestamp(
+    timestamp: str,
+    local_timezone: tzinfo | None = None,
+    *,
+    include_timezone: bool = False,
+) -> str:
+    """Format a stored UTC/offset timestamp in the current system timezone."""
+
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return timestamp
+    if parsed.tzinfo is None:
+        # Filter History has always stored UTC. Treat a legacy naive value as
+        # UTC instead of guessing that it was written in the current timezone.
+        parsed = parsed.replace(tzinfo=UTC)
+    localized = (
+        parsed.astimezone(local_timezone)
+        if local_timezone is not None
+        else parsed.astimezone()
+    )
+    display = localized.strftime("%Y-%m-%d %H:%M:%S")
+    if not include_timezone:
+        return display
+    offset = localized.utcoffset()
+    if offset is None:
+        return display
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    absolute_minutes = abs(total_minutes)
+    offset_text = (
+        f"UTC{sign}{absolute_minutes // 60:02d}:{absolute_minutes % 60:02d}"
+    )
+    zone_name = localized.tzname()
+    zone_text = f" {zone_name}" if zone_name else ""
+    return f"{display}{zone_text} ({offset_text})"
 
 
 class FilterHistory:

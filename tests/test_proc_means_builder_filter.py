@@ -65,6 +65,74 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         self.assertEqual(builder.current_filter_text(), "")
         builder.deleteLater()
 
+    def test_variable_controls_fit_the_default_analysis_width(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        from clinical_data_viewer.ui.proc_means_builder import ProcMeansBuilder
+
+        builder = ProcMeansBuilder()
+        builder.set_dataset(self._metadata(), r"C:\data\adlb.sas7bdat")
+        builder.resize(310, 520)
+        builder.show()
+        self.application.processEvents()
+
+        self.assertLessEqual(builder.minimumSizeHint().width(), 310)
+        self.assertEqual(builder.scroll_area.horizontalScrollBar().maximum(), 0)
+        for editor in (
+            builder.analysis_variables,
+            builder.by_variables,
+            builder.class_variables,
+        ):
+            self.assertTrue(editor.remove_button.isVisible())
+            self.assertLess(editor.remove_button.geometry().right(), editor.width())
+            self.assertGreaterEqual(editor.editor.width(), 80)
+            self.assertLessEqual(editor.values.geometry().right(), editor.width())
+
+        self.assertLessEqual(
+            builder.decimal_groups.geometry().right(), builder.content.width()
+        )
+        self.assertLessEqual(builder.filter_editor.width(), builder.content.width())
+        self.assertGreaterEqual(builder.filter_editor.height(), 56)
+        self.assertEqual(builder.filter_editor.horizontalScrollBar().maximum(), 0)
+        long_filter = (
+            'ANL01FL = "Y" and PARAMCD = "ALB" and '
+            'AVISIT = "Week 12" and TRT01AN in (1, 2, 3)'
+        )
+        builder.filter_editor.setText(long_filter)
+        self.application.processEvents()
+        self.assertEqual(builder.current_filter_text(), long_filter)
+        self.assertEqual(builder.statistics_layout.horizontalSpacing(), 4)
+        self.assertLessEqual(
+            builder.statistics_box.minimumSizeHint().width(),
+            builder.scroll_area.viewport().width(),
+        )
+        for button in (
+            builder.settings_button,
+            builder.clear_button,
+            builder.run_button,
+            builder.sas_code_button,
+            builder.r_code_button,
+        ):
+            self.assertTrue(button.isVisible())
+            self.assertLess(button.geometry().right(), builder.width())
+
+        builder.analysis_variables.set_variables(("AVAL",))
+        builder.analysis_variables.values.setCurrentRow(0)
+        QTest.mouseClick(builder.analysis_variables.remove_button, Qt.LeftButton)
+        self.assertEqual(builder.analysis_variables.selected_variables(), ())
+        self.assertGreater(builder.scroll_area.verticalScrollBar().maximum(), 0)
+        builder.scroll_area.verticalScrollBar().setValue(
+            builder.scroll_area.verticalScrollBar().maximum()
+        )
+        self.application.processEvents()
+        self.assertEqual(
+            builder.scroll_area.verticalScrollBar().value(),
+            builder.scroll_area.verticalScrollBar().maximum(),
+        )
+        builder.close()
+        builder.deleteLater()
+
     def test_metadata_refresh_preserves_filter_and_prunes_stale_selections(self):
         from PySide6.QtCore import Qt
 
