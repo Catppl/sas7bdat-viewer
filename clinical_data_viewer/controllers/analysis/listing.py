@@ -73,20 +73,40 @@ class ListingController(AnalysisModuleController):
             list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
         )
 
+    def refresh_listing_sources(self, datasets=None) -> None:
+        available = (
+            list(datasets)
+            if datasets is not None
+            else getattr(
+                self._host,
+                "available_analysis_dataset_tabs",
+                self._host.available_sas_dataset_tabs,
+            )()
+        )
+        selected = self.listing_source
+        if self._listing_source is not None and selected is None:
+            self._listing_source = None
+            self._set_listing_dataset(None)
+        elif selected is not None:
+            self._set_listing_dataset(selected)
+        self._panel.listing_builder.set_source_datasets(available, selected)
+
+    def select_listing_source(self, tab) -> None:
+        if not isinstance(tab, DatasetTab):
+            self._listing_source = None
+            self._set_listing_dataset(None)
+            return
+        if not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            return
+        self._listing_source = tab
+        self._set_listing_dataset(tab)
+
     def select_listing_adsl(self, tab: DatasetTab) -> None:
         self._panel.listing_builder.select_adsl(tab)
 
     def show_listing_builder(self) -> None:
-        """Open Listing with its first eligible source fixed until Clear."""
-        if self.listing_source is None:
-            active_tab = self._host.current_dataset_tab()
-            if (
-                active_tab is not None
-                and is_analysis_dataset(active_tab.handle)
-                and active_tab.cache_complete
-            ):
-                self._listing_source = active_tab
-                self._set_listing_dataset(active_tab)
+        """Open Listing and let the user choose an already-open source."""
+        self.refresh_listing_sources()
         self.refresh_listing_adsl_sources()
         self._panel.show_listing_tab()
 
@@ -94,6 +114,7 @@ class ListingController(AnalysisModuleController):
         """Release Listing's source only after its own Clear action."""
         self._listing_source = None
         self._set_listing_dataset(None)
+        self.refresh_listing_sources()
 
     def _set_listing_dataset(self, tab: DatasetTab | None) -> None:
         builder = self._panel.listing_builder

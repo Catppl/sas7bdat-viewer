@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..domain import DatasetMetadata
+from .analysis_source_selector import AnalysisSourceSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class AeTableBuilderSelection:
 
 
 class AeTableBuilder(QWidget):
+    source_selected = Signal(object)
     run_requested = Signal(object)
     sas_code_requested = Signal(object)
     validation_error = Signal(str)
@@ -53,6 +55,7 @@ class AeTableBuilder(QWidget):
         self._filter_text = ""
         self._busy = False
         self._source_kind = "sas"
+        self._source_available = False
         self._adsl_user_selected = False
         self._population_treatment_user_selected = False
         outer = QVBoxLayout(self)
@@ -66,6 +69,9 @@ class AeTableBuilder(QWidget):
         outer.addWidget(scroll, 1)
         source = QGroupBox("Source")
         form = QFormLayout(source)
+        self.source_selector = AnalysisSourceSelector()
+        self.source_selector.source_selected.connect(self.source_selected)
+        form.addRow("Dataset", self.source_selector)
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         form.addRow(self.source_label)
@@ -155,6 +161,9 @@ class AeTableBuilder(QWidget):
         self._sync_denominator()
         self.set_dataset(None, "")
 
+    def set_source_datasets(self, datasets, selected=None) -> None:
+        self.source_selector.set_sources(datasets, selected)
+
     def set_dataset(
         self,
         metadata: DatasetMetadata | None,
@@ -163,19 +172,33 @@ class AeTableBuilder(QWidget):
         source_kind: str = "sas",
     ):
         self._source_kind = source_kind
+        self._source_available = metadata is not None
         if metadata is not None and metadata is not self._metadata:
+            previous = {
+                "treatment": self.treatment.currentText(),
+                "soc": self.soc.currentText(),
+                "pt": self.pt.currentText(),
+            }
             self._metadata = metadata
-            self._filter_text = filter_text.strip()
-            self._source_filter_snapshot = self._filter_text
-            self.dataset_filter.setPlainText(self._filter_text)
+            if self._filter_text == self._source_filter_snapshot:
+                self._filter_text = filter_text.strip()
+                self._source_filter_snapshot = self._filter_text
+                self.dataset_filter.setPlainText(self._filter_text)
             names = [v.name for v in metadata.variables]
-            for combo, preferred in (
-                (self.treatment, ("TRT01A", "TRT01P", "TRTA", "TRT01AN", "TRTAN")),
-                (self.soc, ("AEBODSYS",)),
-                (self.pt, ("AEDECOD",)),
+            for key, combo, preferred in (
+                (
+                    "treatment",
+                    self.treatment,
+                    ("TRT01A", "TRT01P", "TRTA", "TRT01AN", "TRTAN"),
+                ),
+                ("soc", self.soc, ("AEBODSYS",)),
+                ("pt", self.pt, ("AEDECOD",)),
             ):
                 combo.clear()
                 combo.addItems(names)
+                if previous[key] in names:
+                    combo.setCurrentText(previous[key])
+                    continue
                 for candidate in preferred:
                     index = combo.findText(candidate, Qt.MatchFixedString)
                     if index >= 0:
@@ -188,8 +211,9 @@ class AeTableBuilder(QWidget):
             if metadata
             else "Select a fully loaded source dataset."
         )
-        enabled = metadata is not None and not self._busy
-        self.setEnabled(enabled or self._busy)
+        enabled = self._source_available and not self._busy
+        self.setEnabled(True)
+        self.source_selector.setEnabled(not self._busy)
         self.run_button.setEnabled(enabled)
         self.sas_code_button.setEnabled(enabled and source_kind == "sas")
         self.sas_code_button.setToolTip(
@@ -285,7 +309,8 @@ class AeTableBuilder(QWidget):
 
     def set_busy(self, busy: bool, message: str = ""):
         self._busy = busy
-        available = not busy and self._metadata is not None
+        self.source_selector.setEnabled(not busy)
+        available = not busy and self._source_available
         self.run_button.setEnabled(available)
         self.sas_code_button.setEnabled(available and self._source_kind == "sas")
         self._sync_denominator()

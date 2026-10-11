@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import suppress
 from pathlib import Path
 
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import quote_identifier
+from ..sqlite_access import connect_result_database
 from ..temp_manager import TempManager
 from .models import is_reserved_listing_name
 
@@ -19,7 +21,7 @@ class ListingResultWriter:
         )
         if reserved is not None:
             raise ValueError(f'Listing output variable "{reserved}" uses a reserved name.')
-        self.connection = sqlite3.connect(database_path)
+        self.connection = connect_result_database(database_path)
         definitions = ", ".join(
             f"{quote_identifier(variable.name)} {'REAL' if variable.kind == 'numeric' else 'TEXT'}"
             for variable in variables
@@ -74,5 +76,7 @@ class ListingResultWriter:
         )
 
     def abort(self, manager: TempManager, directory: Path) -> None:
-        self.connection.close()
-        manager.remove_dataset(directory)
+        with suppress(sqlite3.Error):
+            self.connection.close()
+        with suppress(OSError, ValueError):
+            manager.remove_dataset(directory)

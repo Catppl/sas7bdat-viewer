@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..domain import DatasetMetadata
 from ..settings import PROC_MEANS_STATISTICS
+from .analysis_source_selector import AnalysisSourceSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +161,7 @@ class VariableTokenEditor(QWidget):
 
 
 class ProcMeansBuilder(QWidget):
+    source_selected = Signal(object)
     run_requested = Signal(object)
     sas_code_requested = Signal(object)
     r_code_requested = Signal(object)
@@ -173,6 +175,7 @@ class ProcMeansBuilder(QWidget):
         self._metadata: DatasetMetadata | None = None
         self._source_text = ""
         self._source_kind = "sas"
+        self._source_available = False
         self._busy = False
         self._source_reloading = False
         self._suppress_decimal_group_refresh = False
@@ -189,6 +192,9 @@ class ProcMeansBuilder(QWidget):
         layout.setSpacing(5)
         self.scroll_area.setWidget(self.content)
         outer_layout.addWidget(self.scroll_area, 1)
+        self.source_selector = AnalysisSourceSelector()
+        self.source_selector.source_selected.connect(self.source_selected)
+        layout.addWidget(self.source_selector)
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         layout.addWidget(self.source_label)
@@ -283,6 +289,9 @@ class ProcMeansBuilder(QWidget):
         outer_layout.addLayout(buttons)
         self.set_dataset(None, "")
 
+    def set_source_datasets(self, datasets, selected=None) -> None:
+        self.source_selector.set_sources(datasets, selected)
+
     def set_dataset(
         self,
         metadata: DatasetMetadata | None,
@@ -291,23 +300,24 @@ class ProcMeansBuilder(QWidget):
         source_kind: str = "sas",
     ) -> tuple[str, ...]:
         self._source_kind = source_kind
+        self._source_available = metadata is not None
         removed: tuple[str, ...] = ()
         if metadata is None:
-            self._metadata = None
-            self._source_text = ""
             self._source_reloading = False
-            self.filter_editor.clear()
         elif source_text != self._source_text:
+            previous_source = bool(self._source_text)
             self._metadata = metadata
             self._source_text = source_text
             self._source_reloading = False
-            self.filter_editor.setText(self._normalized_filter_text(filter_text))
+            if not previous_source:
+                self.filter_editor.setText(self._normalized_filter_text(filter_text))
             for editor in (
                 self.analysis_variables,
                 self.by_variables,
                 self.class_variables,
             ):
-                editor.set_metadata(metadata)
+                editor.set_metadata(metadata, preserve=previous_source)
+            self._refresh_decimal_groups(self.selected_decimal_groups())
         elif metadata is not self._metadata:
             # A reload can provide a new metadata object for the same source.
             # Keep the Builder-owned filter and pending variable selections.
@@ -385,19 +395,20 @@ class ProcMeansBuilder(QWidget):
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
+        self.source_selector.setEnabled(not busy)
         self._update_enabled_state()
         if message:
             self.status.setText(message)
 
     def _update_enabled_state(self) -> None:
         available = (
-            self._metadata is not None
+            self._source_available
             and not self._busy
             and not self._source_reloading
         )
         codegen_available = (
             not self._busy
-            and self._metadata is not None
+            and self._source_available
             and self._source_kind != "merge"
             and not self._source_reloading
         )

@@ -253,6 +253,9 @@ class UiSmokeTests(unittest.TestCase):
             window.tabs.setCurrentWidget(tab)
             window.show_proc_means_builder()
             builder = window.analysis_panel.builder
+            builder.source_selector.combo.setCurrentIndex(
+                builder.source_selector.combo.findData(tab)
+            )
             builder.filter_editor.setText('ANL01FL = "Y"')
             callbacks = {}
 
@@ -668,13 +671,26 @@ class UiSmokeTests(unittest.TestCase):
             window._sync_active_tab()
             self.assertTrue(window.merge_panel.left_dataset.count() >= 2)
             window.show_proc_means_builder()
+            window.analysis_panel.builder.source_selector.combo.setCurrentIndex(
+                window.analysis_panel.builder.source_selector.combo.findData(tab)
+            )
             self.assertIs(window.analysis_panel.builder._metadata, metadata)
             window.show_categorical_builder()
+            window.analysis_panel.categorical_builder.source_selector.combo.setCurrentIndex(
+                window.analysis_panel.categorical_builder.source_selector.combo.findData(
+                    tab
+                )
+            )
             self.assertEqual(
                 window.analysis_panel.categorical_builder.current_filter_text(),
                 'TRT01A = "A"',
             )
             window.show_rule_based_builder()
+            window.analysis_panel.rule_based_builder.source_selector.combo.setCurrentIndex(
+                window.analysis_panel.rule_based_builder.source_selector.combo.findData(
+                    tab
+                )
+            )
             self.assertEqual(
                 window.analysis_panel.rule_based_builder.current_filter_text(),
                 'TRT01A = "A"',
@@ -682,7 +698,7 @@ class UiSmokeTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
-    def test_analysis_builders_keep_their_fixed_source_and_inputs_until_clear(
+    def test_analysis_builders_use_explicit_source_and_keep_inputs_until_clear(
         self,
     ) -> None:
         """Changing tabs must not silently rebind or reset an open Builder."""
@@ -749,6 +765,17 @@ class UiSmokeTests(unittest.TestCase):
             window.show_ae_table_builder()
             window.show_listing_builder()
 
+            for builder in (
+                window.analysis_panel.builder,
+                window.analysis_panel.categorical_builder,
+                window.analysis_panel.rule_based_builder,
+                window.analysis_panel.ae_table_builder,
+                window.analysis_panel.listing_builder,
+            ):
+                builder.source_selector.combo.setCurrentIndex(
+                    builder.source_selector.combo.findData(source_a)
+                )
+
             window.analysis_panel.builder.analysis_variables.set_variables(("AVAL",))
             window.analysis_panel.categorical_builder.numerator_where.setPlainText(
                 'TRT01A = "A" and AVAL > 0'
@@ -792,12 +819,17 @@ class UiSmokeTests(unittest.TestCase):
                 'TRT01A = "A" and AVAL > 0',
             )
 
-            with patch(
-                "clinical_data_viewer.ui.main_window.QMessageBox.warning"
-            ) as warning:
-                window.close_tab(window.tabs.indexOf(source_a))
-            self.assertGreaterEqual(window.tabs.indexOf(source_a), 0)
-            self.assertIn("fixed source", warning.call_args.args[2])
+            window.close_tab(window.tabs.indexOf(source_a))
+            self.assertLess(window.tabs.indexOf(source_a), 0)
+            self.assertIsNone(window.analysis_controller.listing_source)
+            self.assertIsNone(window.analysis_controller.categorical_source)
+            self.assertIsNone(window.analysis_controller.rule_based_source)
+            self.assertIsNone(window.analysis_controller.ae_table_source)
+            self.assertIsNone(window.analysis_controller.proc_means_source)
+            self.assertEqual(
+                window.analysis_panel.listing_builder.data_filter.toPlainText(),
+                'TRT01A = "A" and AVAL > 0',
+            )
 
             for builder in (
                 window.analysis_panel.builder,
@@ -813,20 +845,6 @@ class UiSmokeTests(unittest.TestCase):
             self.assertIsNone(window.analysis_controller.ae_table_source)
             self.assertIsNone(window.analysis_controller.proc_means_source)
 
-            # Listing's source binding is now controller-owned.  It must keep
-            # the existing source-close guard and release only after Clear.
-            window.tabs.setCurrentWidget(source_a)
-            window.show_listing_builder()
-            with patch(
-                "clinical_data_viewer.ui.main_window.QMessageBox.warning"
-            ) as warning:
-                window.close_tab(window.tabs.indexOf(source_a))
-            self.assertGreaterEqual(window.tabs.indexOf(source_a), 0)
-            self.assertIn("fixed source", warning.call_args.args[2])
-            window.analysis_panel.listing_builder.clear()
-            self.assertIsNone(window.analysis_controller.listing_source)
-            window.close_tab(window.tabs.indexOf(source_a))
-            self.assertLess(window.tabs.indexOf(source_a), 0)
             window.close()
             application.processEvents()
 

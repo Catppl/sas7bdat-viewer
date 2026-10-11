@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import quote_identifier
+from ..sqlite_access import connect_result_database
 from .models import MergeSummary
 
 
@@ -111,7 +112,7 @@ class MergeResultWriter:
     def __init__(self, database_path: Path, schema: MergeResultSchema) -> None:
         self.database_path = database_path
         self.schema = schema
-        self.connection = sqlite3.connect(database_path)
+        self.connection = connect_result_database(database_path)
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=NORMAL")
         definitions = [

@@ -29,6 +29,7 @@ from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
 from ..dataset_utils import is_analysis_dataset
 from ..domain import CacheProgress, DatasetHandle
+from ..excel_exporter import LARGE_EXPORT_BYTES, ExcelExporter, ExcelExportView
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
 from ..merge_datasets import MergeDatasetsEngine
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow):
         self.merge_engine = MergeDatasetsEngine(temp_manager)
         self.store = DataStore()
         self.exporter = CsvExporter()
+        self.excel_exporter = ExcelExporter()
         self.pool = QThreadPool.globalInstance()
         self._workers: dict[QWidget, set[Worker]] = {}
         self._pending_removals: dict[QWidget, list[Path]] = {}
@@ -137,6 +139,10 @@ class MainWindow(QMainWindow):
         )
         self.export_action.setShortcut("Ctrl+Shift+S")
         self.export_action.triggered.connect(self.export_current)
+        self.export_excel_action = QAction(
+            style.standardIcon(QStyle.SP_DialogSaveButton), "Export Excel", self
+        )
+        self.export_excel_action.triggered.connect(self.export_excel_current)
         self.clear_action = QAction(
             style.standardIcon(QStyle.SP_DialogResetButton), "Clear Filter", self
         )
@@ -205,6 +211,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.reload_action)
         file_menu.addAction(self.export_action)
+        file_menu.addAction(self.export_excel_action)
         file_menu.addSeparator()
         file_menu.addAction(self.close_tab_action)
         file_menu.addAction(self.exit_action)
@@ -249,6 +256,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.reload_action)
         toolbar.addSeparator()
         toolbar.addAction(self.export_action)
+        toolbar.addAction(self.export_excel_action)
         toolbar.addSeparator()
         toolbar.addAction(self.clear_action)
         toolbar.addSeparator()
@@ -395,6 +403,23 @@ class MainWindow(QMainWindow):
         for index in range(self.tabs.count()):
             tab = self.tabs.widget(index)
             if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+                datasets.append(
+                    (
+                        tab,
+                        f"{tab.handle.metadata.name} — {tab.handle.source_path.name}",
+                    )
+                )
+        return datasets
+
+    def available_analysis_dataset_tabs(self) -> list[tuple[DatasetTab, str]]:
+        datasets: list[tuple[DatasetTab, str]] = []
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if (
+                isinstance(tab, DatasetTab)
+                and is_analysis_dataset(tab.handle)
+                and tab.cache_complete
+            ):
                 datasets.append(
                     (
                         tab,
@@ -582,6 +607,12 @@ class MainWindow(QMainWindow):
             return
         datasets = self.available_sas_dataset_tabs()
         if hasattr(self, "analysis_controller"):
+            analysis_datasets = self.available_analysis_dataset_tabs()
+            self.analysis_controller.refresh_proc_means_sources(analysis_datasets)
+            self.analysis_controller.refresh_categorical_sources(analysis_datasets)
+            self.analysis_controller.refresh_listing_sources(analysis_datasets)
+            self.analysis_controller.refresh_rule_based_sources(analysis_datasets)
+            self.analysis_controller.refresh_ae_table_sources(analysis_datasets)
             self.analysis_controller.refresh_categorical_adsl_sources(datasets)
             self.analysis_controller.refresh_listing_adsl_sources(datasets)
             self.analysis_controller.refresh_rule_based_adsl_sources(datasets)
@@ -1679,6 +1710,81 @@ class MainWindow(QMainWindow):
             ),
         )
 
+    def export_excel_current(self) -> None:
+        tab = self.current_dataset_tab()
+        if not tab or not tab.cache_complete or not self._exportable_columns(tab):
+            return
+        initial_directory = Path(
+            self.settings.last_export_directory or str(tab.handle.source_path.parent)
+        )
+        suggested = initial_directory / f"{tab.handle.source_path.stem}.xlsx"
+        destination, _filter = QFileDialog.getSaveFileName(
+            self, "Export Current View to Excel", str(suggested), "Excel files (*.xlsx)"
+        )
+        if not destination:
+            return
+        path = Path(destination)
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+        self.settings.last_export_directory = str(path.parent)
+        self.settings.save()
+        view = ExcelExportView(
+            handle=tab.handle,
+            columns=tuple(tab.visible_columns),
+            compiled_filter=tab.compiled_filter,
+            sort=tab.model.sort_spec,
+            applied_filter_text=tab.current_where_text(),
+            manual_highlights=tuple(tab.manual_highlights_for_export().items()),
+            comparison_rows=frozenset(tab.model.highlighted_rows),
+            comparison_columns=frozenset(tab.model.highlighted_columns),
+        )
+
+        def failed(message: str, details: str) -> None:
+            self._show_error("Excel Export Failed", message, details)
+
+        def estimated(result: tuple[int, int]) -> None:
+            if self.tabs.indexOf(tab) < 0:
+                return
+            row_count, estimated_bytes = result
+            if row_count >= 1_048_576:
+                self._show_error(
+                    "Excel Export Failed",
+                    "Excel supports at most 1,048,575 data rows in one Data sheet.",
+                )
+                return
+            if estimated_bytes > LARGE_EXPORT_BYTES:
+                answer = QMessageBox.question(
+                    self,
+                    "Large Excel Export",
+                    f"Estimated export data is {estimated_bytes / 1_000_000:.1f} MB "
+                    f"across {row_count:,} rows (estimate, not final XLSX size).\n"
+                    "Continue exporting?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    return
+
+            def completed(count: int) -> None:
+                self.task_status.setText(f"Exported {count:,} rows to {path.name}")
+                QMessageBox.information(
+                    self, "Export Complete", f"Exported {count:,} rows to:\n{path}"
+                )
+
+            self._submit(
+                tab,
+                lambda worker: self.excel_exporter.export(view, path, worker.report),
+                completed,
+                failed,
+            )
+
+        self._submit(
+            tab,
+            lambda _worker: self.excel_exporter.estimate_bytes(view),
+            estimated,
+            failed,
+        )
+
     def show_history(self, tab: DatasetTab | None = None) -> None:
         owner = tab or self.current_dataset_tab()
         dialog = HistoryDialog(
@@ -1692,17 +1798,6 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         widget = self.tabs.widget(index)
-        bound_builders = []
-        bound_builders.extend(self.analysis_controller.bound_builder_titles(widget))
-        if bound_builders:
-            QMessageBox.warning(
-                self,
-                "Builder Source Dataset",
-                "This dataset is the fixed source for: "
-                + ", ".join(bound_builders)
-                + ".\n\nClick Clear in the Builder before closing this source dataset.",
-            )
-            return
         if widget in self._compare_input_tabs:
             QMessageBox.information(
                 self,
@@ -1792,6 +1887,7 @@ class MainWindow(QMainWindow):
         self.export_action.setEnabled(
             enabled and tab.cache_complete and bool(self._exportable_columns(tab))
         )
+        self.export_excel_action.setEnabled(self.export_action.isEnabled())
         self.clear_action.setEnabled(enabled and tab.cache_complete)
         self.close_tab_action.setEnabled(self.tabs.count() > 0)
         self.open_categorical_long_action.setEnabled(

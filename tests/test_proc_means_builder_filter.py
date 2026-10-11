@@ -36,7 +36,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
             ),
         )
 
-    def test_filter_editor_is_independent_and_reinitialized_for_new_source(self):
+    def test_filter_editor_is_independent_and_retained_until_clear(self):
         from clinical_data_viewer.ui.proc_means_builder import ProcMeansBuilder
 
         builder = ProcMeansBuilder()
@@ -53,14 +53,14 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         )
         self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
 
-        # A different source gets its own current WHERE.
+        # Switching source does not erase Builder-owned input.
         builder.set_dataset(
             metadata, r"C:\data\adae.sas7bdat", 'TRTEMFL = "Y"'
         )
-        self.assertEqual(builder.current_filter_text(), 'TRTEMFL = "Y"')
+        self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
 
         builder.set_dataset(None, "")
-        self.assertEqual(builder.current_filter_text(), "")
+        self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
         builder.clear()
         self.assertEqual(builder.current_filter_text(), "")
         builder.deleteLater()

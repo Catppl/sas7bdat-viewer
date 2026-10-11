@@ -340,6 +340,43 @@ class MergeDatasetsTests(unittest.TestCase):
         for kind in ("compare", "proc_means", "categorical", "rule_based", "query"):
             self.assertFalse(is_analysis_dataset(kind))
 
+    def test_inspect_and_run_support_uri_special_character_paths(self) -> None:
+        special_root = self.root / "合并 cache # O'Reilly"
+        special_root.mkdir()
+        variables = (("USUBJID", "character"), ("VALUE", "numeric"))
+        left = _handle(special_root, "左 数据", variables, (("01", 1),))
+        right = _handle(special_root, "右 数据", variables, (("01", 2),))
+        config = MergeDatasetsConfig(("USUBJID",), "inner")
+
+        summary = self.engine.inspect(left, right, config)
+        result = self.engine.run(left, right, config)
+
+        self.assertEqual(summary.many_to_many_keys, 0)
+        self.assertEqual(result.summary.matched_rows, 1)
+
+    def test_missing_left_cache_reports_attach_stage(self) -> None:
+        self.left.database_path.unlink()
+        with self.assertRaisesRegex(
+            FileNotFoundError, "attach_left_database failed.*Reopen or reload"
+        ):
+            self.engine.inspect(
+                self.left,
+                self.right,
+                MergeDatasetsConfig(("USUBJID",), "left"),
+            )
+
+    def test_run_cleans_partial_result_when_right_cache_is_missing(self) -> None:
+        self.right.database_path.unlink()
+        with self.assertRaisesRegex(
+            FileNotFoundError, "attach_right_database failed.*Reopen or reload"
+        ):
+            self.engine.run(
+                self.left,
+                self.right,
+                MergeDatasetsConfig(("USUBJID",), "left"),
+            )
+        self.assertEqual(list(self.temp_manager.session_directory.iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()

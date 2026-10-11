@@ -71,23 +71,44 @@ class ProcMeansController(AnalysisModuleController):
             return None
         return self._proc_means_source
 
+    def refresh_proc_means_sources(self, datasets=None) -> None:
+        available = (
+            list(datasets)
+            if datasets is not None
+            else getattr(
+                self._host,
+                "available_analysis_dataset_tabs",
+                self._host.available_sas_dataset_tabs,
+            )()
+        )
+        selected = self.proc_means_source
+        if self._proc_means_source is not None and selected is None:
+            self._proc_means_source = None
+            self._set_proc_means_dataset(None)
+        elif selected is not None:
+            self._set_proc_means_dataset(selected)
+        self._panel.builder.set_source_datasets(available, selected)
+
+    def select_proc_means_source(self, tab) -> None:
+        if not isinstance(tab, DatasetTab):
+            self._proc_means_source = None
+            self._set_proc_means_dataset(None)
+            return
+        if not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            return
+        self._proc_means_source = tab
+        self._set_proc_means_dataset(tab)
+
     def show_proc_means_builder(self) -> None:
-        """Open PROC MEANS Builder with its first eligible source fixed until Clear."""
-        if self.proc_means_source is None:
-            active_tab = self._host.current_dataset_tab()
-            if (
-                active_tab is not None
-                and is_analysis_dataset(active_tab.handle)
-                and active_tab.cache_complete
-            ):
-                self._proc_means_source = active_tab
-                self._set_proc_means_dataset(active_tab)
+        """Open PROC MEANS Builder and let the user choose its source."""
+        self.refresh_proc_means_sources()
         self._panel.show_builder_tab()
 
     def clear_proc_means_source(self) -> None:
         """Release PROC MEANS Builder's fixed source only after Clear."""
         self._proc_means_source = None
         self._set_proc_means_dataset(None)
+        self.refresh_proc_means_sources()
 
     def source_reload_started(self, tab: DatasetTab) -> None:
         """Freeze the Builder while its fixed source is being reloaded."""

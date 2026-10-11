@@ -369,3 +369,81 @@ class ListingEngineTests(unittest.TestCase):
             with closing(sqlite3.connect(result.database_path)) as connection:
                 values = connection.execute('SELECT "VALUE" FROM dataset').fetchall()
             self.assertEqual(values, [("A",), ("B",), ("a",), ("b",)])
+
+    def test_source_and_adsl_attach_support_uri_special_character_paths(self):
+        variables = (VariableMetadata("USUBJID"), VariableMetadata("TERM"))
+        adsl_variables = (
+            VariableMetadata("USUBJID"),
+            VariableMetadata("SAFFL"),
+        )
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path) / "Listing 缓存 # O'Reilly"
+            root.mkdir()
+            source = handle(root, "源 数据", variables, (("01", "Headache"),))
+            adsl = handle(root, "人口 数据", adsl_variables, (("01", "Y"),))
+            config = ListingConfig(
+                (
+                    ListingColumn("TERM", "ITEM", "Event"),
+                    ListingColumn("SAFFL", "SAFFL", "Safety Flag"),
+                ),
+                merge_adsl=ListingMergeAdsl(True, "USUBJID", ("SAFFL",)),
+            )
+
+            result = ListingEngine(TempManager(root / "结果 temp")).run(
+                source, config, adsl
+            )
+
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        'SELECT "ITEM", "SAFFL" FROM dataset'
+                    ).fetchall(),
+                    [("Headache", "Y")],
+                )
+
+    def test_missing_source_cache_reports_stage_and_cleans_partial_result(self):
+        variables = (VariableMetadata("USUBJID"), VariableMetadata("TERM"))
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            source = handle(root, "adae", variables, (("01", "Headache"),))
+            source.database_path.unlink()
+            manager = TempManager(root / "temp")
+
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                "attach_source_database failed.*Reopen or reload",
+            ):
+                ListingEngine(manager).run(
+                    source,
+                    ListingConfig((ListingColumn("TERM", "ITEM", "Event"),)),
+                )
+
+            self.assertTrue(source.temporary_path.exists())
+            self.assertEqual(list(manager.session_directory.iterdir()), [])
+
+    def test_missing_adsl_cache_reports_adsl_attach_stage(self):
+        variables = (VariableMetadata("USUBJID"), VariableMetadata("TERM"))
+        adsl_variables = (
+            VariableMetadata("USUBJID"),
+            VariableMetadata("SAFFL"),
+        )
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            source = handle(root, "adae", variables, (("01", "Headache"),))
+            adsl = handle(root, "adsl", adsl_variables, (("01", "Y"),))
+            adsl.database_path.unlink()
+            manager = TempManager(root / "temp")
+            config = ListingConfig(
+                (ListingColumn("TERM", "ITEM", "Event"),),
+                merge_adsl=ListingMergeAdsl(True, "USUBJID", ("SAFFL",)),
+            )
+
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                "attach_adsl_database failed.*Reopen or reload",
+            ):
+                ListingEngine(manager).run(source, config, adsl)
+
+            self.assertTrue(source.database_path.exists())
+            self.assertTrue(adsl.temporary_path.exists())
+            self.assertEqual(list(manager.session_directory.iterdir()), [])

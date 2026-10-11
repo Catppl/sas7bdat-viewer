@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from pathlib import Path
+from contextlib import suppress
 
 from ..domain import DatasetHandle
 from ..filter_engine import quote_identifier
+from ..sqlite_access import attach_read_only, connect_attachment_workspace
 from ..temp_manager import TempManager
 from .models import MergeDatasetsConfig, MergeResult, MergeSummary
 from .result_store import MergeResultWriter, build_result_schema
 
 ProgressCallback = Callable[[str], None]
-
-
-def _source_uri(path: Path) -> str:
-    return path.resolve().as_uri() + "?mode=ro"
 
 
 class MergeDatasetsEngine:
@@ -64,8 +61,12 @@ class MergeDatasetsEngine:
     def _attach(
         connection: sqlite3.Connection, alias: str, handle: DatasetHandle
     ) -> None:
-        connection.execute(
-            f"ATTACH DATABASE ? AS {alias}", (_source_uri(handle.database_path),)
+        side = "left" if alias == "left_db" else "right"
+        attach_read_only(
+            connection,
+            alias,
+            handle.database_path,
+            stage=f"attach_{side}_database",
         )
 
     @staticmethod
@@ -144,7 +145,7 @@ class MergeDatasetsEngine:
         config: MergeDatasetsConfig,
     ) -> MergeSummary:
         by_variables = self.validate(left, right, config)
-        connection = sqlite3.connect(":memory:")
+        connection = connect_attachment_workspace()
         try:
             self._attach(connection, "left_db", left)
             self._attach(connection, "right_db", right)
@@ -198,9 +199,10 @@ class MergeDatasetsEngine:
         sort_by = self._resolve_sort(schema, config)
         result_directory = self.temp_manager.create_dataset_directory()
         database_path = result_directory / "dataset.sqlite"
-        writer = MergeResultWriter(database_path, schema)
-        connection = writer.connection
+        writer: MergeResultWriter | None = None
         try:
+            writer = MergeResultWriter(database_path, schema)
+            connection = writer.connection
             notify("Preparing SQLite merge…")
             self._attach(connection, "left_db", left)
             self._attach(connection, "right_db", right)
@@ -349,8 +351,10 @@ class MergeDatasetsEngine:
             )
             return MergeResult(handle, summary)
         except BaseException:
-            writer.abort()
-            self.temp_manager.remove_dataset(result_directory)
+            if writer is not None:
+                writer.abort()
+            with suppress(OSError, ValueError):
+                self.temp_manager.remove_dataset(result_directory)
             raise
 
     @staticmethod

@@ -4,12 +4,13 @@ from PyInstaller.utils.hooks import collect_all
 
 pyreadstat_datas, pyreadstat_binaries, pyreadstat_hiddenimports = collect_all("pyreadstat")
 pandas_datas, pandas_binaries, pandas_hiddenimports = collect_all("pandas")
+xlsxwriter_datas, xlsxwriter_binaries, xlsxwriter_hiddenimports = collect_all("xlsxwriter")
 
 a = Analysis(
     ["run.py"],
     pathex=[],
-    binaries=pyreadstat_binaries + pandas_binaries,
-    datas=pyreadstat_datas + pandas_datas + [
+    binaries=pyreadstat_binaries + pandas_binaries + xlsxwriter_binaries,
+    datas=pyreadstat_datas + pandas_datas + xlsxwriter_datas + [
         ("assets/SASDataViewer.ico", "assets"),
         (
             "clinical_data_viewer/codegen/sas/templates",
@@ -20,7 +21,7 @@ a = Analysis(
             "clinical_data_viewer/codegen/r/templates",
         ),
     ],
-    hiddenimports=pyreadstat_hiddenimports + pandas_hiddenimports + ["scipy.stats"],
+    hiddenimports=pyreadstat_hiddenimports + pandas_hiddenimports + xlsxwriter_hiddenimports + ["scipy.stats"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

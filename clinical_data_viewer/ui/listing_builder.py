@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..domain import DatasetMetadata
 from ..listing.models import ListingColumn, ListingMergeAdsl
+from .analysis_source_selector import AnalysisSourceSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,7 @@ class ListingBuilderSelection:
 
 
 class ListingBuilder(QWidget):
+    source_selected = Signal(object)
     run_requested = Signal(object)
     sas_code_requested = Signal(object)
     browse_adsl_requested = Signal()
@@ -60,6 +62,7 @@ class ListingBuilder(QWidget):
         self._filter_text = ""
         self._filter_snapshot = ""
         self._source_kind = "sas"
+        self._source_available = False
         self._busy = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -71,6 +74,9 @@ class ListingBuilder(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         source_box = QGroupBox("Source")
         source_form = QFormLayout(source_box)
+        self.source_selector = AnalysisSourceSelector()
+        self.source_selector.source_selected.connect(self.source_selected)
+        source_form.addRow("Dataset", self.source_selector)
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         source_form.addRow(self.source_label)
@@ -179,6 +185,9 @@ class ListingBuilder(QWidget):
         self._sync_merge()
         self.set_dataset(None, "")
 
+    def set_source_datasets(self, datasets, selected=None) -> None:
+        self.source_selector.set_sources(datasets, selected)
+
     def set_dataset(
         self,
         metadata: DatasetMetadata | None,
@@ -187,6 +196,7 @@ class ListingBuilder(QWidget):
         source_kind: str = "sas",
     ):
         self._source_kind = source_kind
+        self._source_available = metadata is not None
         if metadata is None:
             self.source_label.setText("Select a fully loaded source dataset.")
             self.run.setEnabled(False)
@@ -199,13 +209,13 @@ class ListingBuilder(QWidget):
             self.variable_picker.addItems(
                 variable.name for variable in metadata.variables
             )
-            if initial_source:
+            if initial_source or self._filter_text == self._filter_snapshot:
                 self._filter_text = filter_text.strip()
                 self._filter_snapshot = self._filter_text
                 self.data_filter.setPlainText(self._filter_text)
             self._refresh_rename_map()
         self.source_label.setText(f"Source: {source_text}")
-        available = metadata is not None and not self._busy
+        available = self._source_available and not self._busy
         self.run.setEnabled(available)
         self.sas_code.setEnabled(available and source_kind == "sas")
         self.sas_code.setToolTip(
@@ -480,7 +490,8 @@ class ListingBuilder(QWidget):
 
     def set_busy(self, busy: bool, message: str = ""):
         self._busy = busy
-        available = self._metadata is not None and not busy
+        self.source_selector.setEnabled(not busy)
+        available = self._source_available and not busy
         self.run.setEnabled(available)
         self.sas_code.setEnabled(available and self._source_kind == "sas")
         self._sync_merge()

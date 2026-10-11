@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..domain import DatasetMetadata
+from .analysis_source_selector import AnalysisSourceSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,7 @@ class RuleBasedBuilderSelection:
 
 
 class RuleBasedBuilder(QWidget):
+    source_selected = Signal(object)
     run_requested = Signal(object)
     sas_code_requested = Signal(object)
     validation_error = Signal(str)
@@ -59,6 +61,7 @@ class RuleBasedBuilder(QWidget):
         self.setObjectName("ruleBasedBuilder")
         self._metadata: DatasetMetadata | None = None
         self._source_kind = "sas"
+        self._source_available = False
         self._filter_text = ""
         self._source_filter_snapshot = ""
         self._busy = False
@@ -86,6 +89,9 @@ class RuleBasedBuilder(QWidget):
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
 
+        self.source_selector = AnalysisSourceSelector()
+        self.source_selector.source_selected.connect(self.source_selected)
+        layout.addWidget(self.source_selector)
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         layout.addWidget(self.source_label)
@@ -208,6 +214,9 @@ class RuleBasedBuilder(QWidget):
         self._sync_denominator_page()
         self.set_dataset(None, "")
 
+    def set_source_datasets(self, datasets, selected=None) -> None:
+        self.source_selector.set_sources(datasets, selected)
+
     def set_dataset(
         self,
         metadata: DatasetMetadata | None,
@@ -216,26 +225,33 @@ class RuleBasedBuilder(QWidget):
         source_kind: str = "sas",
     ) -> None:
         self._source_kind = source_kind
+        self._source_available = metadata is not None
         if metadata is not None and metadata is not self._metadata:
+            treatment = self.treatment.currentText()
+            nonmissing = self.nonmissing_value.currentText()
             self._metadata = metadata
-            self._filter_text = filter_text.strip()
-            self._source_filter_snapshot = self._filter_text
-            self._set_dataset_filter(self._filter_text)
+            if self._filter_text == self._source_filter_snapshot:
+                self._filter_text = filter_text.strip()
+                self._source_filter_snapshot = self._filter_text
+                self._set_dataset_filter(self._filter_text)
             names = [variable.name for variable in metadata.variables]
             self.treatment.clear()
             self.treatment.addItems(names)
+            if treatment in names:
+                self.treatment.setCurrentText(treatment)
             self.nonmissing_value.clear()
             self.nonmissing_value.addItems(names)
-            self.rows_table.setRowCount(0)
-            self._row_counter = 0
+            if nonmissing in names:
+                self.nonmissing_value.setCurrentText(nonmissing)
             self._refresh_population_treatment_variables()
         self.source_label.setText(
             f"Source: {source_text}"
             if metadata
             else "Select a fully loaded source dataset."
         )
-        enabled = metadata is not None and not self._busy
-        self.setEnabled(enabled or self._busy)
+        enabled = self._source_available and not self._busy
+        self.setEnabled(True)
+        self.source_selector.setEnabled(not self._busy)
         self.run_button.setEnabled(enabled)
         codegen_available = enabled and source_kind == "sas"
         self.sas_code_button.setEnabled(codegen_available)
@@ -400,9 +416,10 @@ class RuleBasedBuilder(QWidget):
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
-        self.run_button.setEnabled(self._metadata is not None and not busy)
+        self.source_selector.setEnabled(not busy)
+        self.run_button.setEnabled(self._source_available and not busy)
         self.sas_code_button.setEnabled(
-            self._metadata is not None and not busy and self._source_kind == "sas"
+            self._source_available and not busy and self._source_kind == "sas"
         )
         if message:
             self.status.setText(message)

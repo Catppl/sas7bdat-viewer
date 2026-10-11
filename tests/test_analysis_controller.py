@@ -176,6 +176,10 @@ class AnalysisControllerTests(unittest.TestCase):
             )
 
             controller.show_listing_builder()
+            self.assertIsNone(controller.listing_source)
+            panel.listing_builder.source_selector.combo.setCurrentIndex(
+                panel.listing_builder.source_selector.combo.findData(source)
+            )
             host.active = other
             controller.show_listing_builder()
             self.assertIs(controller.listing_source, source)
@@ -318,6 +322,10 @@ class AnalysisControllerTests(unittest.TestCase):
             )
 
             controller.show_rule_based_builder()
+            self.assertIsNone(controller.rule_based_source)
+            panel.rule_based_builder.source_selector.combo.setCurrentIndex(
+                panel.rule_based_builder.source_selector.combo.findData(source)
+            )
             host.active = other
             controller.show_rule_based_builder()
             self.assertIs(controller.rule_based_source, source)
@@ -455,6 +463,10 @@ class AnalysisControllerTests(unittest.TestCase):
             )
 
             controller.show_categorical_builder()
+            self.assertIsNone(controller.categorical_source)
+            panel.categorical_builder.source_selector.combo.setCurrentIndex(
+                panel.categorical_builder.source_selector.combo.findData(source)
+            )
             host.active = other
             controller.show_categorical_builder()
             self.assertIs(controller.categorical_source, source)
@@ -591,6 +603,10 @@ class AnalysisControllerTests(unittest.TestCase):
             )
 
             controller.show_ae_table_builder()
+            self.assertIsNone(controller.ae_table_source)
+            panel.ae_table_builder.source_selector.combo.setCurrentIndex(
+                panel.ae_table_builder.source_selector.combo.findData(source)
+            )
             host.active = other
             controller.show_ae_table_builder()
             self.assertIs(controller.ae_table_source, source)
@@ -727,6 +743,10 @@ class AnalysisControllerTests(unittest.TestCase):
             )
 
             controller.show_proc_means_builder()
+            self.assertIsNone(controller.proc_means_source)
+            panel.builder.source_selector.combo.setCurrentIndex(
+                panel.builder.source_selector.combo.findData(source)
+            )
             host.active = other
             controller.show_proc_means_builder()
             self.assertIs(controller.proc_means_source, source)

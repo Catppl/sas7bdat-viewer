@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..categorical import CategoricalItem
 from ..domain import DatasetMetadata
+from .analysis_source_selector import AnalysisSourceSelector
 from .proc_means_builder import VariableTokenEditor
 
 
@@ -227,6 +228,7 @@ class CategoricalItemEditor(QWidget):
 
 
 class CategoricalBuilder(QWidget):
+    source_selected = Signal(object)
     run_requested = Signal(object)
     sas_code_requested = Signal(object)
     validation_error = Signal(str)
@@ -259,6 +261,9 @@ class CategoricalBuilder(QWidget):
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
 
+        self.source_selector = AnalysisSourceSelector()
+        self.source_selector.source_selected.connect(self.source_selected)
+        layout.addWidget(self.source_selector)
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         layout.addWidget(self.source_label)
@@ -362,6 +367,9 @@ class CategoricalBuilder(QWidget):
         outer.addLayout(buttons)
         self._sync_denominator_page()
         self.set_dataset(None, "")
+
+    def set_source_datasets(self, datasets, selected=None) -> None:
+        self.source_selector.set_sources(datasets, selected)
 
     def set_dataset(
         self,
@@ -516,6 +524,7 @@ class CategoricalBuilder(QWidget):
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
+        self.source_selector.setEnabled(not busy)
         self._update_enabled_state()
         if message:
             self.status.setText(message)
@@ -537,7 +546,8 @@ class CategoricalBuilder(QWidget):
             and not self._busy
             and not self._source_reloading
         )
-        self.setEnabled(available or self._busy)
+        self.setEnabled(True)
+        self.source_selector.setEnabled(not self._busy)
         self.run_button.setEnabled(available)
         codegen_available = available and self._source_kind == "sas"
         self.sas_code_button.setEnabled(codegen_available)

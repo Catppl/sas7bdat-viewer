@@ -83,20 +83,40 @@ class CategoricalController(AnalysisModuleController):
             list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
         )
 
+    def refresh_categorical_sources(self, datasets=None) -> None:
+        available = (
+            list(datasets)
+            if datasets is not None
+            else getattr(
+                self._host,
+                "available_analysis_dataset_tabs",
+                self._host.available_sas_dataset_tabs,
+            )()
+        )
+        selected = self.categorical_source
+        if self._categorical_source is not None and selected is None:
+            self._categorical_source = None
+            self._set_categorical_dataset(None)
+        elif selected is not None:
+            self._set_categorical_dataset(selected, inherit_filter=False)
+        self._panel.categorical_builder.set_source_datasets(available, selected)
+
+    def select_categorical_source(self, tab) -> None:
+        if not isinstance(tab, DatasetTab):
+            self._categorical_source = None
+            self._set_categorical_dataset(None)
+            return
+        if not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            return
+        self._categorical_source = tab
+        self._set_categorical_dataset(tab)
+
     def select_categorical_adsl(self, tab: DatasetTab) -> None:
         self._panel.categorical_builder.select_adsl(tab)
 
     def show_categorical_builder(self) -> None:
-        """Open Categorical Builder with its first eligible source fixed until Clear."""
-        if self.categorical_source is None:
-            active_tab = self._host.current_dataset_tab()
-            if (
-                active_tab is not None
-                and is_analysis_dataset(active_tab.handle)
-                and active_tab.cache_complete
-            ):
-                self._categorical_source = active_tab
-                self._set_categorical_dataset(active_tab)
+        """Open Categorical Builder and let the user choose its source."""
+        self.refresh_categorical_sources()
         self.refresh_categorical_adsl_sources()
         self._panel.show_categorical_tab()
 
@@ -104,6 +124,7 @@ class CategoricalController(AnalysisModuleController):
         """Release Categorical Builder's fixed source only after Clear."""
         self._categorical_source = None
         self._set_categorical_dataset(None)
+        self.refresh_categorical_sources()
 
     def source_reload_started(self, tab: DatasetTab) -> None:
         """Freeze Categorical Builder while its fixed source is reloading."""

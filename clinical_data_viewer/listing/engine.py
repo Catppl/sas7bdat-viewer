@@ -6,15 +6,12 @@ from dataclasses import replace
 
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from ..filter_engine import FilterEngine, quote_identifier
+from ..sqlite_access import attach_read_only, connect_read_only
 from ..temp_manager import TempManager
 from .configuration import write_listing_configuration
 from .expressions import evaluate, infer_kind, infer_length, parse_expression
 from .models import ListingConfig, is_reserved_listing_name
 from .result_store import ListingResultWriter
-
-
-def _uri(handle: DatasetHandle) -> str:
-    return handle.database_path.resolve().as_uri() + "?mode=ro"
 
 
 def _missing_sql(variable: VariableMetadata, prefix: str = "") -> str:
@@ -145,11 +142,11 @@ class ListingEngine:
             config.merge_adsl.by_variable.casefold()
         ]
         adsl_by = self._fields(adsl.metadata)[config.merge_adsl.by_variable.casefold()]
-        with closing(sqlite3.connect(_uri(source), uri=True)) as connection:
+        with closing(connect_read_only(source.database_path)) as connection:
             missing_source = connection.execute(
                 f"SELECT count(*) FROM dataset WHERE {_missing_sql(source_by)}"
             ).fetchone()[0]
-        with closing(sqlite3.connect(_uri(adsl), uri=True)) as connection:
+        with closing(connect_read_only(adsl.database_path)) as connection:
             missing_adsl = connection.execute(
                 f"SELECT count(*) FROM dataset WHERE {_missing_sql(adsl_by)}"
             ).fetchone()[0]
@@ -166,7 +163,7 @@ class ListingEngine:
     def _validate_adsl_keys(self, adsl: DatasetHandle, config: ListingConfig) -> None:
         variable = self._fields(adsl.metadata)[config.merge_adsl.by_variable.casefold()]
         col = quote_identifier(variable.name)
-        with closing(sqlite3.connect(_uri(adsl), uri=True)) as connection:
+        with closing(connect_read_only(adsl.database_path)) as connection:
             duplicate = connection.execute(
                 f"SELECT 1 FROM dataset WHERE NOT {_missing_sql(variable)} GROUP BY {col} HAVING count(*) > 1 LIMIT 1"
             ).fetchone()
@@ -183,7 +180,12 @@ class ListingEngine:
         adsl: DatasetHandle | None,
         metadata: DatasetMetadata,
     ) -> None:
-        connection.execute("ATTACH DATABASE ? AS source_db", (_uri(source),))
+        attach_read_only(
+            connection,
+            "source_db",
+            source.database_path,
+            stage="attach_source_database",
+        )
         select = ["s._source_row AS _listing_row"]
         source_fields = self._fields(source.metadata)
         for variable in source.metadata.variables:
@@ -192,7 +194,12 @@ class ListingEngine:
             )
         join = ""
         if config.merge_adsl.enabled and adsl is not None:
-            connection.execute("ATTACH DATABASE ? AS adsl_db", (_uri(adsl),))
+            attach_read_only(
+                connection,
+                "adsl_db",
+                adsl.database_path,
+                stage="attach_adsl_database",
+            )
             self._validate_adsl_keys(adsl, config)
             by = config.merge_adsl.by_variable
             source_by, adsl_by = (

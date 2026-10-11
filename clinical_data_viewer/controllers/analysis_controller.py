@@ -63,6 +63,8 @@ class AnalysisControllerHost(Protocol):
 
     def available_sas_dataset_tabs(self) -> list[tuple[DatasetTab, str]]: ...
 
+    def available_analysis_dataset_tabs(self) -> list[tuple[DatasetTab, str]]: ...
+
     def create_analysis_result_tab(self, handle: DatasetHandle) -> DatasetTab: ...
 
     def show_analysis_result_tab(self, tab: DatasetTab, title: str) -> None: ...
@@ -134,12 +136,14 @@ class AnalysisController(QObject):
 
         builder = self._panel.listing_builder
         builder.run_requested.connect(self.listing.run_listing)
+        builder.source_selected.connect(self.listing.select_listing_source)
         builder.sas_code_requested.connect(self.listing.generate_listing_sas_code)
         builder.browse_adsl_requested.connect(host.browse_listing_adsl_dataset)
         builder.cleared.connect(self.listing.clear_listing_source)
 
         rule_builder = self._panel.rule_based_builder
         rule_builder.run_requested.connect(self.rule_based.run_rule_based)
+        rule_builder.source_selected.connect(self.rule_based.select_rule_based_source)
         rule_builder.sas_code_requested.connect(self.rule_based.generate_rule_based_sas_code)
         rule_builder.validation_error.connect(
             lambda message: QMessageBox.warning(
@@ -151,6 +155,7 @@ class AnalysisController(QObject):
 
         ae_builder = self._panel.ae_table_builder
         ae_builder.run_requested.connect(self.ae_table.run_ae_table)
+        ae_builder.source_selected.connect(self.ae_table.select_ae_table_source)
         ae_builder.sas_code_requested.connect(self.ae_table.generate_ae_table_sas_code)
         ae_builder.validation_error.connect(
             lambda message: QMessageBox.warning(self._parent_widget(), "AE Table", message)
@@ -160,6 +165,7 @@ class AnalysisController(QObject):
 
         proc_builder = self._panel.builder
         proc_builder.run_requested.connect(self.proc_means.run_proc_means_builder)
+        proc_builder.source_selected.connect(self.proc_means.select_proc_means_source)
         proc_builder.sas_code_requested.connect(
             self.proc_means.generate_proc_means_sas_code
         )
@@ -173,6 +179,9 @@ class AnalysisController(QObject):
 
         categorical_builder = self._panel.categorical_builder
         categorical_builder.run_requested.connect(self.categorical.run_categorical)
+        categorical_builder.source_selected.connect(
+            self.categorical.select_categorical_source
+        )
         categorical_builder.sas_code_requested.connect(
             self.categorical.generate_categorical_sas_code
         )
@@ -192,6 +201,9 @@ class AnalysisController(QObject):
 
     def refresh_listing_adsl_sources(self, datasets=None) -> None:
         self.listing.refresh_listing_adsl_sources(datasets)
+
+    def refresh_listing_sources(self, datasets=None) -> None:
+        self.listing.refresh_listing_sources(datasets)
 
     def select_listing_adsl(self, tab: DatasetTab) -> None:
         self.listing.select_listing_adsl(tab)
@@ -214,6 +226,9 @@ class AnalysisController(QObject):
 
     def refresh_rule_based_adsl_sources(self, datasets=None) -> None:
         self.rule_based.refresh_rule_based_adsl_sources(datasets)
+
+    def refresh_rule_based_sources(self, datasets=None) -> None:
+        self.rule_based.refresh_rule_based_sources(datasets)
 
     def select_rule_based_adsl(self, tab: DatasetTab) -> None:
         self.rule_based.select_rule_based_adsl(tab)
@@ -336,6 +351,9 @@ class AnalysisController(QObject):
     ) -> None:
         self.categorical.refresh_categorical_adsl_sources(datasets)
 
+    def refresh_categorical_sources(self, datasets=None) -> None:
+        self.categorical.refresh_categorical_sources(datasets)
+
     def select_categorical_adsl(self, tab: DatasetTab) -> None:
         self.categorical.select_categorical_adsl(tab)
 
@@ -370,6 +388,9 @@ class AnalysisController(QObject):
     def refresh_ae_table_adsl_sources(self, datasets=None) -> None:
         self.ae_table.refresh_ae_table_adsl_sources(datasets)
 
+    def refresh_ae_table_sources(self, datasets=None) -> None:
+        self.ae_table.refresh_ae_table_sources(datasets)
+
     def select_ae_table_adsl(self, tab: DatasetTab) -> None:
         self.ae_table.select_ae_table_adsl(tab)
 
@@ -397,6 +418,9 @@ class AnalysisController(QObject):
 
     def show_proc_means_builder(self) -> None:
         self.proc_means.show_proc_means_builder()
+
+    def refresh_proc_means_sources(self, datasets=None) -> None:
+        self.proc_means.refresh_proc_means_sources(datasets)
 
     def clear_proc_means_source(self) -> None:
         self.proc_means.clear_proc_means_source()

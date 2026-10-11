@@ -83,20 +83,40 @@ class RuleBasedController(AnalysisModuleController):
             list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
         )
 
+    def refresh_rule_based_sources(self, datasets=None) -> None:
+        available = (
+            list(datasets)
+            if datasets is not None
+            else getattr(
+                self._host,
+                "available_analysis_dataset_tabs",
+                self._host.available_sas_dataset_tabs,
+            )()
+        )
+        selected = self.rule_based_source
+        if self._rule_based_source is not None and selected is None:
+            self._rule_based_source = None
+            self._set_rule_based_dataset(None)
+        elif selected is not None:
+            self._set_rule_based_dataset(selected)
+        self._panel.rule_based_builder.set_source_datasets(available, selected)
+
+    def select_rule_based_source(self, tab) -> None:
+        if not isinstance(tab, DatasetTab):
+            self._rule_based_source = None
+            self._set_rule_based_dataset(None)
+            return
+        if not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            return
+        self._rule_based_source = tab
+        self._set_rule_based_dataset(tab)
+
     def select_rule_based_adsl(self, tab: DatasetTab) -> None:
         self._panel.rule_based_builder.select_adsl(tab)
 
     def show_rule_based_builder(self) -> None:
-        """Open Rule-based Builder with its first eligible source fixed until Clear."""
-        if self.rule_based_source is None:
-            active_tab = self._host.current_dataset_tab()
-            if (
-                active_tab is not None
-                and is_analysis_dataset(active_tab.handle)
-                and active_tab.cache_complete
-            ):
-                self._rule_based_source = active_tab
-                self._set_rule_based_dataset(active_tab)
+        """Open Rule-based Builder and let the user choose its source."""
+        self.refresh_rule_based_sources()
         self.refresh_rule_based_adsl_sources()
         self._panel.show_rule_based_tab()
 
@@ -104,6 +124,7 @@ class RuleBasedController(AnalysisModuleController):
         """Release Rule-based Builder's fixed source only after Clear."""
         self._rule_based_source = None
         self._set_rule_based_dataset(None)
+        self.refresh_rule_based_sources()
 
     def _set_rule_based_dataset(self, tab: DatasetTab | None) -> None:
         builder = self._panel.rule_based_builder
