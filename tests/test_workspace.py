@@ -240,6 +240,67 @@ class WorkspaceControllerTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
+    def test_opening_two_workspace_files_sequentially_adds_tabs_to_same_window(
+        self,
+    ) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import LoadingPage, MainWindow
+
+        class Settings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                Settings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+                WorkspaceFavoritesStore(root / "favorites.sqlite"),
+            )
+            # Keep the test at the MainWindow/Tab boundary. _open_path creates
+            # LoadingPage synchronously; the actual Reader pipeline has its own
+            # regression suite and does not need real SAS fixtures here.
+            window._submit = Mock()
+            existing_windows = {
+                id(widget)
+                for widget in application.topLevelWidgets()
+                if isinstance(widget, MainWindow)
+            }
+            first = (root / "adsl.sas7bdat").resolve()
+            second = (root / "adae.sas7bdat").resolve()
+
+            window.open_or_focus_paths((first,))
+            self.assertEqual(window.tabs.count(), 1)
+            self.assertIsInstance(window.tabs.widget(0), LoadingPage)
+            self.assertEqual(window.tabs.widget(0).source_path, first)
+
+            window.open_or_focus_paths((second,))
+            self.assertEqual(window.tabs.count(), 2)
+            self.assertEqual(
+                [window.tabs.widget(index).source_path for index in range(2)],
+                [first, second],
+            )
+            self.assertIs(window.tabs.currentWidget(), window.tabs.widget(1))
+            self.assertEqual(
+                {
+                    id(widget)
+                    for widget in application.topLevelWidgets()
+                    if isinstance(widget, MainWindow)
+                },
+                existing_windows,
+            )
+            window.close()
+            application.processEvents()
+
     def test_main_window_workspace_surface_contains_no_scanner_or_sqlite_logic(self) -> None:
         import inspect
 
