@@ -25,6 +25,23 @@ The interface follows a compact Windows 11 / SAS Studio-style layout: menu bar, 
 
 ![SASDataViewer analysis view](docs/screenshots/SASDataViewer-analysis.png)
 
+## Mini File Manager workspace integration (planned)
+
+SASDataViewer plans to expose the following command-line contract so that Mini File Manager can open any selected folder directly:
+
+```text
+SASDataViewer.exe --workspace "C:\clinical\project\adam"
+```
+
+- Mini File Manager should let the user configure or select the actual `SASDataViewer.exe` path instead of hard-coding an installation location.
+- Launch the process with an argument array such as `[viewer_executable, "--workspace", selected_folder]`; do not assemble a shell command string.
+- `selected_folder` may be any readable folder, even if it has never been opened or favorited in SASDataViewer. The first external open does not automatically add it to Favorites.
+- v1 may open a new SASDataViewer window for every request; single-instance IPC is not required.
+- The `Folder Panel` will list first-level `.sas7bdat` and `.xpt` files without recursion and will not automatically open every dataset.
+- Path handling must cover spaces, non-ASCII characters, quotes, `#`, and UNC paths.
+
+This is a future integration contract for Mini File Manager and the planned Workspace feature. The current release does not yet implement `--workspace`. See [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md) for the detailed design.
+
 ## User guide
 
 ### Start the application

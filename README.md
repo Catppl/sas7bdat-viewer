@@ -40,6 +40,23 @@
 
 ![SASDataViewer 浅蓝主题、列筛选和统计面板](docs/screenshots/SASDataViewer-analysis.png)
 
+## Mini File Manager Workspace 集成（规划）
+
+为了以后从 Mini File Manager 直接打开任意文件夹，SASDataViewer 计划提供以下命令行约定：
+
+```text
+SASDataViewer.exe --workspace "C:\clinical\project\adam"
+```
+
+- Mini File Manager 应允许用户配置或选择 `SASDataViewer.exe` 的实际路径，不要把安装位置写死。
+- 启动进程时应传递参数数组，例如 `[viewer_executable, "--workspace", selected_folder]`，不要自行拼接 shell 命令字符串。
+- `selected_folder` 可以是从未在 SASDataViewer 中打开或收藏过的任意可读文件夹；首次外部打开不会自动加入 Favorites。
+- v1 接受每次调用打开一个新的 SASDataViewer 窗口，不要求 single-instance IPC。
+- 打开后由 `Folder Panel` 非递归列出该目录第一层的 `.sas7bdat` 和 `.xpt` 文件；不会自动打开所有数据集。
+- 路径传递必须覆盖空格、中文、引号、`#` 和 UNC 路径等情况。
+
+这是一份供后续 Mini File Manager 与 Workspace 功能实现使用的集成约定，当前版本尚未提供 `--workspace` 参数。详细设计见 [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md)。
+
 ## 文档导航
 
 | 目的 | 章节 |
