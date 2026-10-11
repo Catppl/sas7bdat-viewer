@@ -75,7 +75,10 @@ class AppSettings:
     history_limit: int = 500
     temp_max_age_hours: int = 24
     last_open_directory: str = ""
+    last_workspace_directory: str = ""
     last_export_directory: str = ""
+    folder_panel_visible: bool = False
+    folder_panel_width: int = 250
     apply_sas_date_time_formats: bool = False
     proc_means_decimals: int = 2
     proc_means_decimal_places: dict[str, int] = field(
@@ -102,6 +105,12 @@ class AppSettings:
         value.history_limit = min(10_000, max(10, int(value.history_limit)))
         value.temp_max_age_hours = min(720, max(1, int(value.temp_max_age_hours)))
         value.apply_sas_date_time_formats = bool(value.apply_sas_date_time_formats)
+        value.folder_panel_visible = bool(value.folder_panel_visible)
+        try:
+            folder_panel_width = int(value.folder_panel_width)
+        except (TypeError, ValueError):
+            folder_panel_width = 250
+        value.folder_panel_width = min(600, max(160, folder_panel_width))
         value.proc_means_decimals = min(10, max(0, int(value.proc_means_decimals)))
         raw_decimal_places = raw.get("proc_means_decimal_places", {})
         if not isinstance(raw_decimal_places, dict):

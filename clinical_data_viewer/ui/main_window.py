@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QSizePolicy,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..compare_engine import DatasetComparer, recommend_group_variables
-from ..controllers import AnalysisController
+from ..controllers import AnalysisController, WorkspaceController
 from ..csv_exporter import CsvExporter
 from ..data_store import DataStore
 from ..dataset_utils import is_analysis_dataset
@@ -38,6 +39,8 @@ from ..settings import AppSettings
 from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
+from ..workspace import WorkspaceFavoritesStore
+from ..workspace.models import normalize_workspace_path, workspace_path_key
 from .analysis_panel import AnalysisPanel
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
@@ -46,6 +49,7 @@ from .dataset_tab import DatasetTab
 from .history_dialog import HistoryDialog
 from .settings_dialog import SettingsDialog
 from .variables_panel import VariablesPanel
+from .workspace_panel import WorkspacePanel
 
 
 class LoadingPage(QWidget):
@@ -76,12 +80,16 @@ class MainWindow(QMainWindow):
         settings: AppSettings,
         temp_manager: TempManager,
         history: FilterHistory,
+        workspace_favorites: WorkspaceFavoritesStore | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.settings = settings
         self.temp_manager = temp_manager
         self.history = history
+        self.workspace_favorites = workspace_favorites or WorkspaceFavoritesStore(
+            temp_manager.root / "workspace_favorites.sqlite"
+        )
         self.reader = SasDatasetReader(temp_manager)
         self.comparer = DatasetComparer(temp_manager)
         self.merge_engine = MergeDatasetsEngine(temp_manager)
@@ -113,9 +121,23 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_center()
         self._create_variables_panel()
+        self._create_workspace_panel()
         self._create_analysis_panel()
         self.analysis_controller = AnalysisController(
             self, self.analysis_panel, temp_manager, settings, self
+        )
+        self.workspace_controller = WorkspaceController(
+            self,
+            self.workspace_panel,
+            self.workspace_favorites,
+            settings,
+            self,
+        )
+        self.workspace_controller.register_favorites_menu(
+            self.favorite_workspaces_menu
+        )
+        self.workspace_controller.register_favorites_menu(
+            self.toolbar_favorite_workspaces_menu
         )
         self._create_compare_panel()
         self._create_merge_panel()
@@ -125,10 +147,15 @@ class MainWindow(QMainWindow):
     def _create_actions(self) -> None:
         style = self.style()
         self.open_action = QAction(
-            style.standardIcon(QStyle.SP_DialogOpenButton), "Open", self
+            style.standardIcon(QStyle.SP_DialogOpenButton), "Open Dataset(s)…", self
         )
         self.open_action.setShortcut(QKeySequence.Open)
         self.open_action.triggered.connect(self.open_files)
+        self.open_workspace_action = QAction("Open Folder as Workspace…", self)
+        self.open_workspace_action.setShortcut("Ctrl+Shift+O")
+        self.open_workspace_action.triggered.connect(
+            lambda: self.workspace_controller.browse()
+        )
         self.reload_action = QAction(
             style.standardIcon(QStyle.SP_BrowserReload), "Reload", self
         )
@@ -162,6 +189,9 @@ class MainWindow(QMainWindow):
         self.variables_action = QAction("Variables Panel", self)
         self.variables_action.setCheckable(True)
         self.variables_action.setChecked(True)
+        self.folder_action = QAction("Folder Panel", self)
+        self.folder_action.setCheckable(True)
+        self.folder_action.setChecked(self.settings.folder_panel_visible)
         self.sas_date_time_formats_action = QAction("Apply SAS Date/Time Formats", self)
         self.sas_date_time_formats_action.setCheckable(True)
         self.sas_date_time_formats_action.setChecked(
@@ -209,6 +239,8 @@ class MainWindow(QMainWindow):
     def _create_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addAction(self.open_action)
+        file_menu.addAction(self.open_workspace_action)
+        self.favorite_workspaces_menu = file_menu.addMenu("Favorite Workspaces")
         file_menu.addAction(self.reload_action)
         file_menu.addAction(self.export_action)
         file_menu.addAction(self.export_excel_action)
@@ -219,6 +251,7 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.clear_action)
         edit_menu.addAction(self.history_action)
         view_menu = self.menuBar().addMenu("&View")
+        view_menu.addAction(self.folder_action)
         view_menu.addAction(self.variables_action)
         view_menu.addAction(self.sas_date_time_formats_action)
         view_menu.addAction(self.open_categorical_long_action)
@@ -251,7 +284,17 @@ class MainWindow(QMainWindow):
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar.addAction(self.open_action)
+        self.open_tool_button = QToolButton()
+        self.open_tool_button.setDefaultAction(self.open_action)
+        self.open_tool_button.setPopupMode(QToolButton.MenuButtonPopup)
+        open_menu = QMenu(self.open_tool_button)
+        open_menu.addAction(self.open_action)
+        open_menu.addAction(self.open_workspace_action)
+        self.toolbar_favorite_workspaces_menu = open_menu.addMenu(
+            "Favorite Workspaces"
+        )
+        self.open_tool_button.setMenu(open_menu)
+        toolbar.addWidget(self.open_tool_button)
         toolbar.addSeparator()
         toolbar.addAction(self.reload_action)
         toolbar.addSeparator()
@@ -307,6 +350,29 @@ class MainWindow(QMainWindow):
         self.variables_panel.variable_activated.connect(self._locate_variable)
         self.variable_search.textChanged.connect(self.variables_panel.set_search)
         self.variables_panel.search.textChanged.connect(self._sync_top_search)
+
+    def _create_workspace_panel(self) -> None:
+        self.workspace_panel = WorkspacePanel()
+        self.folder_dock = QDockWidget("Folder Panel", self)
+        self.folder_dock.setObjectName("folderDock")
+        self.folder_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.folder_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.folder_dock.setTitleBarWidget(QWidget())
+        self.folder_dock.setWidget(self.workspace_panel)
+        self.folder_dock.setMinimumWidth(160)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.folder_dock)
+        self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
+        self.resizeDocks(
+            [self.folder_dock, self.variables_dock],
+            [self.settings.folder_panel_width, 285],
+            Qt.Horizontal,
+        )
+        self.folder_action.toggled.connect(self.folder_dock.setVisible)
+        self.folder_dock.visibilityChanged.connect(self.folder_action.setChecked)
+        self.workspace_panel.collapse_requested.connect(
+            lambda: self.folder_dock.setVisible(False)
+        )
+        self.folder_dock.setVisible(self.settings.folder_panel_visible)
 
     def _create_analysis_panel(self) -> None:
         self.analysis_panel = AnalysisPanel()
@@ -392,6 +458,43 @@ class MainWindow(QMainWindow):
     def current_dataset_tab(self) -> DatasetTab | None:
         widget = self.tabs.currentWidget()
         return widget if isinstance(widget, DatasetTab) else None
+
+    # WorkspaceController host surface. Workspace discovery and persistence
+    # remain outside MainWindow; these adapters only expose existing UI/lifecycle
+    # capabilities.
+    def submit_workspace_task(self, owner, function, completed, failed) -> None:
+        self._submit(owner, function, completed, failed)
+
+    def show_folder_panel(self) -> None:
+        self.folder_dock.show()
+        self.folder_dock.raise_()
+        self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
+
+    def show_workspace_error(
+        self, title: str, message: str, details: str = ""
+    ) -> None:
+        self._show_error(title, message, details)
+
+    def open_or_focus_paths(self, paths: tuple[Path, ...]) -> None:
+        for source_path in paths:
+            normalized = normalize_workspace_path(source_path)
+            key = workspace_path_key(normalized)
+            existing_index = -1
+            for index in range(self.tabs.count()):
+                widget = self.tabs.widget(index)
+                if isinstance(widget, LoadingPage):
+                    candidate = widget.source_path
+                elif isinstance(widget, DatasetTab):
+                    candidate = widget.handle.source_path
+                else:
+                    continue
+                if workspace_path_key(candidate) == key:
+                    existing_index = index
+                    break
+            if existing_index >= 0:
+                self.tabs.setCurrentIndex(existing_index)
+            else:
+                self._open_path(normalized)
 
     # AnalysisController host surface.  These are deliberately thin wrappers
     # around the existing MainWindow lifecycle mechanisms during Phase 1.
@@ -2011,5 +2114,7 @@ class MainWindow(QMainWindow):
                 "Temporary Cleanup",
                 f"Some temporary files could not be removed:\n{error}",
             )
+        self.settings.folder_panel_visible = self.folder_dock.isVisible()
+        self.settings.folder_panel_width = self.folder_dock.width()
         self.settings.save()
         event.accept()

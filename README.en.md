@@ -8,7 +8,7 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 
 | Area | Supported functionality |
 | --- | --- |
-| Datasets | Open multiple `.sas7bdat` / `.xpt` files in tabs; open files from the command line or Windows file association. |
+| Datasets | Open multiple `.sas7bdat` / `.xpt` files in tabs; open files from the command line or Windows file association; browse first-level datasets through a searchable Folder Panel. |
 | File safety | Copy the source to a session temporary directory, read only the copy/cache, and clean temporary data on tab close and application exit. |
 | Large data | Show metadata and the first batch quickly, then continue caching in the background. Virtual paging avoids rendering the full dataset at once. |
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
@@ -25,9 +25,9 @@ The interface follows a compact Windows 11 / SAS Studio-style layout: menu bar, 
 
 ![SASDataViewer analysis view](docs/screenshots/SASDataViewer-analysis.png)
 
-## Mini File Manager workspace integration (planned)
+## Mini File Manager workspace integration
 
-SASDataViewer plans to expose the following command-line contract so that Mini File Manager can open any selected folder directly:
+Mini File Manager can open any selected folder directly through this command-line contract:
 
 ```text
 SASDataViewer.exe --workspace "C:\clinical\project\adam"
@@ -40,7 +40,7 @@ SASDataViewer.exe --workspace "C:\clinical\project\adam"
 - The `Folder Panel` will list first-level `.sas7bdat` and `.xpt` files without recursion and will not automatically open every dataset.
 - Path handling must cover spaces, non-ASCII characters, quotes, `#`, and UNC paths.
 
-This is a future integration contract for Mini File Manager and the planned Workspace feature. The current release does not yet implement `--workspace`. See [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md) for the detailed design.
+The current release supports `--workspace`. It opens a new SASDataViewer window and shows the Folder Panel without automatically opening or favoriting datasets in that folder. See [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md) for the detailed design.
 
 ## User guide
 

@@ -2,7 +2,7 @@
 
 设计日期：2026-10-11  
 项目：`sas7bdat-viewer / SASDataViewer`  
-状态：仅供评审，尚未实施
+状态：已按本设计实施；本文同时作为维护和回归验收依据
 
 ## 1. 需求理解
 
@@ -332,6 +332,30 @@ where path_key = ?;
 
 不要继续把目录扫描和收藏逻辑直接堆进 `MainWindow`。
 
+### 5.0 施工架构红线
+
+本功能必须采用**增量接入、保持既有行为**的方式实施。以下两条属于施工红线，不是可选建议：
+
+1. **不要修改之前的业务逻辑。** Workspace 只负责发现文件、展示文件夹、管理收藏并把用户明确选择的路径交给现有数据集打开入口。现有 Dataset Open、Reader、临时副本、SQLite cache、WHERE、排序、Variables Panel、Dataset Tab、Reload、Export、Compare、Merge、Analysis Builder、文件关联和生命周期逻辑必须继续沿用，不能为了实现 Workspace 顺手改写、合并或重新定义。若实施中发现必须改变既有行为，应停止该部分施工，单独记录原因、影响范围和迁移方案，获得确认后再处理。
+2. **不要在 `MainWindow` 中插入大量业务逻辑。** `MainWindow` 只允许增加菜单/工具栏/Dock 的创建与连接、Controller 初始化，以及少量明确的 host adapter 方法。目录扫描、路径规范化、后缀过滤、Workspace 状态、异步 generation guard、Favorites CRUD、SQLite transaction、收藏数量限制、错误分类和列表状态转换必须分别留在 `workspace/`、`WorkspaceController` 或 `WorkspacePanel` 中，不能以内联 helper 或大段 slot 的形式回流到 `ui/main_window.py`。
+
+推荐依赖方向固定为：
+
+```text
+MainWindow (UI composition and routing only)
+    ↓ host contract / Qt signals
+WorkspaceController (workflow and runtime state)
+    ├── WorkspaceScanner (filesystem discovery)
+    ├── WorkspaceFavoritesStore (persistent CRUD)
+    └── WorkspacePanel (presentation and user interaction)
+            ↓ selected paths
+MainWindow.open_or_focus_paths()
+            ↓
+existing dataset open/read/cache workflow
+```
+
+施工过程中不得让 `WorkspaceController` 直接访问 `MainWindow` 的任意私有字段；应通过最小、命名清晰的 host protocol/adapter 调用现有能力。也不得让 `WorkspacePanel` 直接读取目录、打开数据集或写入 Favorites 数据库。
+
 ### 5.1 新增文件
 
 ```text
@@ -613,6 +637,18 @@ open requested Folder Panel
 
 ## 9. 分阶段施工计划
 
+### Phase 0：行为边界和回归基线
+
+开始写功能代码前：
+
+- 记录 `git status`，保护用户已有修改；
+- 找出现有 `open_files()`、`open_paths()`、`_open_path()`、Reader、TempManager 和 Dataset Tab 生命周期入口；
+- 为这些现有入口建立或确认回归测试基线；
+- 明确 `MainWindow` 只负责 composition/wiring，先定义 Workspace host contract，再实现 Controller；
+- 不移动、重构或改名与 Workspace 无关的现有业务流程。
+
+完成标准：现有 dataset open/file association/reader/cache 测试在 Workspace 代码加入前通过，并形成后续回归对照。
+
 ### Phase 1：Workspace domain 和 scanner
 
 涉及：
@@ -665,6 +701,8 @@ open requested Folder Panel
 - Favorite submenu；
 - `open_or_focus_paths()`；
 - open/loading path 查询，用于聚焦已有 Tab，但不渲染状态列。
+
+限制：`MainWindow` 本阶段只增加 QAction/Dock wiring、Controller 初始化和最小 host adapter；禁止在 `MainWindow` 中实现扫描、收藏、路径过滤、SQLite 或 Workspace 状态机。
 
 完成标准：从 Workspace 打开文件继续走现有 reader/cache；快速切换目录不会显示旧结果。
 
@@ -805,6 +843,10 @@ open requested Folder Panel
 - changed-file Ruff；
 - `git diff --check`；
 - Windows 打包版真实本地目录、UNC path 和离线盘验收。
+- Workspace 打开文件必须调用既有 dataset open/read/cache 流程，不能出现第二套 Reader 或 Dataset Tab 生命周期；
+- 现有 Open Dataset(s)、命令行单文件打开和 Windows 文件关联的行为及错误提示保持不变；
+- 对 `MainWindow` 的结构测试/代码审查确认其只包含 Workspace composition、signal wiring 和 host adapter，不包含扫描、Favorites 持久化或状态机业务实现；
+- Workspace 相关测试分别落在 scanner、favorites store、controller 和 panel 边界，不能只依赖 MainWindow 集成测试覆盖业务逻辑。
 
 ## 11. Acceptance Criteria
 
@@ -841,6 +883,10 @@ open requested Folder Panel
 31. Folder Panel 的数据集列表只显示完整文件名，例如 `adlb.sas7bdat`。
 32. 从未在 Viewer 中打开或收藏的文件夹也可以由 Mini File Manager 打开；
 33. 外部首次打开不自动收藏，只有用户明确点击星标后才持久化。
+34. Workspace 实现不改变现有 Dataset Open、Reader/cache、WHERE、Variables、Reload、Export、Compare、Merge 或 Analysis Builder 的业务语义；
+35. `MainWindow` 只承担 Workspace 的 UI composition、路由和最小 host adapter，不包含目录扫描、Favorites SQLite、文件过滤或 Workspace 状态机的大段业务代码；
+36. Workspace 选中的数据集始终进入既有 `open_or_focus_paths()` 和 dataset 生命周期，不创建第二套打开流程；
+37. 若实现需要改变既有业务 contract，该变化必须作为独立需求评审，不能混入 Workspace 施工。
 
 ## 12. 已确认决策与剩余评审点
 

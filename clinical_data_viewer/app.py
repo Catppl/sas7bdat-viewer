@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .filter_history import FilterHistory
 from .resources import resource_path
 from .settings import AppSettings, application_data_directory, temporary_root_directory
 from .temp_manager import TempManager
 from .ui.main_window import MainWindow
+from .workspace import WorkspaceFavoritesStore
 
 STYLE = """
 QWidget {
@@ -49,7 +51,7 @@ QToolBar::separator {
     width: 1px;
     margin: 6px 3px;
 }
-QDockWidget, QWidget#variablesPanel { background: #f7fbff; }
+QDockWidget, QWidget#variablesPanel, QWidget#workspacePanel { background: #f7fbff; }
 QTabWidget::pane { background: #ffffff; border: 1px solid #bfd4e8; }
 QTabBar::tab {
     background: #edf4fb;
@@ -225,27 +227,73 @@ QProgressBar::chunk { background: #1684d8; }
 """
 
 
-def dataset_paths_from_arguments(arguments: Sequence[str]) -> tuple[Path, ...]:
-    """Return dataset paths supplied by a shell or Windows file association."""
+@dataclass(frozen=True, slots=True)
+class StartupRequest:
+    workspace_path: Path | None
+    dataset_paths: tuple[Path, ...]
+
+
+def startup_request_from_arguments(arguments: Sequence[str]) -> StartupRequest:
+    """Parse the explicit Workspace flag while preserving file associations."""
+
     paths: list[Path] = []
     seen: set[str] = set()
-    for argument in arguments:
-        value = argument.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        candidate = Path(value).expanduser()
-        if candidate.suffix.lower() not in {".sas7bdat", ".xpt"}:
+    workspace_path: Path | None = None
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--workspace":
+            if workspace_path is not None:
+                raise ValueError("Only one --workspace folder may be specified.")
+            index += 1
+            if index >= len(arguments) or not arguments[index].strip():
+                raise ValueError("--workspace requires a folder path.")
+            workspace_path = Path(_unquote_argument(arguments[index])).expanduser().resolve(
+                strict=False
+            )
+            index += 1
             continue
-        resolved = candidate.resolve(strict=False)
-        key = str(resolved).casefold() if sys.platform == "win32" else str(resolved)
-        if key not in seen:
-            seen.add(key)
-            paths.append(resolved)
-    return tuple(paths)
+        if argument.startswith("--workspace="):
+            if workspace_path is not None:
+                raise ValueError("Only one --workspace folder may be specified.")
+            value = _unquote_argument(argument.partition("=")[2])
+            if not value:
+                raise ValueError("--workspace requires a folder path.")
+            workspace_path = Path(value).expanduser().resolve(strict=False)
+            index += 1
+            continue
+        value = _unquote_argument(argument)
+        candidate = Path(value).expanduser()
+        if candidate.suffix.lower() in {".sas7bdat", ".xpt"}:
+            resolved = candidate.resolve(strict=False)
+            key = str(resolved).casefold() if sys.platform == "win32" else str(resolved)
+            if key not in seen:
+                seen.add(key)
+                paths.append(resolved)
+        index += 1
+    return StartupRequest(workspace_path, tuple(paths))
+
+
+def _unquote_argument(argument: str) -> str:
+    value = argument.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
+def dataset_paths_from_arguments(arguments: Sequence[str]) -> tuple[Path, ...]:
+    """Return dataset paths supplied by a shell or Windows file association."""
+
+    return startup_request_from_arguments(arguments).dataset_paths
 
 
 def main() -> int:
-    startup_paths = dataset_paths_from_arguments(sys.argv[1:])
+    startup_error = ""
+    try:
+        startup_request = startup_request_from_arguments(sys.argv[1:])
+    except ValueError as error:
+        startup_request = StartupRequest(None, ())
+        startup_error = str(error)
     application = QApplication(sys.argv)
     application.setApplicationName("SASDataViewer")
     application.setOrganizationName("ClinicalDataViewer")
@@ -258,10 +306,25 @@ def main() -> int:
     history = FilterHistory(
         application_data_directory() / "filter_history.sqlite", settings.history_limit
     )
-    window = MainWindow(settings, temp_manager, history)
+    favorites = WorkspaceFavoritesStore(
+        application_data_directory() / "workspace_favorites.sqlite"
+    )
+    window = MainWindow(settings, temp_manager, history, favorites)
     window.show()
-    if startup_paths:
-        QTimer.singleShot(0, lambda: window.open_paths(startup_paths))
+    if startup_request.workspace_path is not None:
+        QTimer.singleShot(
+            0,
+            lambda: window.workspace_controller.open_workspace(
+                startup_request.workspace_path
+            ),
+        )
+    if startup_request.dataset_paths:
+        QTimer.singleShot(0, lambda: window.open_paths(startup_request.dataset_paths))
+    if startup_error:
+        QTimer.singleShot(
+            0,
+            lambda: QMessageBox.critical(window, "Invalid Startup Request", startup_error),
+        )
     return application.exec()
 
 

@@ -7,6 +7,7 @@
 ## 已实现功能
 
 - 同时打开多个 `.sas7bdat` / `.xpt`，使用可关闭、可移动的 Tab 切换。
+- `File > Open Folder as Workspace…` 可在左侧 `Folder Panel` 非递归列出文件夹第一层的 `.sas7bdat` / `.xpt`；支持搜索、多选打开、手动刷新、自定义名称收藏，以及 `View > Folder Panel` 显示/隐藏。收藏通过独立 SQLite 增量保存。
 - 源文件先分块复制到本次会话的临时目录；复制结束后，读取、筛选、排序和导出都只访问临时文件/缓存。
 - 关闭 Tab 清理对应副本；退出清理整个会话；启动时清理超过 24 小时且不属于仍在运行进程的异常退出遗留目录。
 - 大文件复制完成后立即显示首批数据：`.sas7bdat` 首批 5,000 行继续使用 pyreadstat；`.xpt` 首批 2,500 行使用顺序 XPORT reader。两种格式其余数据均按每批 20,000 行在后台写入本地缓存；缓存期间仍可浏览首批及随后到达的数据。
@@ -40,9 +41,9 @@
 
 ![SASDataViewer 浅蓝主题、列筛选和统计面板](docs/screenshots/SASDataViewer-analysis.png)
 
-## Mini File Manager Workspace 集成（规划）
+## Mini File Manager Workspace 集成
 
-为了以后从 Mini File Manager 直接打开任意文件夹，SASDataViewer 计划提供以下命令行约定：
+Mini File Manager 可以通过以下命令行约定直接打开任意文件夹：
 
 ```text
 SASDataViewer.exe --workspace "C:\clinical\project\adam"
@@ -55,7 +56,7 @@ SASDataViewer.exe --workspace "C:\clinical\project\adam"
 - 打开后由 `Folder Panel` 非递归列出该目录第一层的 `.sas7bdat` 和 `.xpt` 文件；不会自动打开所有数据集。
 - 路径传递必须覆盖空格、中文、引号、`#` 和 UNC 路径等情况。
 
-这是一份供后续 Mini File Manager 与 Workspace 功能实现使用的集成约定，当前版本尚未提供 `--workspace` 参数。详细设计见 [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md)。
+当前版本已提供 `--workspace` 参数；该调用会打开一个新的 SASDataViewer 窗口并显示 Folder Panel，但不会自动打开或收藏目录中的数据集。详细设计见 [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md)。
 
 ## 文档导航
 
