@@ -128,9 +128,6 @@ class WorkspacePanel(QWidget):
         self.open_button = QPushButton("Open Selected")
         self.open_button.clicked.connect(self._emit_open)
         layout.addWidget(self.open_button)
-        self.status_label = QLabel("")
-        self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
         self._sync_controls()
 
     @property
@@ -166,7 +163,7 @@ class WorkspacePanel(QWidget):
         self._root = root
         self.file_list.clear()
         self.message_label.setText("Scanning workspace…")
-        self.status_label.setText(str(root))
+        self.file_list.setToolTip("")
         self.set_favorites(self._favorites)
         self._sync_controls(busy=True)
 
@@ -181,13 +178,10 @@ class WorkspacePanel(QWidget):
         self.message_label.setText(
             "" if snapshot.entries else "No SAS datasets were found in this folder."
         )
-        self.status_label.setText(
-            f"{len(snapshot.entries)} datasets | {snapshot.root}"
-        )
         if snapshot.warnings:
-            self.status_label.setToolTip("\n".join(snapshot.warnings))
+            self.file_list.setToolTip("\n".join(snapshot.warnings))
         else:
-            self.status_label.setToolTip("")
+            self.file_list.setToolTip("")
         self.set_favorites(self._favorites)
         self._apply_search(self.search.text())
         self._sync_controls()
@@ -199,7 +193,7 @@ class WorkspacePanel(QWidget):
             "This workspace folder is unavailable.\n"
             "Reconnect the drive or choose another folder."
         )
-        self.status_label.setText(message)
+        self.message_label.setToolTip(message)
         self.set_favorites(self._favorites)
         self._sync_controls()
 
@@ -208,7 +202,8 @@ class WorkspacePanel(QWidget):
         self.file_list.clear()
         self.search.clear()
         self.message_label.setText("Open a folder to view its SAS datasets.")
-        self.status_label.clear()
+        self.message_label.setToolTip("")
+        self.file_list.setToolTip("")
         self.set_favorites(self._favorites)
         self._sync_controls()
 

@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 APP_FOLDER = "ClinicalDataViewer"
+DEFAULT_FOLDER_PANEL_WIDTH = 175
+DEFAULT_VARIABLES_PANEL_WIDTH = 175
+MIN_FOLDER_PANEL_WIDTH = 140
+MIN_VARIABLES_PANEL_WIDTH = 170
 
 PROC_MEANS_STATISTICS = (
     ("subjects", "n (Subjects)"),
@@ -78,8 +82,8 @@ class AppSettings:
     last_workspace_directory: str = ""
     last_export_directory: str = ""
     folder_panel_visible: bool = False
-    folder_panel_width: int = 250
-    variables_panel_width: int = 285
+    folder_panel_width: int = DEFAULT_FOLDER_PANEL_WIDTH
+    variables_panel_width: int = DEFAULT_VARIABLES_PANEL_WIDTH
     apply_sas_date_time_formats: bool = False
     proc_means_decimals: int = 2
     proc_means_decimal_places: dict[str, int] = field(
@@ -110,13 +114,17 @@ class AppSettings:
         try:
             folder_panel_width = int(value.folder_panel_width)
         except (TypeError, ValueError):
-            folder_panel_width = 250
-        value.folder_panel_width = min(600, max(160, folder_panel_width))
+            folder_panel_width = DEFAULT_FOLDER_PANEL_WIDTH
+        value.folder_panel_width = min(
+            600, max(MIN_FOLDER_PANEL_WIDTH, folder_panel_width)
+        )
         try:
             variables_panel_width = int(value.variables_panel_width)
         except (TypeError, ValueError):
-            variables_panel_width = 285
-        value.variables_panel_width = min(600, max(230, variables_panel_width))
+            variables_panel_width = DEFAULT_VARIABLES_PANEL_WIDTH
+        value.variables_panel_width = min(
+            600, max(MIN_VARIABLES_PANEL_WIDTH, variables_panel_width)
+        )
         value.proc_means_decimals = min(10, max(0, int(value.proc_means_decimals)))
         raw_decimal_places = raw.get("proc_means_decimal_places", {})
         if not isinstance(raw_decimal_places, dict):

@@ -35,7 +35,11 @@ from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
 from ..merge_datasets import MergeDatasetsEngine
 from ..sas_reader import SasDatasetReader
-from ..settings import AppSettings
+from ..settings import (
+    MIN_FOLDER_PANEL_WIDTH,
+    MIN_VARIABLES_PANEL_WIDTH,
+    AppSettings,
+)
 from ..statistics import calculate_statistics
 from ..temp_manager import TempManager
 from ..workers import Worker
@@ -299,7 +303,7 @@ class MainWindow(QMainWindow):
         self.open_tool_button.setStyleSheet(
             "QToolButton#openDatasetButton::menu-button {"
             f" width: {menu_indicator_width + menu_gap}px;"
-            " border-left: 1px solid #c5d9ec;"
+            " border: none;"
             "}"
         )
         self.open_menu = QMenu(self.open_tool_button)
@@ -318,6 +322,10 @@ class MainWindow(QMainWindow):
             "Favorite Workspaces"
         )
         self.open_tool_button.setMenu(self.open_menu)
+        self.open_tool_button.setProperty("menuExtraWidthPixels", 6 * menu_gap)
+        self.open_tool_button.setMinimumWidth(
+            self.open_tool_button.sizeHint().width() + (6 * menu_gap)
+        )
         toolbar.addWidget(self.open_tool_button)
         toolbar.addSeparator()
         toolbar.addAction(self.reload_action)
@@ -362,7 +370,7 @@ class MainWindow(QMainWindow):
         self.variables_dock.setFeatures(QDockWidget.DockWidgetMovable)
         self.variables_dock.setTitleBarWidget(QWidget())
         self.variables_dock.setWidget(self.variables_panel)
-        self.variables_dock.setMinimumWidth(230)
+        self.variables_dock.setMinimumWidth(MIN_VARIABLES_PANEL_WIDTH)
         self.variables_dock.resize(self._variables_panel_width, self.height())
         self.addDockWidget(Qt.LeftDockWidgetArea, self.variables_dock)
         self.variables_action.toggled.connect(self._set_variables_panel_visible)
@@ -383,7 +391,7 @@ class MainWindow(QMainWindow):
         self.folder_dock.setFeatures(QDockWidget.DockWidgetMovable)
         self.folder_dock.setTitleBarWidget(QWidget())
         self.folder_dock.setWidget(self.workspace_panel)
-        self.folder_dock.setMinimumWidth(160)
+        self.folder_dock.setMinimumWidth(MIN_FOLDER_PANEL_WIDTH)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.folder_dock)
         self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
         self.resizeDocks(
@@ -505,11 +513,11 @@ class MainWindow(QMainWindow):
     def _remember_navigation_panel_widths(self) -> None:
         if hasattr(self, "folder_dock") and self._panel_is_open(self.folder_dock):
             self._folder_panel_width = self._bounded_panel_width(
-                self.folder_dock.width(), 160
+                self.folder_dock.width(), MIN_FOLDER_PANEL_WIDTH
             )
         if hasattr(self, "variables_dock") and self._panel_is_open(self.variables_dock):
             self._variables_panel_width = self._bounded_panel_width(
-                self.variables_dock.width(), 230
+                self.variables_dock.width(), MIN_VARIABLES_PANEL_WIDTH
             )
 
     def _restore_navigation_panel_widths(self) -> None:
@@ -524,7 +532,12 @@ class MainWindow(QMainWindow):
         if len(docks) == 2:
             self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
         if docks:
-            minimums = [160 if dock is self.folder_dock else 230 for dock in docks]
+            minimums = [
+                MIN_FOLDER_PANEL_WIDTH
+                if dock is self.folder_dock
+                else MIN_VARIABLES_PANEL_WIDTH
+                for dock in docks
+            ]
             # QMainWindow otherwise reuses the former dock-group width: one
             # remaining panel expands, while a reopened pair can be squeezed
             # into that single-panel width.  Fix each dock for one layout pass,

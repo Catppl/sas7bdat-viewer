@@ -399,6 +399,11 @@ class WorkspaceControllerTests(unittest.TestCase):
             self.assertGreaterEqual(
                 window.open_tool_button.property("menuGapPixels"), 6
             )
+            self.assertGreaterEqual(
+                window.open_tool_button.property("menuExtraWidthPixels"), 36
+            )
+            self.assertNotIn("border-left", window.open_tool_button.styleSheet())
+            self.assertIn("border: none", window.open_tool_button.styleSheet())
             self.assertIn("background-color: #f7fbff", window.open_menu.styleSheet())
             self.assertIn("background-color: #dceeff", window.open_menu.styleSheet())
             window.close()

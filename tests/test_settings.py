@@ -5,10 +5,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from clinical_data_viewer.settings import AppSettings
+from clinical_data_viewer.settings import (
+    DEFAULT_FOLDER_PANEL_WIDTH,
+    DEFAULT_VARIABLES_PANEL_WIDTH,
+    AppSettings,
+)
 
 
 class SettingsTests(unittest.TestCase):
+    def test_navigation_panel_defaults_are_compact(self) -> None:
+        settings = AppSettings()
+        self.assertEqual(settings.folder_panel_width, DEFAULT_FOLDER_PANEL_WIDTH)
+        self.assertEqual(settings.variables_panel_width, DEFAULT_VARIABLES_PANEL_WIDTH)
+        self.assertEqual(settings.folder_panel_width, 175)
+        self.assertEqual(settings.variables_panel_width, 175)
+
     def test_settings_round_trip_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "settings.json"
