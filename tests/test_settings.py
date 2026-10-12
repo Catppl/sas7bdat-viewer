@@ -18,6 +18,7 @@ class SettingsTests(unittest.TestCase):
                 last_workspace_directory="C:/clinical/adam",
                 folder_panel_visible=True,
                 folder_panel_width=320,
+                variables_panel_width=340,
                 apply_sas_date_time_formats=True,
                 proc_means_decimals=4,
                 proc_means_decimal_places={"mean": 2, "q1": 1, "max": 12},
@@ -32,6 +33,7 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(restored.last_workspace_directory, "C:/clinical/adam")
             self.assertTrue(restored.folder_panel_visible)
             self.assertEqual(restored.folder_panel_width, 320)
+            self.assertEqual(restored.variables_panel_width, 340)
             self.assertTrue(restored.apply_sas_date_time_formats)
             self.assertEqual(restored.proc_means_decimals, 4)
             self.assertEqual(restored.proc_means_decimal_places["mean"], 2)

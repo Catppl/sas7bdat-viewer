@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import Qt, QThreadPool, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -113,6 +113,8 @@ class MainWindow(QMainWindow):
         self._pending_directory_releases: dict[QWidget, list[Path]] = {}
         self._compare_sources: dict[DatasetTab, dict[str, tuple[DatasetTab, Path]]] = {}
         self._recommendation_generation = 0
+        self._folder_panel_width = self.settings.folder_panel_width
+        self._variables_panel_width = self.settings.variables_panel_width
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
         self.setMinimumSize(850, 560)
@@ -285,15 +287,37 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.open_tool_button = QToolButton()
+        self.open_tool_button.setObjectName("openDatasetButton")
         self.open_tool_button.setDefaultAction(self.open_action)
         self.open_tool_button.setPopupMode(QToolButton.MenuButtonPopup)
-        open_menu = QMenu(self.open_tool_button)
-        open_menu.addAction(self.open_action)
-        open_menu.addAction(self.open_workspace_action)
-        self.toolbar_favorite_workspaces_menu = open_menu.addMenu(
+        menu_gap = max(
+            6,
+            self.style().pixelMetric(QStyle.PM_LayoutHorizontalSpacing),
+        )
+        menu_indicator_width = self.style().pixelMetric(QStyle.PM_MenuButtonIndicator)
+        self.open_tool_button.setProperty("menuGapPixels", menu_gap)
+        self.open_tool_button.setStyleSheet(
+            "QToolButton#openDatasetButton::menu-button {"
+            f" width: {menu_indicator_width + menu_gap}px;"
+            " border-left: 1px solid #c5d9ec;"
+            "}"
+        )
+        self.open_menu = QMenu(self.open_tool_button)
+        self.open_menu.setObjectName("openDatasetMenu")
+        self.open_menu.setStyleSheet(
+            "QMenu { background-color: #f7fbff; border: 1px solid #bfd4e8;"
+            " padding: 4px; }"
+            "QMenu::item { background-color: transparent; color: #1f2937;"
+            " padding: 6px 24px 6px 10px; border-radius: 3px; }"
+            "QMenu::item:selected { background-color: #dceeff; color: #0f5f9f; }"
+            "QMenu::separator { height: 1px; background: #cbdced; margin: 4px 6px; }"
+        )
+        self.open_menu.addAction(self.open_action)
+        self.open_menu.addAction(self.open_workspace_action)
+        self.toolbar_favorite_workspaces_menu = self.open_menu.addMenu(
             "Favorite Workspaces"
         )
-        self.open_tool_button.setMenu(open_menu)
+        self.open_tool_button.setMenu(self.open_menu)
         toolbar.addWidget(self.open_tool_button)
         toolbar.addSeparator()
         toolbar.addAction(self.reload_action)
@@ -339,12 +363,12 @@ class MainWindow(QMainWindow):
         self.variables_dock.setTitleBarWidget(QWidget())
         self.variables_dock.setWidget(self.variables_panel)
         self.variables_dock.setMinimumWidth(230)
-        self.variables_dock.resize(285, self.height())
+        self.variables_dock.resize(self._variables_panel_width, self.height())
         self.addDockWidget(Qt.LeftDockWidgetArea, self.variables_dock)
-        self.variables_action.toggled.connect(self.variables_dock.setVisible)
+        self.variables_action.toggled.connect(self._set_variables_panel_visible)
         self.variables_dock.visibilityChanged.connect(self.variables_action.setChecked)
         self.variables_panel.collapse_requested.connect(
-            lambda: self.variables_dock.setVisible(False)
+            lambda: self._set_variables_panel_visible(False)
         )
         self.variables_panel.visibility_changed.connect(self._visible_columns_changed)
         self.variables_panel.variable_activated.connect(self._locate_variable)
@@ -364,15 +388,16 @@ class MainWindow(QMainWindow):
         self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
         self.resizeDocks(
             [self.folder_dock, self.variables_dock],
-            [self.settings.folder_panel_width, 285],
+            [self._folder_panel_width, self._variables_panel_width],
             Qt.Horizontal,
         )
-        self.folder_action.toggled.connect(self.folder_dock.setVisible)
+        self.folder_action.toggled.connect(self._set_folder_panel_visible)
         self.folder_dock.visibilityChanged.connect(self.folder_action.setChecked)
         self.workspace_panel.collapse_requested.connect(
-            lambda: self.folder_dock.setVisible(False)
+            lambda: self._set_folder_panel_visible(False)
         )
         self.folder_dock.setVisible(self.settings.folder_panel_visible)
+        QTimer.singleShot(0, self._restore_navigation_panel_widths)
 
     def _create_analysis_panel(self) -> None:
         self.analysis_panel = AnalysisPanel()
@@ -466,9 +491,69 @@ class MainWindow(QMainWindow):
         self._submit(owner, function, completed, failed)
 
     def show_folder_panel(self) -> None:
-        self.folder_dock.show()
+        self._set_folder_panel_visible(True)
         self.folder_dock.raise_()
-        self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
+
+    @staticmethod
+    def _panel_is_open(dock: QDockWidget) -> bool:
+        return not dock.isHidden()
+
+    @staticmethod
+    def _bounded_panel_width(width: int, minimum: int) -> int:
+        return min(600, max(minimum, int(width)))
+
+    def _remember_navigation_panel_widths(self) -> None:
+        if hasattr(self, "folder_dock") and self._panel_is_open(self.folder_dock):
+            self._folder_panel_width = self._bounded_panel_width(
+                self.folder_dock.width(), 160
+            )
+        if hasattr(self, "variables_dock") and self._panel_is_open(self.variables_dock):
+            self._variables_panel_width = self._bounded_panel_width(
+                self.variables_dock.width(), 230
+            )
+
+    def _restore_navigation_panel_widths(self) -> None:
+        docks: list[QDockWidget] = []
+        widths: list[int] = []
+        if self._panel_is_open(self.folder_dock):
+            docks.append(self.folder_dock)
+            widths.append(self._folder_panel_width)
+        if self._panel_is_open(self.variables_dock):
+            docks.append(self.variables_dock)
+            widths.append(self._variables_panel_width)
+        if len(docks) == 2:
+            self.splitDockWidget(self.folder_dock, self.variables_dock, Qt.Horizontal)
+        if docks:
+            minimums = [160 if dock is self.folder_dock else 230 for dock in docks]
+            # QMainWindow otherwise reuses the former dock-group width: one
+            # remaining panel expands, while a reopened pair can be squeezed
+            # into that single-panel width.  Fix each dock for one layout pass,
+            # then release the limits so normal user resizing remains available.
+            for dock, width in zip(docks, widths, strict=True):
+                dock.setMinimumWidth(width)
+                dock.setMaximumWidth(width)
+                dock.resize(width, dock.height())
+            self.resizeDocks(docks, widths, Qt.Horizontal)
+
+            def release_width_limits() -> None:
+                for dock, minimum in zip(docks, minimums, strict=True):
+                    dock.setMinimumWidth(minimum)
+                    dock.setMaximumWidth(16_777_215)
+
+            QTimer.singleShot(0, release_width_limits)
+
+    def _set_navigation_panel_visible(self, dock: QDockWidget, visible: bool) -> None:
+        if self._panel_is_open(dock) == visible:
+            return
+        self._remember_navigation_panel_widths()
+        dock.setVisible(visible)
+        QTimer.singleShot(0, self._restore_navigation_panel_widths)
+
+    def _set_folder_panel_visible(self, visible: bool) -> None:
+        self._set_navigation_panel_visible(self.folder_dock, visible)
+
+    def _set_variables_panel_visible(self, visible: bool) -> None:
+        self._set_navigation_panel_visible(self.variables_dock, visible)
 
     def show_workspace_error(
         self, title: str, message: str, details: str = ""
@@ -2099,6 +2184,7 @@ class MainWindow(QMainWindow):
         box.exec()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._remember_navigation_panel_widths()
         for workers in self._workers.values():
             for worker in workers:
                 worker.cancel()
@@ -2115,6 +2201,7 @@ class MainWindow(QMainWindow):
                 f"Some temporary files could not be removed:\n{error}",
             )
         self.settings.folder_panel_visible = self.folder_dock.isVisible()
-        self.settings.folder_panel_width = self.folder_dock.width()
+        self.settings.folder_panel_width = self._folder_panel_width
+        self.settings.variables_panel_width = self._variables_panel_width
         self.settings.save()
         event.accept()

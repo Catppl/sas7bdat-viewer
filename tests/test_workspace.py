@@ -4,7 +4,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from clinical_data_viewer.workspace import WorkspaceFavoritesStore, scan_workspace
 from clinical_data_viewer.workspace.models import workspace_path_key
@@ -312,6 +312,96 @@ class WorkspaceControllerTests(unittest.TestCase):
         self.assertNotIn("scan_workspace", source)
         self.assertNotIn("sqlite3", source)
         self.assertNotIn("workspace_favorites (", source)
+
+    def test_navigation_panels_restore_their_own_width_after_one_closes(
+        self,
+    ) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class Settings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        _application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch(
+                "clinical_data_viewer.ui.main_window.QTimer.singleShot",
+                side_effect=lambda _delay, callback: callback(),
+            ):
+                window = MainWindow(
+                    Settings(
+                        folder_panel_visible=True,
+                        folder_panel_width=250,
+                        variables_panel_width=315,
+                    ),
+                    TempManager(root / "temp"),
+                    FilterHistory(root / "history.sqlite"),
+                    WorkspaceFavoritesStore(root / "favorites.sqlite"),
+                )
+                window._folder_panel_width = 250
+                window._variables_panel_width = 315
+                window._remember_navigation_panel_widths = Mock()
+                window.resizeDocks = Mock()
+
+                window._set_folder_panel_visible(False)
+                window.resizeDocks.assert_called_with(
+                    [window.variables_dock], [315], Qt.Horizontal
+                )
+
+                window._set_folder_panel_visible(True)
+                window.resizeDocks.assert_called_with(
+                    [window.folder_dock, window.variables_dock],
+                    [250, 315],
+                    Qt.Horizontal,
+                )
+
+                window._set_variables_panel_visible(False)
+                window.resizeDocks.assert_called_with(
+                    [window.folder_dock], [250], Qt.Horizontal
+                )
+                window.close()
+
+    def test_open_menu_spacing_and_colors_match_the_toolbar_theme(self) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class Settings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        _application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                Settings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+                WorkspaceFavoritesStore(root / "favorites.sqlite"),
+            )
+            self.assertIs(window.open_tool_button.menu(), window.open_menu)
+            self.assertGreaterEqual(
+                window.open_tool_button.property("menuGapPixels"), 6
+            )
+            self.assertIn("background-color: #f7fbff", window.open_menu.styleSheet())
+            self.assertIn("background-color: #dceeff", window.open_menu.styleSheet())
+            window.close()
 
 
 if __name__ == "__main__":
