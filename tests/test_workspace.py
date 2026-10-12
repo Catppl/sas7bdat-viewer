@@ -125,7 +125,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             def show_workspace_error(self, title, message, details=""):
                 self.error = (title, message, details)
 
-        application = QApplication.instance() or QApplication([])
+        _application = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first = root / "first"
@@ -145,8 +145,8 @@ class WorkspaceControllerTests(unittest.TestCase):
             controller.open_workspace(second)
             host.tasks[1][1](WorkspaceSnapshot(second.resolve(), ()))
             host.tasks[0][1](WorkspaceSnapshot(first.resolve(), ()))
-            application.processEvents()
             self.assertEqual(panel.root, second.resolve())
+            panel.close()
 
     def test_panel_shows_only_names_and_preserves_snapshot_when_hidden(self) -> None:
         import os
@@ -161,7 +161,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             WorkspaceSnapshot,
         )
 
-        application = QApplication.instance() or QApplication([])
+        _application = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             first = root / "adsl.sas7bdat"
@@ -188,12 +188,14 @@ class WorkspaceControllerTests(unittest.TestCase):
             self.assertEqual(opened, [(second,)])
             panel.hide()
             panel.show()
-            application.processEvents()
             self.assertEqual(panel.root, root)
             self.assertEqual(panel.search.text(), "transport")
             self.assertEqual(panel.file_list.item(1).data(Qt.UserRole), second)
+            panel.close()
 
-    def test_main_window_wires_folder_panel_without_replacing_open_lifecycle(self) -> None:
+    def test_main_window_wires_folder_panel_without_replacing_open_lifecycle(
+        self,
+    ) -> None:
         import os
 
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -208,7 +210,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             def save(self, path=None):
                 return None
 
-        application = QApplication.instance() or QApplication([])
+        _application = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             settings = Settings(folder_panel_visible=False)
@@ -238,7 +240,6 @@ class WorkspaceControllerTests(unittest.TestCase):
             window.open_or_focus_paths((new_path,))
             window._open_path.assert_called_once_with(new_path)
             window.close()
-            application.processEvents()
 
     def test_opening_two_workspace_files_sequentially_adds_tabs_to_same_window(
         self,
@@ -299,9 +300,10 @@ class WorkspaceControllerTests(unittest.TestCase):
                 existing_windows,
             )
             window.close()
-            application.processEvents()
 
-    def test_main_window_workspace_surface_contains_no_scanner_or_sqlite_logic(self) -> None:
+    def test_main_window_workspace_surface_contains_no_scanner_or_sqlite_logic(
+        self,
+    ) -> None:
         import inspect
 
         from clinical_data_viewer.ui.main_window import MainWindow

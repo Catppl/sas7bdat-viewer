@@ -33,7 +33,14 @@ $VenvPython = (Resolve-Path ".venv\Scripts\python.exe").Path
 & .\.venv\Scripts\ruff.exe check clinical_data_viewer tests run.py
 & .\.venv\Scripts\ruff.exe format --check clinical_data_viewer tests run.py
 & $VenvPython -m compileall -q clinical_data_viewer tests run.py
-& $VenvPython -m unittest discover -s tests -v
+$PreviousQtPlatform = $env:QT_QPA_PLATFORM
+$env:QT_QPA_PLATFORM = "offscreen"
+try {
+    & $VenvPython -m unittest discover -s tests -v
+}
+finally {
+    $env:QT_QPA_PLATFORM = $PreviousQtPlatform
+}
 & .\.venv\Scripts\pyinstaller.exe --noconfirm --clean SASDataViewer.spec
 
 $BundleDirectory = (Resolve-Path "dist\SASDataViewer").Path
