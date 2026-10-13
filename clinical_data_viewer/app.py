@@ -27,9 +27,30 @@ QMenuBar {
     background: #f7fbff;
     border-bottom: 1px solid #cbdced;
 }
-QMenuBar::item:selected, QMenu::item:selected {
+QMenuBar::item:selected {
     background: #dceeff;
     color: #0f5f9f;
+}
+QMenu {
+    background-color: #f7fbff;
+    border: 1px solid #bfd4e8;
+    padding: 4px;
+}
+QMenu::item {
+    background-color: transparent;
+    color: #1f2937;
+    padding: 6px 24px 6px 10px;
+    border-radius: 3px;
+}
+QMenu::item:selected {
+    background-color: #dceeff;
+    color: #0f5f9f;
+}
+QMenu::item:disabled { color: #94a3b8; }
+QMenu::separator {
+    height: 1px;
+    background: #cbdced;
+    margin: 4px 6px;
 }
 QToolBar#mainToolbar {
     background: #f3f8fe;
@@ -127,6 +148,14 @@ QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     selection-background-color: #b9ddff;
 }
 QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #1684d8; }
+QComboBox QAbstractItemView {
+    background-color: #f7fbff;
+    color: #1f2937;
+    border: 1px solid #bfd4e8;
+    outline: 0;
+    selection-background-color: #dceeff;
+    selection-color: #0f5f9f;
+}
 QSpinBox, QDoubleSpinBox { min-height: 24px; padding-right: 22px; }
 QSpinBox::up-button, QDoubleSpinBox::up-button {
     subcontrol-origin: border;

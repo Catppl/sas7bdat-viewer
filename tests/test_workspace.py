@@ -377,6 +377,7 @@ class WorkspaceControllerTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
 
+        from clinical_data_viewer.app import STYLE
         from clinical_data_viewer.filter_history import FilterHistory
         from clinical_data_viewer.settings import AppSettings
         from clinical_data_viewer.temp_manager import TempManager
@@ -387,6 +388,7 @@ class WorkspaceControllerTests(unittest.TestCase):
                 return None
 
         _application = QApplication.instance() or QApplication([])
+        _application.setStyleSheet(STYLE)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             window = MainWindow(
@@ -404,8 +406,12 @@ class WorkspaceControllerTests(unittest.TestCase):
             )
             self.assertNotIn("border-left", window.open_tool_button.styleSheet())
             self.assertIn("border: none", window.open_tool_button.styleSheet())
-            self.assertIn("background-color: #f7fbff", window.open_menu.styleSheet())
-            self.assertIn("background-color: #dceeff", window.open_menu.styleSheet())
+            self.assertEqual(window.open_menu.styleSheet(), "")
+            self.assertIn("QMenu {", _application.styleSheet())
+            self.assertIn("QMenu::item:disabled", _application.styleSheet())
+            self.assertIn("QComboBox QAbstractItemView", _application.styleSheet())
+            self.assertIn("background-color: #f7fbff", _application.styleSheet())
+            self.assertIn("background-color: #dceeff", _application.styleSheet())
             window.close()
 
 

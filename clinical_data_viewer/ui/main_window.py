@@ -308,14 +308,6 @@ class MainWindow(QMainWindow):
         )
         self.open_menu = QMenu(self.open_tool_button)
         self.open_menu.setObjectName("openDatasetMenu")
-        self.open_menu.setStyleSheet(
-            "QMenu { background-color: #f7fbff; border: 1px solid #bfd4e8;"
-            " padding: 4px; }"
-            "QMenu::item { background-color: transparent; color: #1f2937;"
-            " padding: 6px 24px 6px 10px; border-radius: 3px; }"
-            "QMenu::item:selected { background-color: #dceeff; color: #0f5f9f; }"
-            "QMenu::separator { height: 1px; background: #cbdced; margin: 4px 6px; }"
-        )
         self.open_menu.addAction(self.open_action)
         self.open_menu.addAction(self.open_workspace_action)
         self.toolbar_favorite_workspaces_menu = self.open_menu.addMenu(
