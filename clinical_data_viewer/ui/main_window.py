@@ -494,6 +494,16 @@ class MainWindow(QMainWindow):
         self._set_folder_panel_visible(True)
         self.folder_dock.raise_()
 
+    def set_startup_navigation_panels(
+        self, *, folder_visible: bool, variables_visible: bool
+    ) -> None:
+        """Apply one launch-mode layout without changing later open behavior."""
+
+        self._remember_navigation_panel_widths()
+        self.folder_dock.setVisible(folder_visible)
+        self.variables_dock.setVisible(variables_visible)
+        QTimer.singleShot(0, self._restore_navigation_panel_widths)
+
     @staticmethod
     def _panel_is_open(dock: QDockWidget) -> bool:
         return not dock.isHidden()

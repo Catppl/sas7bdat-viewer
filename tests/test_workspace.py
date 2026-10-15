@@ -201,6 +201,10 @@ class WorkspaceControllerTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication, QToolButton
 
+        from clinical_data_viewer.app import (
+            StartupRequest,
+            apply_startup_navigation_mode,
+        )
         from clinical_data_viewer.filter_history import FilterHistory
         from clinical_data_viewer.settings import AppSettings
         from clinical_data_viewer.temp_manager import TempManager
@@ -226,7 +230,19 @@ class WorkspaceControllerTests(unittest.TestCase):
                 window.open_tool_button.popupMode(), QToolButton.MenuButtonPopup
             )
             self.assertFalse(window.folder_dock.isVisible())
-            window.show_folder_panel()
+            apply_startup_navigation_mode(
+                window,
+                StartupRequest(root / "workspace", ()),
+            )
+            self.assertFalse(window.folder_dock.isHidden())
+            self.assertFalse(window.variables_dock.isHidden())
+
+            dataset = (root / "adsl.sas7bdat").resolve()
+            apply_startup_navigation_mode(
+                window,
+                StartupRequest(None, (dataset,)),
+            )
+            self.assertTrue(window.folder_dock.isHidden())
             self.assertFalse(window.variables_dock.isHidden())
 
             existing = (root / "existing.sas7bdat").resolve()
@@ -239,6 +255,8 @@ class WorkspaceControllerTests(unittest.TestCase):
             new_path = (root / "new.xpt").resolve()
             window.open_or_focus_paths((new_path,))
             window._open_path.assert_called_once_with(new_path)
+            self.assertTrue(window.folder_dock.isHidden())
+            self.assertFalse(window.variables_dock.isHidden())
             window.close()
 
     def test_opening_two_workspace_files_sequentially_adds_tabs_to_same_window(

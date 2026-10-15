@@ -3,8 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from clinical_data_viewer.app import (
+    StartupRequest,
+    apply_startup_navigation_mode,
     dataset_paths_from_arguments,
     startup_request_from_arguments,
 )
@@ -46,6 +49,29 @@ class AppArgumentTests(unittest.TestCase):
             startup_request_from_arguments(
                 ["--workspace", "one", "--workspace", "two"]
             )
+
+    def test_startup_navigation_mode_uses_workspace_precedence(self) -> None:
+        window = Mock()
+        request = StartupRequest(Path("workspace"), (Path("adsl.sas7bdat"),))
+        apply_startup_navigation_mode(window, request)
+        window.set_startup_navigation_panels.assert_called_once_with(
+            folder_visible=True,
+            variables_visible=True,
+        )
+
+    def test_startup_navigation_mode_hides_folder_for_dataset_launch(self) -> None:
+        window = Mock()
+        request = StartupRequest(None, (Path("adsl.sas7bdat"),))
+        apply_startup_navigation_mode(window, request)
+        window.set_startup_navigation_panels.assert_called_once_with(
+            folder_visible=False,
+            variables_visible=True,
+        )
+
+    def test_startup_navigation_mode_preserves_settings_without_arguments(self) -> None:
+        window = Mock()
+        apply_startup_navigation_mode(window, StartupRequest(None, ()))
+        window.set_startup_navigation_panels.assert_not_called()
 
 
 if __name__ == "__main__":

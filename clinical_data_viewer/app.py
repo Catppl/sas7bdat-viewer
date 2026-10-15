@@ -316,6 +316,23 @@ def dataset_paths_from_arguments(arguments: Sequence[str]) -> tuple[Path, ...]:
     return startup_request_from_arguments(arguments).dataset_paths
 
 
+def apply_startup_navigation_mode(
+    window: MainWindow, startup_request: StartupRequest
+) -> None:
+    """Choose the initial panel layout from the explicit launch mode only."""
+
+    if startup_request.workspace_path is not None:
+        window.set_startup_navigation_panels(
+            folder_visible=True,
+            variables_visible=True,
+        )
+    elif startup_request.dataset_paths:
+        window.set_startup_navigation_panels(
+            folder_visible=False,
+            variables_visible=True,
+        )
+
+
 def main() -> int:
     startup_error = ""
     try:
@@ -339,6 +356,7 @@ def main() -> int:
         application_data_directory() / "workspace_favorites.sqlite"
     )
     window = MainWindow(settings, temp_manager, history, favorites)
+    apply_startup_navigation_mode(window, startup_request)
     window.show()
     if startup_request.workspace_path is not None:
         QTimer.singleShot(
