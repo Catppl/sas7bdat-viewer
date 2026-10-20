@@ -207,8 +207,10 @@ class CopyTableView(QTableView):
             ):
                 action = QAction(label, self)
                 action.triggered.connect(
-                    lambda _checked=False, color=key: self.manual_highlight_requested.emit(
-                        self.manual_highlight_row_numbers(), color
+                    lambda _checked=False, color=key: (
+                        self.manual_highlight_requested.emit(
+                            self.manual_highlight_row_numbers(), color
+                        )
                     )
                 )
                 highlights.addAction(action)

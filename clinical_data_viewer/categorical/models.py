@@ -101,10 +101,15 @@ class CategoricalConfig:
 
         def source_field(name: str, role: str) -> None:
             if not name or name.casefold() not in known:
-                raise ValueError(f'{role} "{name}" does not exist in the source dataset.')
+                raise ValueError(
+                    f'{role} "{name}" does not exist in the source dataset.'
+                )
 
         source_field(self.treatment_variable, "Treatment variable")
-        if self.count_type == "distinct_subject" or self.denominator.type == "baseline_postbaseline":
+        if (
+            self.count_type == "distinct_subject"
+            or self.denominator.type == "baseline_postbaseline"
+        ):
             source_field(self.subject_id_variable, "Subject ID variable")
         item_names: set[str] = set()
         for item in self.items:
@@ -119,7 +124,9 @@ class CategoricalConfig:
             item_names.add(folded)
             contexts = [name.casefold() for name in item.context_variables]
             if len(contexts) != len(set(contexts)):
-                raise ValueError(f'Item "{item.variable}" has duplicate context variables.')
+                raise ValueError(
+                    f'Item "{item.variable}" has duplicate context variables.'
+                )
             for context in item.context_variables:
                 source_field(context, "Context variable")
         denom = self.denominator
@@ -147,14 +154,18 @@ class CategoricalConfig:
                     + ", ".join(dict.fromkeys(unknown))
                 )
             source_treatment = known[self.treatment_variable.casefold()]
-            population_treatment_field = population_known[population_treatment.casefold()]
+            population_treatment_field = population_known[
+                population_treatment.casefold()
+            ]
             if source_treatment.kind != population_treatment_field.kind:
                 raise ValueError(
                     f'Population treatment variable "{population_treatment}" must have the same type in source and ADSL.'
                 )
             if self.count_type == "distinct_subject":
                 source_subject = known[self.subject_id_variable.casefold()]
-                population_subject = population_known[self.subject_id_variable.casefold()]
+                population_subject = population_known[
+                    self.subject_id_variable.casefold()
+                ]
                 if source_subject.kind != population_subject.kind:
                     raise ValueError(
                         f'Subject ID variable "{self.subject_id_variable}" must have the same type in source and ADSL.'

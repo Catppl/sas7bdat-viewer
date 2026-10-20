@@ -103,9 +103,7 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             self.assertIn("work.dec_aval", code)
             self.assertIn("work.dec_rule", code)
             self.assertIn(
-                "proc sort data=work.stat_aval;\n"
-                "    by PARAMCD AVISITN TRT01AN;\n"
-                "run;",
+                "proc sort data=work.stat_aval;\n    by PARAMCD AVISITN TRT01AN;\nrun;",
                 code,
             )
             self.assertNotIn("in=in_subj", code)
@@ -124,7 +122,14 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
                 "/* Clean up intermediate WORK tables */",
             ):
                 self.assertIn(section, code)
-            for readable_name in ("pm_src", "stat_aval", "subj_aval", "out_aval", "dec_aval", "dec_rule"):
+            for readable_name in (
+                "pm_src",
+                "stat_aval",
+                "subj_aval",
+                "out_aval",
+                "dec_aval",
+                "dec_rule",
+            ):
                 self.assertRegex(code, rf"\b{readable_name}\b")
 
     def test_subject_only_and_no_grouping_or_filter_render(self) -> None:
@@ -166,7 +171,10 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             # The fixture does not contain CHG, so validate the naming helper
             # through a metadata copy that includes a second numeric variable.
             source = self.make_source(Path(directory), dataset_name="ADLB2")
-            variables = (*source.metadata.variables, VariableMetadata("CHG", kind="numeric"))
+            variables = (
+                *source.metadata.variables,
+                VariableMetadata("CHG", kind="numeric"),
+            )
             source = DatasetHandle(
                 source.source_path,
                 source.temporary_path,
@@ -176,7 +184,9 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
                 True,
             )
             code = SasProcMeansGenerator().generate(
-                build_proc_means_configuration(source, ProcMeansConfig(("AVAL", "CHG"), statistics=("mean",)))
+                build_proc_means_configuration(
+                    source, ProcMeansConfig(("AVAL", "CHG"), statistics=("mean",))
+                )
             )
             for name in ("stat_aval", "stat_chg", "out_aval", "out_chg"):
                 self.assertIn(name, code)
@@ -193,7 +203,9 @@ class SasProcMeansGeneratorTests(unittest.TestCase):
             self.assertIn(
                 "libname analysis xport '" + str(source.source_path) + "';", code
             )
-            self.assertNotIn("libname analysis '" + str(source.source_path.parent), code)
+            self.assertNotIn(
+                "libname analysis '" + str(source.source_path.parent), code
+            )
 
     def test_sas_where_is_rendered_from_python_filter_ast(self) -> None:
         cases = {

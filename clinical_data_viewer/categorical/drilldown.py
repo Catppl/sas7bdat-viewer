@@ -12,12 +12,20 @@ from .models import CategoricalConfig
 
 def _missing_sql(name: str, kind: str, *, missing: bool) -> str:
     column = quote_identifier(name)
-    expression = f"({column} IS NULL OR {column} = '')" if kind == "character" else f"{column} IS NULL"
+    expression = (
+        f"({column} IS NULL OR {column} = '')"
+        if kind == "character"
+        else f"{column} IS NULL"
+    )
     return expression if missing else f"NOT {expression}"
 
 
 def _field(metadata: DatasetMetadata, name: str):
-    return next(variable for variable in metadata.variables if variable.name.casefold() == name.casefold())
+    return next(
+        variable
+        for variable in metadata.variables
+        if variable.name.casefold() == name.casefold()
+    )
 
 
 def _exact_clause(variable, value: object) -> tuple[str, tuple[object, ...]]:
@@ -29,9 +37,13 @@ def _exact_clause(variable, value: object) -> tuple[str, tuple[object, ...]]:
 def _and(*clauses: tuple[str, tuple[object, ...]]) -> tuple[str, tuple[object, ...]]:
     active = [(sql, params) for sql, params in clauses if sql]
     return (
-        " AND ".join(f"({sql})" for sql, _params in active),
-        tuple(value for _sql, params in active for value in params),
-    ) if active else ("", ())
+        (
+            " AND ".join(f"({sql})" for sql, _params in active),
+            tuple(value for _sql, params in active for value in params),
+        )
+        if active
+        else ("", ())
+    )
 
 
 class CategoricalCell:
@@ -51,7 +63,9 @@ class CategoricalCell:
 def lookup_cell(
     result: DatasetHandle, result_source_row: int, column_name: str
 ) -> CategoricalCell | None:
-    with closing(sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+    with closing(
+        sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)
+    ) as connection:
         row = connection.execute(
             "SELECT item_variable, context_json, level_json, treatment_json "
             "FROM categorical_cell_map WHERE result_row = ? AND column_name = ?",
@@ -59,7 +73,12 @@ def lookup_cell(
         ).fetchone()
     if row is None:
         return None
-    return CategoricalCell(row[0], json.loads(row[1]), json.loads(row[2]), json.loads(row[3]) if row[3] is not None else None)
+    return CategoricalCell(
+        row[0],
+        json.loads(row[1]),
+        json.loads(row[2]),
+        json.loads(row[3]) if row[3] is not None else None,
+    )
 
 
 class CategoricalQueryBuilder:
@@ -93,21 +112,25 @@ class CategoricalQueryBuilder:
         target: sqlite3.Connection | None = None
         try:
             target = sqlite3.connect(database)
-            target.execute("CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + definitions + ")")
+            target.execute(
+                "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+                + definitions
+                + ")"
+            )
             source_uri = source.database_path.resolve().as_uri() + "?mode=ro"
             row_count = 0
-            insert = "INSERT INTO dataset VALUES (" + ", ".join(
-                "?" for _ in range(len(variables) + 1)
-            ) + ")"
+            insert = (
+                "INSERT INTO dataset VALUES ("
+                + ", ".join("?" for _ in range(len(variables) + 1))
+                + ")"
+            )
             with closing(sqlite3.connect(source_uri, uri=True)) as input_connection:
                 where = f" WHERE {where_sql}" if where_sql else ""
                 if subject is not None:
                     subject_condition = _missing_sql(
                         subject.name, subject.kind, missing=False
                     )
-                    where += (
-                        " AND " if where else " WHERE "
-                    ) + subject_condition
+                    where += (" AND " if where else " WHERE ") + subject_condition
                     select_sql = (
                         f"SELECT MIN(_source_row), {columns} FROM dataset{where} "
                         f"GROUP BY {columns} ORDER BY {columns}"
@@ -126,8 +149,12 @@ class CategoricalQueryBuilder:
                     row_count += len(rows)
                     if row_count % 10_000 == 0:
                         target.commit()
-            target.execute("CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, total_rows INTEGER, complete INTEGER NOT NULL)")
-            target.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (row_count, row_count))
+            target.execute(
+                "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, total_rows INTEGER, complete INTEGER NOT NULL)"
+            )
+            target.execute(
+                "INSERT INTO cache_info VALUES (?, ?, 1)", (row_count, row_count)
+            )
             target.commit()
             target.close()
             target = None
@@ -160,9 +187,16 @@ def build_cell_filter(
     """Build a source filter for ordinary numerator/denominator drill-down."""
     clauses: list[tuple[str, tuple[object, ...]]] = []
     if denominator and config.denominator.type == "population":
-        clauses.append((config.denominator.population_filter.sql, config.denominator.population_filter.parameters))
+        clauses.append(
+            (
+                config.denominator.population_filter.sql,
+                config.denominator.population_filter.parameters,
+            )
+        )
     else:
-        clauses.append((config.numerator_filter.sql, config.numerator_filter.parameters))
+        clauses.append(
+            (config.numerator_filter.sql, config.numerator_filter.parameters)
+        )
     treatment_name = config.treatment_variable
     if denominator and config.denominator.type == "population":
         treatment_name = (
@@ -195,20 +229,30 @@ def build_n1_cell_filter(
     treatment = _field(metadata, config.treatment_variable)
     subject = _field(metadata, config.subject_id_variable)
     analysis = _field(metadata, config.denominator.analysis_value_variable)
-    match_fields = [treatment, subject, *(_field(metadata, name) for name in cell.context)]
+    match_fields = [
+        treatment,
+        subject,
+        *(_field(metadata, name) for name in cell.context),
+    ]
     joins = " AND ".join(
         f"base.{quote_identifier(field.name)} = post.{quote_identifier(field.name)}"
         for field in match_fields
     )
     base_sql, base_params = _and(
         (config.numerator_filter.sql, config.numerator_filter.parameters),
-        (config.denominator.baseline_filter.sql, config.denominator.baseline_filter.parameters),
+        (
+            config.denominator.baseline_filter.sql,
+            config.denominator.baseline_filter.parameters,
+        ),
         (_missing_sql(analysis.name, analysis.kind, missing=False), ()),
         (_missing_sql(subject.name, subject.kind, missing=False), ()),
     )
     post_sql, post_params = _and(
         (config.numerator_filter.sql, config.numerator_filter.parameters),
-        (config.denominator.postbaseline_filter.sql, config.denominator.postbaseline_filter.parameters),
+        (
+            config.denominator.postbaseline_filter.sql,
+            config.denominator.postbaseline_filter.parameters,
+        ),
         (_missing_sql(analysis.name, analysis.kind, missing=False), ()),
         (_missing_sql(subject.name, subject.kind, missing=False), ()),
     )
@@ -216,7 +260,9 @@ def build_n1_cell_filter(
         "_source_row IN (SELECT post._source_row FROM dataset AS post WHERE "
         f"{post_sql} AND EXISTS (SELECT 1 FROM dataset AS base WHERE {base_sql} AND {joins}))"
     )
-    outer: list[tuple[str, tuple[object, ...]]] = [(eligible, (*post_params, *base_params))]
+    outer: list[tuple[str, tuple[object, ...]]] = [
+        (eligible, (*post_params, *base_params))
+    ]
     if cell.treatment is not None:
         outer.append(_exact_clause(treatment, cell.treatment))
     for name, value in cell.context.items():

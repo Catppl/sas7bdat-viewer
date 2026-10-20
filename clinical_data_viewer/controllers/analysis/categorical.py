@@ -80,7 +80,9 @@ class CategoricalController(AnalysisModuleController):
 
     def refresh_categorical_adsl_sources(self, datasets=None) -> None:
         self._panel.categorical_builder.set_adsl_sources(
-            list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
+            list(datasets)
+            if datasets is not None
+            else self._host.available_sas_dataset_tabs()
         )
 
     def refresh_categorical_sources(self, datasets=None) -> None:
@@ -273,7 +275,11 @@ class CategoricalController(AnalysisModuleController):
             result_tab = self._host.create_analysis_result_tab(handle)
             for directory in {
                 source_handle.temporary_path.parent,
-                *([population_handle.temporary_path.parent] if population_handle else []),
+                *(
+                    [population_handle.temporary_path.parent]
+                    if population_handle
+                    else []
+                ),
             }:
                 self._host.retain_analysis_directory(directory)
             self._categorical_results[result_tab] = CategoricalResultContext(

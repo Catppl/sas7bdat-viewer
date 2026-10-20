@@ -46,9 +46,7 @@ class AppArgumentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires a folder path"):
             startup_request_from_arguments(["--workspace"])
         with self.assertRaisesRegex(ValueError, "Only one"):
-            startup_request_from_arguments(
-                ["--workspace", "one", "--workspace", "two"]
-            )
+            startup_request_from_arguments(["--workspace", "one", "--workspace", "two"])
 
     def test_startup_navigation_mode_uses_workspace_precedence(self) -> None:
         window = Mock()

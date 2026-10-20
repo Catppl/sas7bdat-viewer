@@ -16,11 +16,17 @@ class ListingResultWriter:
         self.database_path = database_path
         self.variables = variables
         reserved = next(
-            (variable.name for variable in variables if is_reserved_listing_name(variable.name)),
+            (
+                variable.name
+                for variable in variables
+                if is_reserved_listing_name(variable.name)
+            ),
             None,
         )
         if reserved is not None:
-            raise ValueError(f'Listing output variable "{reserved}" uses a reserved name.')
+            raise ValueError(
+                f'Listing output variable "{reserved}" uses a reserved name.'
+            )
         self.connection = connect_result_database(database_path)
         definitions = ", ".join(
             f"{quote_identifier(variable.name)} {'REAL' if variable.kind == 'numeric' else 'TEXT'}"

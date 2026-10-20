@@ -23,7 +23,6 @@ from clinical_data_viewer.rule_based.drilldown import (
 )
 from clinical_data_viewer.temp_manager import TempManager
 
-
 SOURCE_VARIABLES = (
     VariableMetadata("USUBJID"),
     VariableMetadata("TRT"),
@@ -62,7 +61,9 @@ def make_handle(
         connection.execute(
             "CREATE TABLE cache_info (cached_rows INTEGER, total_rows INTEGER, complete INTEGER)"
         )
-        connection.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows)))
+        connection.execute(
+            "INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows))
+        )
         connection.commit()
     source_path = root / f"{name}.sas7bdat"
     source_path.touch()
@@ -77,11 +78,13 @@ def make_handle(
 
 
 class RuleBasedEngineTests(unittest.TestCase):
-    def _config(self, source: DatasetHandle, denominator: RuleBasedDenominator) -> RuleBasedConfig:
+    def _config(
+        self, source: DatasetHandle, denominator: RuleBasedDenominator
+    ) -> RuleBasedConfig:
         dataset_filter = FilterEngine(SOURCE_VARIABLES).compile('ITEM = "X"')
-        row_filter = FilterEngine(SOURCE_VARIABLES).compile('AVAL > 0')
+        row_filter = FilterEngine(SOURCE_VARIABLES).compile("AVAL > 0")
         return RuleBasedConfig(
-            (RuleBasedRow("row_001", "Item X", row_filter, 'AVAL > 0', 0),),
+            (RuleBasedRow("row_001", "Item X", row_filter, "AVAL > 0", 0),),
             "TRT",
             "USUBJID",
             dataset_filter,
@@ -106,9 +109,7 @@ class RuleBasedEngineTests(unittest.TestCase):
                     ("S4", "B", "Y", 4.0),
                 ),
             )
-            config = self._config(
-                source, RuleBasedDenominator(type="same_universe")
-            )
+            config = self._config(source, RuleBasedDenominator(type="same_universe"))
             result = RuleBasedEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
                 row = connection.execute(
@@ -167,30 +168,38 @@ class RuleBasedEngineTests(unittest.TestCase):
                     population_filter_text='SAFFL = "Y"',
                 ),
             )
-            population_result = RuleBasedEngine(TempManager(root / "population-temp")).run(
-                source, population_config, adsl
-            )
-            with closing(sqlite3.connect(population_result.database_path)) as connection:
+            population_result = RuleBasedEngine(
+                TempManager(root / "population-temp")
+            ).run(source, population_config, adsl)
+            with closing(
+                sqlite3.connect(population_result.database_path)
+            ) as connection:
                 self.assertEqual(
-                    connection.execute('SELECT "TRT_1", "TRT_2" FROM dataset').fetchone(),
+                    connection.execute(
+                        'SELECT "TRT_1", "TRT_2" FROM dataset'
+                    ).fetchone(),
                     ("1 (50.0)", "1 (100.0)"),
                 )
             nonmissing_config = self._config(
                 source,
-                RuleBasedDenominator(
-                    type="nonmissing", analysis_value_variable="AVAL"
-                ),
+                RuleBasedDenominator(type="nonmissing", analysis_value_variable="AVAL"),
             )
-            nonmissing_result = RuleBasedEngine(TempManager(root / "nonmissing-temp")).run(
-                source, nonmissing_config
-            )
-            with closing(sqlite3.connect(nonmissing_result.database_path)) as connection:
+            nonmissing_result = RuleBasedEngine(
+                TempManager(root / "nonmissing-temp")
+            ).run(source, nonmissing_config)
+            with closing(
+                sqlite3.connect(nonmissing_result.database_path)
+            ) as connection:
                 self.assertEqual(
-                    connection.execute('SELECT "TRT_1", "TRT_2" FROM dataset').fetchone(),
+                    connection.execute(
+                        'SELECT "TRT_1", "TRT_2" FROM dataset'
+                    ).fetchone(),
                     ("1 (100.0)", "1 (100.0)"),
                 )
 
-    def test_population_denominator_can_use_a_different_treatment_variable(self) -> None:
+    def test_population_denominator_can_use_a_different_treatment_variable(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source_variables = (
@@ -217,9 +226,18 @@ class RuleBasedEngineTests(unittest.TestCase):
                 (("S1", 1, "Y"), ("S2", 2, "Y")),
             )
             source_engine = FilterEngine(source_variables)
-            population_filter = FilterEngine(population_variables).compile('SAFFL = "Y"')
+            population_filter = FilterEngine(population_variables).compile(
+                'SAFFL = "Y"'
+            )
             config = RuleBasedConfig(
-                (RuleBasedRow("row_001", "Item X", source_engine.compile('ITEM = "X"'), 'ITEM = "X"'),),
+                (
+                    RuleBasedRow(
+                        "row_001",
+                        "Item X",
+                        source_engine.compile('ITEM = "X"'),
+                        'ITEM = "X"',
+                    ),
+                ),
                 "TRTAN",
                 "USUBJID",
                 source_engine.compile(""),
@@ -236,7 +254,9 @@ class RuleBasedEngineTests(unittest.TestCase):
             )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 self.assertEqual(
-                    connection.execute('SELECT "TRT_1", "TRT_2" FROM dataset').fetchone(),
+                    connection.execute(
+                        'SELECT "TRT_1", "TRT_2" FROM dataset'
+                    ).fetchone(),
                     ("1 (100.0)", "1 (100.0)"),
                 )
             _sql, parameters = build_population_cell_filter(
@@ -276,9 +296,7 @@ class RuleBasedEngineTests(unittest.TestCase):
             population_filter = FilterEngine(ADSL_VARIABLES).compile('SAFFL = "Y"')
             config = self._config(
                 source,
-                RuleBasedDenominator(
-                    "population", population_filter, 'SAFFL = "Y"'
-                ),
+                RuleBasedDenominator("population", population_filter, 'SAFFL = "Y"'),
             )
             row = config.rows[0]
             numerator_sql, numerator_params = build_cell_filter(

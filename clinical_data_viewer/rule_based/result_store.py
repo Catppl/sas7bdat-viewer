@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from ..domain import DatasetHandle, DatasetMetadata, VariableMetadata
@@ -52,7 +52,9 @@ class RuleBasedResultWriter:
         self.item_column = _unique("ITEM", used)
         self.treatment_columns: list[tuple[str | None, str, str]] = []
         for position, (key, _value, label) in enumerate(treatment_levels, start=1):
-            self.treatment_columns.append((key, _unique(f"TRT_{position}", used), label))
+            self.treatment_columns.append(
+                (key, _unique(f"TRT_{position}", used), label)
+            )
         if config.include_total:
             self.treatment_columns.append((None, _unique("TOTAL", used), "Total"))
         self.variables = (
@@ -69,7 +71,9 @@ class RuleBasedResultWriter:
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=NORMAL")
         self.connection.execute(
-            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + definitions + ")"
+            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+            + definitions
+            + ")"
         )
         self.connection.execute(
             "CREATE TABLE rule_based_cell_map ("
@@ -118,7 +122,9 @@ class RuleBasedResultWriter:
             values,
         )
         self.row_count += 1
-        result_row = int(self.connection.execute("SELECT last_insert_rowid()").fetchone()[0])
+        result_row = int(
+            self.connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+        )
         for treatment_key, column, _label in self.treatment_columns:
             if treatment_key is None:
                 freq = numerator.get(TOTAL_KEY, sum(numerator.values()))
@@ -175,14 +181,12 @@ class RuleBasedResultWriter:
                 f"Rule-based Table - {source.metadata.name}",
                 self.row_count,
                 self.variables,
-                display_column_names=tuple(
-                    [
-                        (self.item_column, "Item"),
-                        *(
-                            (column, f"{label} n (%)")
-                            for _key, column, label in self.treatment_columns
-                        ),
-                    ]
+                display_column_names=(
+                    (self.item_column, "Item"),
+                    *(
+                        (column, f"{label} n (%)")
+                        for _key, column, label in self.treatment_columns
+                    ),
                 ),
             ),
             self.row_count,
@@ -225,9 +229,15 @@ class RuleBasedLongResultBuilder:
                 for variable in variables
             )
             target.execute(
-                "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + definitions + ")"
+                "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+                + definitions
+                + ")"
             )
-            with closing(sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            with closing(
+                sqlite3.connect(
+                    result.database_path.resolve().as_uri() + "?mode=ro", uri=True
+                )
+            ) as connection:
                 rows = connection.execute(
                     "SELECT row_id, item, filter_text, indent, treatment_json, freq, denom, pct, "
                     "dataset_filter, denominator_type, count_type, count_variable "
@@ -245,8 +255,16 @@ class RuleBasedLongResultBuilder:
                         row[1],
                         row[2],
                         row[3],
-                        "(Missing)" if json.loads(row[4]) is None else str(json.loads(row[4])),
-                        row[5], row[6], row[7], row[8], row[9], row[10], row[11],
+                        "(Missing)"
+                        if json.loads(row[4]) is None
+                        else str(json.loads(row[4])),
+                        row[5],
+                        row[6],
+                        row[7],
+                        row[8],
+                        row[9],
+                        row[10],
+                        row[11],
                     )
                     for row in rows
                 ],
@@ -254,7 +272,9 @@ class RuleBasedLongResultBuilder:
             target.execute(
                 "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, total_rows INTEGER, complete INTEGER NOT NULL)"
             )
-            target.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows)))
+            target.execute(
+                "INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows))
+            )
             target.commit()
             target.close()
             target = None
@@ -264,8 +284,12 @@ class RuleBasedLongResultBuilder:
                 result.source_path.parent / f"Rule-based Long - {result.metadata.name}",
                 marker,
                 database,
-                DatasetMetadata(f"Rule-based Long - {result.metadata.name}", len(rows), variables),
-                len(rows), True, kind="rule_based_long",
+                DatasetMetadata(
+                    f"Rule-based Long - {result.metadata.name}", len(rows), variables
+                ),
+                len(rows),
+                True,
+                kind="rule_based_long",
                 display_source=f"Rule-based long result from {result.source_path}",
             )
         except BaseException:

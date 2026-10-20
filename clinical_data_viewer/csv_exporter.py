@@ -56,7 +56,9 @@ class CsvExporter:
             ):
                 connection.execute("PRAGMA case_sensitive_like=ON")
                 writer = csv.writer(stream, lineterminator="\n")
-                writer.writerow([*selected, "HIGHLIGHT"] if include_highlights else selected)
+                writer.writerow(
+                    [*selected, "HIGHLIGHT"] if include_highlights else selected
+                )
                 cursor = connection.execute(sql, compiled_filter.parameters)
                 while True:
                     rows = cursor.fetchmany(2_000)

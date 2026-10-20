@@ -31,7 +31,13 @@ def value(xml: ET.Element, cell_ref: str) -> str | None:
         return None
     inline = cell.find("x:is/x:t", NS)
     number = cell.find("x:v", NS)
-    return inline.text if inline is not None else number.text if number is not None else None
+    return (
+        inline.text
+        if inline is not None
+        else number.text
+        if number is not None
+        else None
+    )
 
 
 def fill_color(book: ZipFile, data: ET.Element, cell_ref: str) -> str:
@@ -56,7 +62,7 @@ class ExcelExporterTests(unittest.TestCase):
             )
             connection.executemany(
                 'INSERT INTO dataset("NAME", "GROUP", "AGE", "ADT", "DIFF", "WARN") '
-                'VALUES (?, ?, ?, ?, ?, ?)',
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 [
                     ("=formula", "Y", 45, 24345, '["AGE"]', 0),
                     ("second", "N", 50, 24346, "[]", 0),
@@ -111,7 +117,9 @@ class ExcelExporterTests(unittest.TestCase):
             self.assertEqual(value(info, "B6"), "2")
             self.assertEqual(value(metadata, "F5"), "Yes")
             self.assertEqual(value(metadata, "F6"), "No")
-            self.assertEqual([value(data, ref) for ref in ("A1", "B1", "C1")], ["NAME", "AGE", "ADT"])
+            self.assertEqual(
+                [value(data, ref) for ref in ("A1", "B1", "C1")], ["NAME", "AGE", "ADT"]
+            )
             self.assertEqual(value(data, "A2"), "third")
             self.assertEqual(value(data, "B2"), "60.25")
             self.assertEqual(value(data, "A3"), "=formula")

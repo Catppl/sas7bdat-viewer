@@ -95,7 +95,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 (CategoricalItem("RACE"),),
                 "TRT",
                 "USUBJID",
-                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
             )
             result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
@@ -122,7 +124,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 (CategoricalItem("RACE", include_missing_level=True),),
                 "TRT",
                 "USUBJID",
-                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
             )
             result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
@@ -159,7 +163,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 "USUBJID",
                 denominator=DenominatorConfig("population"),
             )
-            result = CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+            result = CategoricalEngine(TempManager(root / "temp")).run(
+                source, config, adsl
+            )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 row = connection.execute(
                     'SELECT _source_row, "TRT_2" FROM dataset WHERE "ITEM_LEVEL" = ?',
@@ -202,7 +208,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 population_variables,
                 (("S1", "A", "Y"), ("S2", "B", "Y")),
             )
-            population_filter = FilterEngine(population_variables).compile('SAFFL = "Y"')
+            population_filter = FilterEngine(population_variables).compile(
+                'SAFFL = "Y"'
+            )
             config = CategoricalConfig(
                 (CategoricalItem("RACE"),),
                 "TRTA",
@@ -213,7 +221,9 @@ class CategoricalEngineTests(unittest.TestCase):
                     population_treatment_variable="TRT01A",
                 ),
             )
-            result = CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+            result = CategoricalEngine(TempManager(root / "temp")).run(
+                source, config, adsl
+            )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 rows = connection.execute(
                     'SELECT "TRT_1", "TRT_2" FROM dataset WHERE "ITEM_LEVEL" = ?',
@@ -228,7 +238,9 @@ class CategoricalEngineTests(unittest.TestCase):
             denominator_query = CategoricalQueryBuilder(
                 TempManager(root / "denominator-query")
             ).run(adsl, denominator_where, denominator_params, "denominator")
-            with closing(sqlite3.connect(denominator_query.database_path)) as connection:
+            with closing(
+                sqlite3.connect(denominator_query.database_path)
+            ) as connection:
                 self.assertEqual(
                     connection.execute("SELECT count(*) FROM dataset").fetchone()[0],
                     1,
@@ -247,7 +259,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 (CategoricalItem("RACE", label="Race category"),),
                 "TRT",
                 "USUBJID",
-                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
             )
             result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
@@ -273,7 +287,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 (CategoricalItem("RACE"),),
                 "TRT",
                 "USUBJID",
-                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
             )
             result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
@@ -341,7 +357,9 @@ class CategoricalEngineTests(unittest.TestCase):
                     "population", population_treatment_variable="TRT01A"
                 ),
             )
-            result = CategoricalEngine(TempManager(root / "temp")).run(source, config, adsl)
+            result = CategoricalEngine(TempManager(root / "temp")).run(
+                source, config, adsl
+            )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 row = connection.execute(
                     'SELECT "TRT_1" FROM dataset WHERE "ITEM_LEVEL" = ?',
@@ -391,7 +409,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 (CategoricalItem("RACE"),),
                 "TRT",
                 "USUBJID",
-                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
             )
             with self.assertRaises(MissingTreatmentError):
                 CategoricalEngine(TempManager(root / "temp")).run(source, config)
@@ -464,7 +484,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 self.assertEqual(
                     connection.execute("SELECT count(*) FROM dataset").fetchone()[0], 1
                 )
-            with closing(sqlite3.connect(denominator_query.database_path)) as connection:
+            with closing(
+                sqlite3.connect(denominator_query.database_path)
+            ) as connection:
                 self.assertEqual(
                     connection.execute("SELECT count(*) FROM dataset").fetchone()[0], 2
                 )
@@ -500,7 +522,9 @@ class CategoricalEngineTests(unittest.TestCase):
                 "TRT",
                 "USUBJID",
                 denominator=DenominatorConfig(
-                    "population", population_filter=population_filter, population_filter_text='SAFFL = "Y"'
+                    "population",
+                    population_filter=population_filter,
+                    population_filter_text='SAFFL = "Y"',
                 ),
             )
             result = CategoricalEngine(TempManager(root / "temp")).run(
@@ -511,8 +535,12 @@ class CategoricalEngineTests(unittest.TestCase):
                 dict(result.metadata.display_column_names)["TRT_1"], "A n (%)"
             )
             with closing(sqlite3.connect(result.database_path)) as connection:
-                columns = [row[1] for row in connection.execute("PRAGMA table_info(dataset)")]
-                rows = connection.execute('SELECT "ITEM_LEVEL", "TRT_1", "TRT_2", "TOTAL" FROM dataset').fetchall()
+                columns = [
+                    row[1] for row in connection.execute("PRAGMA table_info(dataset)")
+                ]
+                rows = connection.execute(
+                    'SELECT "ITEM_LEVEL", "TRT_1", "TRT_2", "TOTAL" FROM dataset'
+                ).fetchall()
                 long_row = connection.execute(
                     "SELECT freq, denom, pct FROM categorical_long "
                     "WHERE level_json = ? AND treatment_json = ?",
@@ -521,8 +549,14 @@ class CategoricalEngineTests(unittest.TestCase):
             self.assertIn("TRT_1", columns)
             self.assertEqual(long_row, (1, 2, 50.0))
             self.assertIn(("RACE", "", "", ""), rows)
-            self.assertIn(("\u00a0\u00a0\u00a0\u00a0WHITE", "1 (50.0)", "1 (100.0)", "2 (66.7)"), rows)
-            self.assertIn(("\u00a0\u00a0\u00a0\u00a0BLACK", "1 (50.0)", "0 (0.0)", "1 (33.3)"), rows)
+            self.assertIn(
+                ("\u00a0\u00a0\u00a0\u00a0WHITE", "1 (50.0)", "1 (100.0)", "2 (66.7)"),
+                rows,
+            )
+            self.assertIn(
+                ("\u00a0\u00a0\u00a0\u00a0BLACK", "1 (50.0)", "0 (0.0)", "1 (33.3)"),
+                rows,
+            )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 result_row = connection.execute(
                     'SELECT _source_row FROM dataset WHERE "ITEM_LEVEL" = ?',
@@ -564,7 +598,9 @@ class CategoricalEngineTests(unittest.TestCase):
             denominator_query = CategoricalQueryBuilder(
                 TempManager(root / "denominator-queries")
             ).run(adsl, denominator_where, denominator_params, "Denominator")
-            with closing(sqlite3.connect(denominator_query.database_path)) as connection:
+            with closing(
+                sqlite3.connect(denominator_query.database_path)
+            ) as connection:
                 self.assertEqual(
                     connection.execute("SELECT count(*) FROM dataset").fetchone()[0], 2
                 )
@@ -582,7 +618,16 @@ class CategoricalEngineTests(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(
                 long_columns,
-                ["_source_row", "ITEM", "ITEM_LABEL", "LEVEL", "TRT", "FREQ", "DENOM", "PCT"],
+                [
+                    "_source_row",
+                    "ITEM",
+                    "ITEM_LABEL",
+                    "LEVEL",
+                    "TRT",
+                    "FREQ",
+                    "DENOM",
+                    "PCT",
+                ],
             )
             self.assertEqual(long_values, ("RACE", "WHITE", "A", 1.0, 2.0, 50.0))
 
@@ -607,11 +652,15 @@ class CategoricalEngineTests(unittest.TestCase):
                 "USUBJID",
                 source_filter=source_filter,
                 source_filter_text='ABLFL = "Y"',
-                denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
             )
             result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
-                rows = connection.execute('SELECT "ITEM_LEVEL", "TRT_1" FROM dataset').fetchall()
+                rows = connection.execute(
+                    'SELECT "ITEM_LEVEL", "TRT_1" FROM dataset'
+                ).fetchall()
             self.assertIn(("\u00a0\u00a0\u00a0\u00a0WHITE", "2 (100.0)"), rows)
             self.assertIn(("\u00a0\u00a0\u00a0\u00a0(Missing)", "1 (50.0)"), rows)
 

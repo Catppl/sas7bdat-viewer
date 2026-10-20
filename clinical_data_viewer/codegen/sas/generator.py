@@ -124,10 +124,18 @@ class SasProcMeansGenerator:
                     "index": index,
                     "name": name,
                     "label": variables[name]["label"],
-                    "work_stats": _work_member(f"stat_{analysis_token}", used_work_members),
-                    "work_subjects": _work_member(f"subj_{analysis_token}", used_work_members),
-                    "work_long": _work_member(f"out_{analysis_token}", used_work_members),
-                    "work_decimals": _work_member(f"dec_{analysis_token}", used_work_members),
+                    "work_stats": _work_member(
+                        f"stat_{analysis_token}", used_work_members
+                    ),
+                    "work_subjects": _work_member(
+                        f"subj_{analysis_token}", used_work_members
+                    ),
+                    "work_long": _work_member(
+                        f"out_{analysis_token}", used_work_members
+                    ),
+                    "work_decimals": _work_member(
+                        f"dec_{analysis_token}", used_work_members
+                    ),
                 }
             )
         offsets = context["display"]["decimal_offsets"]

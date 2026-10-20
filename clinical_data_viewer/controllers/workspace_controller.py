@@ -62,7 +62,9 @@ class WorkspaceController:
 
     def register_favorites_menu(self, menu: QMenu) -> None:
         self._favorite_menus.append(menu)
-        menu.aboutToShow.connect(lambda current=menu: self.populate_favorites_menu(current))
+        menu.aboutToShow.connect(
+            lambda current=menu: self.populate_favorites_menu(current)
+        )
         self.populate_favorites_menu(menu)
 
     def populate_favorites_menu(self, menu: QMenu) -> None:

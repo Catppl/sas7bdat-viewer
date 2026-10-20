@@ -219,9 +219,7 @@ class ProcMeansController(AnalysisModuleController):
             self._parent_widget(),
         ).exec()
 
-    def generate_proc_means_r_code(
-        self, selection: ProcMeansBuilderSelection
-    ) -> None:
+    def generate_proc_means_r_code(self, selection: ProcMeansBuilderSelection) -> None:
         context = self._proc_means_context(selection, "R Code Generator")
         if context is None:
             return
@@ -271,7 +269,9 @@ class ProcMeansController(AnalysisModuleController):
         def failed(message: str, details: str) -> None:
             self._proc_means_input_tabs.clear()
             builder.set_busy(False, "PROC MEANS failed.")
-            self._host.show_analysis_error("PROC MEANS Builder Failed", message, details)
+            self._host.show_analysis_error(
+                "PROC MEANS Builder Failed", message, details
+            )
 
         self._host.submit_analysis_task(
             builder,

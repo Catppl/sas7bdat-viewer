@@ -75,7 +75,9 @@ class AeTableController(AnalysisModuleController):
 
     def refresh_ae_table_adsl_sources(self, datasets=None) -> None:
         self._panel.ae_table_builder.set_adsl_sources(
-            list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
+            list(datasets)
+            if datasets is not None
+            else self._host.available_sas_dataset_tabs()
         )
 
     def refresh_ae_table_sources(self, datasets=None) -> None:
@@ -221,7 +223,11 @@ class AeTableController(AnalysisModuleController):
             result_tab = self._host.create_analysis_result_tab(handle)
             for directory in {
                 source_handle.temporary_path.parent,
-                *([population_handle.temporary_path.parent] if population_handle else []),
+                *(
+                    [population_handle.temporary_path.parent]
+                    if population_handle
+                    else []
+                ),
             }:
                 self._host.retain_analysis_directory(directory)
             self._ae_table_results[result_tab] = AeTableResultContext(
@@ -315,7 +321,9 @@ class AeTableController(AnalysisModuleController):
                 target.metadata, context.config, cell, denominator=is_denominator
             )
         except (KeyError, ValueError, StopIteration) as error:
-            QMessageBox.warning(self._parent_widget(), "AE Table Drill-down", str(error))
+            QMessageBox.warning(
+                self._parent_widget(), "AE Table Drill-down", str(error)
+            )
             return
         mode = (
             "Denominator Subjects"

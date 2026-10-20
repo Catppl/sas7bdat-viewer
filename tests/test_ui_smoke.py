@@ -282,19 +282,18 @@ class UiSmokeTests(unittest.TestCase):
 
         from PySide6.QtWidgets import QApplication
 
+        from clinical_data_viewer.controllers.analysis import ProcMeansResultContext
+        from clinical_data_viewer.data_store import DataStore
         from clinical_data_viewer.domain import (
             DatasetHandle,
             DatasetMetadata,
             VariableMetadata,
         )
-        from clinical_data_viewer.data_store import DataStore
-        from clinical_data_viewer.filter_engine import FilterEngine
-        from clinical_data_viewer.filter_engine import CompiledFilter
+        from clinical_data_viewer.filter_engine import CompiledFilter, FilterEngine
         from clinical_data_viewer.filter_history import FilterHistory
         from clinical_data_viewer.proc_means import ProcMeansConfig, ProcMeansEngine
         from clinical_data_viewer.settings import AppSettings
         from clinical_data_viewer.temp_manager import TempManager
-        from clinical_data_viewer.controllers.analysis import ProcMeansResultContext
         from clinical_data_viewer.ui.main_window import MainWindow
 
         application = QApplication.instance() or QApplication([])
@@ -305,7 +304,7 @@ class UiSmokeTests(unittest.TestCase):
             source_db = source_dir / "dataset.sqlite"
             with sqlite3.connect(source_db) as connection:
                 connection.execute(
-                    'CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, '
+                    "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
                     '"USUBJID" TEXT, "PARAMCD" TEXT, "TRT01AN" REAL, '
                     '"AVAL" REAL, "ANL01FL" TEXT)'
                 )
@@ -382,7 +381,7 @@ class UiSmokeTests(unittest.TestCase):
             def submit(owner, function, completed, failed):
                 try:
                     value = function(SimpleNamespace(report=lambda _message: None))
-                except BaseException as error:  # pragma: no cover - assertion below
+                except BaseException as error:  # noqa: BLE001  # pragma: no cover
                     failed(str(error), "")
                     submitted.append(error)
                 else:
@@ -402,17 +401,21 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(
                 query_tab.current_where_text(),
                 '(ANL01FL = "Y") and PARAMCD = "ALB" and '
-                'TRT01AN = 1 and not missing(AVAL)',
+                "TRT01AN = 1 and not missing(AVAL)",
             )
             self.assertEqual(query_tab.handle.metadata.row_count, 2)
 
             # The context-menu action and double-click share this signal path.
             result_tab.table._context_index = index
-            self.assertTrue(result_tab.table._context_variable_is_proc_means_statistic())
+            self.assertTrue(
+                result_tab.table._context_variable_is_proc_means_statistic()
+            )
             result_tab.table._context_index = result_tab.model.index(
                 0, result_tab.visible_columns.index("PARAMCD")
             )
-            self.assertFalse(result_tab.table._context_variable_is_proc_means_statistic())
+            self.assertFalse(
+                result_tab.table._context_variable_is_proc_means_statistic()
+            )
             result_tab.table._context_index = index
             result_tab.table.drilldown_requested.emit(index)
 
@@ -1341,10 +1344,9 @@ class UiSmokeTests(unittest.TestCase):
             requested_filters: list[str] = []
             numeric_tab.column_filter_requested.connect(requested_filters.append)
             filter_button = numeric_tab.filter_header._button_rect(2)
-            section_right = (
-                numeric_tab.filter_header.sectionViewportPosition(2)
-                + numeric_tab.filter_header.sectionSize(2)
-            )
+            section_right = numeric_tab.filter_header.sectionViewportPosition(
+                2
+            ) + numeric_tab.filter_header.sectionSize(2)
             self.assertEqual(
                 section_right - filter_button.right() - 1,
                 numeric_tab.filter_header.RESIZE_GUTTER_WIDTH,

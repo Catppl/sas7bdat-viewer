@@ -47,9 +47,7 @@ def format_history_timestamp(
     total_minutes = int(offset.total_seconds() // 60)
     sign = "+" if total_minutes >= 0 else "-"
     absolute_minutes = abs(total_minutes)
-    offset_text = (
-        f"UTC{sign}{absolute_minutes // 60:02d}:{absolute_minutes % 60:02d}"
-    )
+    offset_text = f"UTC{sign}{absolute_minutes // 60:02d}:{absolute_minutes % 60:02d}"
     zone_name = localized.tzname()
     zone_text = f" {zone_name}" if zone_name else ""
     return f"{display}{zone_text} ({offset_text})"

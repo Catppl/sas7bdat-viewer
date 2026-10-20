@@ -20,7 +20,9 @@ class FilterHeaderView(QHeaderView):
         self.viewport().update()
 
     def _button_rect(self, section: int) -> QRect:
-        section_right = self.sectionViewportPosition(section) + self.sectionSize(section)
+        section_right = self.sectionViewportPosition(section) + self.sectionSize(
+            section
+        )
         return QRect(
             section_right - self.RESIZE_GUTTER_WIDTH - self.FILTER_BUTTON_WIDTH,
             0,
@@ -78,10 +80,7 @@ class FilterHeaderView(QHeaderView):
         else:
             self.style().drawControl(QStyle.CE_Header, option, painter, self)
         button = QRect(
-            rect.right()
-            - self.RESIZE_GUTTER_WIDTH
-            - self.FILTER_BUTTON_WIDTH
-            + 1,
+            rect.right() - self.RESIZE_GUTTER_WIDTH - self.FILTER_BUTTON_WIDTH + 1,
             rect.top(),
             self.FILTER_BUTTON_WIDTH,
             rect.height(),

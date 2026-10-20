@@ -304,7 +304,7 @@ class ProcMeansBuilderTests(unittest.TestCase):
             self.assertEqual(
                 mean_where,
                 '(ANL01FL = "Y") and PARAMCD = "ALB" and AVISITN = 1 '
-                'and TRT01AN = 1 and not missing(AVAL)',
+                "and TRT01AN = 1 and not missing(AVAL)",
             )
             query = ProcMeansQueryBuilder(manager).run(
                 source, mean_filter, "Query: Mean: 1.55"

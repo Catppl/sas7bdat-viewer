@@ -69,7 +69,9 @@ class WorkspacePanel(QWidget):
 
         workspace_row = QHBoxLayout()
         self.workspace_selector = QComboBox()
-        self.workspace_selector.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.workspace_selector.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
         self.workspace_selector.setMinimumContentsLength(12)
         self.workspace_selector.currentIndexChanged.connect(self._workspace_changed)
         workspace_row.addWidget(self.workspace_selector, 1)
@@ -147,12 +149,16 @@ class WorkspacePanel(QWidget):
         self.workspace_selector.addItem("Choose workspace…", None)
         favorite_keys = {item.path_key for item in favorites}
         if self._root is not None and current_key not in favorite_keys:
-            self.workspace_selector.addItem(self._root.name or str(self._root), self._root)
+            self.workspace_selector.addItem(
+                self._root.name or str(self._root), self._root
+            )
             self.workspace_selector.setItemData(1, str(self._root), Qt.ToolTipRole)
         for favorite in favorites:
             self.workspace_selector.addItem(favorite.label, favorite.path)
             index = self.workspace_selector.count() - 1
-            self.workspace_selector.setItemData(index, str(favorite.path), Qt.ToolTipRole)
+            self.workspace_selector.setItemData(
+                index, str(favorite.path), Qt.ToolTipRole
+            )
         target = 0
         if current_key is not None:
             for index in range(1, self.workspace_selector.count()):
@@ -232,7 +238,8 @@ class WorkspacePanel(QWidget):
             return
         path = self.workspace_selector.itemData(index)
         if path is not None and (
-            self._root is None or workspace_path_key(path) != workspace_path_key(self._root)
+            self._root is None
+            or workspace_path_key(path) != workspace_path_key(self._root)
         ):
             self.workspace_selected.emit(Path(path))
 
@@ -271,7 +278,9 @@ class WorkspacePanel(QWidget):
         favorite = None
         if self._root is not None:
             key = workspace_path_key(self._root)
-            favorite = next((item for item in self._favorites if item.path_key == key), None)
+            favorite = next(
+                (item for item in self._favorites if item.path_key == key), None
+            )
         self.favorite_button.setText("★" if favorite else "☆")
         self.favorite_button.setToolTip(
             "Remove current workspace from Favorites"

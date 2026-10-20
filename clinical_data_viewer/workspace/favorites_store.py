@@ -50,12 +50,14 @@ class WorkspaceFavoritesStore:
             ).fetchall()
         favorites: list[WorkspaceFavorite] = []
         for path_key, path, label, updated_at in rows:
-            if not all(isinstance(value, str) for value in (path_key, path, label, updated_at)):
+            if not all(
+                isinstance(value, str) for value in (path_key, path, label, updated_at)
+            ):
                 continue
-            favorites.append(
-                WorkspaceFavorite(path_key, Path(path), label, updated_at)
-            )
-        favorites.sort(key=lambda item: (item.label.casefold(), str(item.path).casefold()))
+            favorites.append(WorkspaceFavorite(path_key, Path(path), label, updated_at))
+        favorites.sort(
+            key=lambda item: (item.label.casefold(), str(item.path).casefold())
+        )
         return tuple(favorites)
 
     def upsert_favorite(self, path: Path, label: str = "") -> WorkspaceFavorite:

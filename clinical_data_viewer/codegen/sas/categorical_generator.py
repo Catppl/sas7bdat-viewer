@@ -155,12 +155,18 @@ class SasCategoricalGenerator:
 
     def _prepare(self, configuration: Mapping[str, object]) -> dict[str, object]:
         if configuration.get("type") != "categorical_table":
-            raise ValueError("The configuration is not a Categorical Table configuration.")
+            raise ValueError(
+                "The configuration is not a Categorical Table configuration."
+            )
         if configuration.get("version") != 1:
-            raise ValueError("SAS generation requires Categorical Table configuration v1.")
+            raise ValueError(
+                "SAS generation requires Categorical Table configuration v1."
+            )
         missing = [name for name in _REQUIRED_TOP_LEVEL if name not in configuration]
         if missing:
-            raise ValueError("Categorical configuration is missing: " + ", ".join(missing))
+            raise ValueError(
+                "Categorical configuration is missing: " + ", ".join(missing)
+            )
 
         source = _input(configuration["input"], "input")
         variables = _mapping(configuration["variables"], "variables")
@@ -177,7 +183,9 @@ class SasCategoricalGenerator:
             length = metadata_block.get("length")
             variable_lengths[str(name).casefold()] = (
                 min(length, 32767)
-                if isinstance(length, int) and not isinstance(length, bool) and length > 0
+                if isinstance(length, int)
+                and not isinstance(length, bool)
+                and length > 0
                 else 200
             )
 
@@ -214,7 +222,9 @@ class SasCategoricalGenerator:
                 raise ValueError("Each treatment level requires value and label.")
             value = level["value"]
             if value is None:
-                raise ValueError("Resolved treatment levels cannot contain missing values.")
+                raise ValueError(
+                    "Resolved treatment levels cannot contain missing values."
+                )
             key = repr(value)
             if key in seen_levels:
                 raise ValueError("Resolved treatment levels must be unique.")
@@ -263,18 +273,29 @@ class SasCategoricalGenerator:
             "percent_method": "freq_divided_by_denom_times_100",
             "total_method": "recompute_from_analysis_universe",
         }
-        if any(calculation.get(key) != value for key, value in expected_calculation.items()):
+        if any(
+            calculation.get(key) != value for key, value in expected_calculation.items()
+        ):
             raise ValueError("Unsupported Categorical calculation contract.")
 
         display = _mapping(configuration["display"], "display")
         digits = display.get("percent_digits")
-        if isinstance(digits, bool) or not isinstance(digits, int) or not 0 <= digits <= 4:
-            raise ValueError("Categorical percent_digits must be an integer from 0 to 4.")
+        if (
+            isinstance(digits, bool)
+            or not isinstance(digits, int)
+            or not 0 <= digits <= 4
+        ):
+            raise ValueError(
+                "Categorical percent_digits must be an integer from 0 to 4."
+            )
         if display.get("rounding") != "half_up":
             raise ValueError("Categorical display rounding must be 'half_up'.")
         if display.get("zero_denominator_display") != "0 (—)":
             raise ValueError("Unsupported Categorical zero denominator display.")
-        if display.get("level_indent_spaces") != 4 or display.get("header_rows") is not True:
+        if (
+            display.get("level_indent_spaces") != 4
+            or display.get("header_rows") is not True
+        ):
             raise ValueError("Unsupported Categorical row display contract.")
 
         output = _mapping(configuration["output"], "output")
@@ -327,7 +348,9 @@ class SasCategoricalGenerator:
             "nonmissing",
             "baseline_postbaseline",
         }:
-            raise ValueError(f"Unsupported Categorical denominator: {denominator_type!r}.")
+            raise ValueError(
+                f"Unsupported Categorical denominator: {denominator_type!r}."
+            )
         expected_subject_missing = (
             "exclude_for_eligibility"
             if denominator_type == "baseline_postbaseline"
@@ -346,8 +369,12 @@ class SasCategoricalGenerator:
         denominator_treatment = sas_name(variable_names[treatment_name.casefold()])
         denominator_subject = subject
         if denominator_type == "population":
-            population = _mapping(denominator.get("population"), "denominator.population")
-            population_input = _input(population.get("input"), "denominator.population.input")
+            population = _mapping(
+                denominator.get("population"), "denominator.population"
+            )
+            population_input = _input(
+                population.get("input"), "denominator.population.input"
+            )
             population_variables = _mapping(
                 population.get("variables"), "denominator.population.variables"
             )
@@ -377,8 +404,12 @@ class SasCategoricalGenerator:
                 "input": population_input,
                 "library": str(sas_target.get("population_library")),
                 "reference": population_reference,
-                "filter": _filter(population.get("filter"), "denominator.population.filter"),
-                "treatment": sas_name(population_names[population_treatment.casefold()]),
+                "filter": _filter(
+                    population.get("filter"), "denominator.population.filter"
+                ),
+                "treatment": sas_name(
+                    population_names[population_treatment.casefold()]
+                ),
                 "subject": sas_name(population_names[subject_name.casefold()]),
             }
             denominator_types = population_types
@@ -400,7 +431,9 @@ class SasCategoricalGenerator:
             analysis_name = str(denominator.get("analysis_value_variable") or "")
             if analysis_name.casefold() not in variable_types:
                 raise ValueError("n1 analysis value variable does not exist.")
-            eligibility = _mapping(denominator.get("eligibility"), "denominator.eligibility")
+            eligibility = _mapping(
+                denominator.get("eligibility"), "denominator.eligibility"
+            )
             expected_eligibility = {
                 "base_filter": "numerator.filter",
                 "match_variables": "treatment_subject_and_item_context",
@@ -409,13 +442,19 @@ class SasCategoricalGenerator:
                 "numerator_source": "eligible_postbaseline_records",
                 "denominator_source": "eligible_postbaseline_records",
             }
-            if any(eligibility.get(key) != value for key, value in expected_eligibility.items()):
+            if any(
+                eligibility.get(key) != value
+                for key, value in expected_eligibility.items()
+            ):
                 raise ValueError("Unsupported Categorical n1 eligibility contract.")
             denominator_context.update(
                 {
-                    "analysis_value": sas_name(variable_names[analysis_name.casefold()]),
+                    "analysis_value": sas_name(
+                        variable_names[analysis_name.casefold()]
+                    ),
                     "baseline_filter": _filter(
-                        denominator.get("baseline_filter"), "denominator.baseline_filter"
+                        denominator.get("baseline_filter"),
+                        "denominator.baseline_filter",
                     ),
                     "postbaseline_filter": _filter(
                         denominator.get("postbaseline_filter"),
@@ -435,7 +474,9 @@ class SasCategoricalGenerator:
             variable_name = str(item.get("variable") or "")
             folded = variable_name.casefold()
             if folded not in variable_types:
-                raise ValueError(f"Categorical item variable does not exist: {variable_name}.")
+                raise ValueError(
+                    f"Categorical item variable does not exist: {variable_name}."
+                )
             if folded in seen_items:
                 raise ValueError("Categorical item variables must be unique.")
             seen_items.add(folded)
@@ -460,7 +501,9 @@ class SasCategoricalGenerator:
                 context_name = str(context_name_value)
                 context_folded = context_name.casefold()
                 if context_folded not in variable_types:
-                    raise ValueError(f"Context variable does not exist: {context_name}.")
+                    raise ValueError(
+                        f"Context variable does not exist: {context_name}."
+                    )
                 if context_folded in seen_contexts:
                     raise ValueError("Item context variables must be unique.")
                 if denominator_type == "population":
@@ -468,7 +511,10 @@ class SasCategoricalGenerator:
                         raise ValueError(
                             f"Population context variable does not exist: {context_name}."
                         )
-                    if denominator_types[context_folded] != variable_types[context_folded]:
+                    if (
+                        denominator_types[context_folded]
+                        != variable_types[context_folded]
+                    ):
                         raise ValueError(
                             f"Population context variable type differs: {context_name}."
                         )
@@ -549,7 +595,9 @@ class SasCategoricalGenerator:
                 **context
             )
         except (KeyError, TypeError, TemplateError) as error:
-            raise ValueError(f"Unable to render the Categorical SAS template: {error}") from error
+            raise ValueError(
+                f"Unable to render the Categorical SAS template: {error}"
+            ) from error
 
 
 __all__ = ["SasCategoricalGenerator"]

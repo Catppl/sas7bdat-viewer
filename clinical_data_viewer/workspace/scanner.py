@@ -26,7 +26,9 @@ def scan_workspace(
     try:
         iterator = os.scandir(directory)
     except PermissionError as error:
-        raise PermissionError(f"Workspace folder is not readable: {directory}") from error
+        raise PermissionError(
+            f"Workspace folder is not readable: {directory}"
+        ) from error
 
     with iterator:
         for item in iterator:

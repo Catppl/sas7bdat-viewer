@@ -292,8 +292,7 @@ def infer_length(
         elif name in {"CATS", "CATX"}:
             value_arguments = arguments[1:] if name == "CATX" else arguments
             length = sum(
-                _display_length(argument, metadata)
-                for argument in value_arguments
+                _display_length(argument, metadata) for argument in value_arguments
             )
             if name == "CATX" and arguments:
                 length += _display_length(arguments[0], metadata)

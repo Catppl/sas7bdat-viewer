@@ -80,7 +80,9 @@ class RuleBasedController(AnalysisModuleController):
         self, datasets: Iterable[tuple[DatasetTab, str]] | None = None
     ) -> None:
         self._panel.rule_based_builder.set_adsl_sources(
-            list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
+            list(datasets)
+            if datasets is not None
+            else self._host.available_sas_dataset_tabs()
         )
 
     def refresh_rule_based_sources(self, datasets=None) -> None:
@@ -235,7 +237,11 @@ class RuleBasedController(AnalysisModuleController):
             result_tab = self._host.create_analysis_result_tab(handle)
             for directory in {
                 source_handle.temporary_path.parent,
-                *([population_handle.temporary_path.parent] if population_handle else []),
+                *(
+                    [population_handle.temporary_path.parent]
+                    if population_handle
+                    else []
+                ),
             }:
                 self._host.retain_analysis_directory(directory)
             self._rule_based_results[result_tab] = RuleBasedResultContext(
@@ -249,7 +255,9 @@ class RuleBasedController(AnalysisModuleController):
             if message.startswith("Missing treatment values"):
                 QMessageBox.warning(self._parent_widget(), "Rule-based Table", message)
             else:
-                self._host.show_analysis_error("Rule-based Table Failed", message, details)
+                self._host.show_analysis_error(
+                    "Rule-based Table Failed", message, details
+                )
 
         self._host.submit_analysis_task(
             builder,
@@ -319,7 +327,11 @@ class RuleBasedController(AnalysisModuleController):
         if cell is None:
             return
         row = next(
-            (candidate for candidate in context.config.rows if candidate.row_id == cell.row_id),
+            (
+                candidate
+                for candidate in context.config.rows
+                if candidate.row_id == cell.row_id
+            ),
             None,
         )
         if row is None:

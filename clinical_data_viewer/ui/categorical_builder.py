@@ -136,7 +136,9 @@ class CategoricalItemEditor(QWidget):
                     config.level_order,
                 )
             self._configs = configs
-            current = self.items.currentItem().text() if self.items.currentItem() else ""
+            current = (
+                self.items.currentItem().text() if self.items.currentItem() else ""
+            )
             self.items.clear()
             self.items.addItems(self._configs)
             if current:
@@ -181,7 +183,9 @@ class CategoricalItemEditor(QWidget):
             )
             return
         if variable.name not in self._configs:
-            self._configs[variable.name] = CategoricalItem(variable.name, variable.label)
+            self._configs[variable.name] = CategoricalItem(
+                variable.name, variable.label
+            )
             self.items.addItem(variable.name)
             self.items.setCurrentRow(self.items.count() - 1)
         self.editor.clear()
@@ -294,9 +298,7 @@ class CategoricalBuilder(QWidget):
         layout.addWidget(QLabel("Numerator WHERE"))
         self.numerator_where = QPlainTextEdit()
         self.numerator_where.setObjectName("categoricalNumeratorWhere")
-        self.numerator_where.setPlaceholderText(
-            'e.g. TRTEMFL = "Y" and AOCC01FL = "Y"'
-        )
+        self.numerator_where.setPlaceholderText('e.g. TRTEMFL = "Y" and AOCC01FL = "Y"')
         self.numerator_where.setMaximumHeight(78)
         self.numerator_where.textChanged.connect(self._numerator_where_changed)
         layout.addWidget(self.numerator_where)
@@ -308,7 +310,9 @@ class CategoricalBuilder(QWidget):
         self.denominator_type = QComboBox()
         self.denominator_type.addItem("Population N (ADSL)", "population")
         self.denominator_type.addItem("Non-missing N", "nonmissing")
-        self.denominator_type.addItem("Baseline + Postbaseline n1", "baseline_postbaseline")
+        self.denominator_type.addItem(
+            "Baseline + Postbaseline n1", "baseline_postbaseline"
+        )
         self.denominator_type.currentIndexChanged.connect(self._sync_denominator_page)
         type_row.addWidget(self.denominator_type, 1)
         denominator_layout.addLayout(type_row)
@@ -407,12 +411,16 @@ class CategoricalBuilder(QWidget):
                     if index >= 0:
                         combo.setCurrentIndex(index)
             removed.extend(
-                self.items.set_metadata(metadata, preserve=previous_metadata is not None)
+                self.items.set_metadata(
+                    metadata, preserve=previous_metadata is not None
+                )
             )
             self._population_treatment_user_selected = False
             self._refresh_population_treatment_variables()
         self.source_label.setText(
-            f"Source: {source_text}" if metadata else "Select a fully loaded source dataset."
+            f"Source: {source_text}"
+            if metadata
+            else "Select a fully loaded source dataset."
         )
         self._metadata_available = metadata is not None
         self._source_kind = source_kind if metadata is not None else ""
@@ -572,9 +580,7 @@ class CategoricalBuilder(QWidget):
             0 if self.nonmissing_value.count() else -1
         )
         self.n1_value.setCurrentIndex(0 if self.n1_value.count() else -1)
-        self.count_type.setCurrentIndex(
-            self.count_type.findData("distinct_subject")
-        )
+        self.count_type.setCurrentIndex(self.count_type.findData("distinct_subject"))
         self.denominator_type.setCurrentIndex(0)
         self.population_where.clear()
         self.baseline_where.clear()

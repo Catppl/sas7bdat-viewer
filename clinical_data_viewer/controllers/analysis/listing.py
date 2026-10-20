@@ -70,7 +70,9 @@ class ListingController(AnalysisModuleController):
     ) -> None:
         """Refresh only Listing's physical-SAS ADSL selector."""
         self._panel.listing_builder.set_adsl_sources(
-            list(datasets) if datasets is not None else self._host.available_sas_dataset_tabs()
+            list(datasets)
+            if datasets is not None
+            else self._host.available_sas_dataset_tabs()
         )
 
     def refresh_listing_sources(self, datasets=None) -> None:

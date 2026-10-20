@@ -116,9 +116,7 @@ class ListingEngineTests(unittest.TestCase):
                 configuration["report"]["width_method"],
                 "metadata_weighted_visible_columns",
             )
-            self.assertNotIn(
-                "visible_output_type", configuration["calculation"]
-            )
+            self.assertNotIn("visible_output_type", configuration["calculation"])
 
     def test_adsl_left_merge_filter_duplicate_rename_and_missing_keys(self):
         source_vars = (
@@ -190,7 +188,8 @@ class ListingEngineTests(unittest.TestCase):
             result = ListingEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
                 self.assertEqual(
-                    connection.execute('SELECT "RATIO" FROM dataset').fetchone()[0], None
+                    connection.execute('SELECT "RATIO" FROM dataset').fetchone()[0],
+                    None,
                 )
 
     def test_duplicate_adsl_key_blocks_a_left_merge(self):
@@ -261,12 +260,12 @@ class ListingEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)
             source = handle(root, "adlb", variables, (("01", 12.5),))
-            config = ListingConfig(
-                (ListingColumn("PUT(AVAL, 8.2)", "AVAL_TEXT"),)
-            )
+            config = ListingConfig((ListingColumn("PUT(AVAL, 8.2)", "AVAL_TEXT"),))
             result = ListingEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
-                value = connection.execute('SELECT "AVAL_TEXT" FROM dataset').fetchone()[0]
+                value = connection.execute(
+                    'SELECT "AVAL_TEXT" FROM dataset'
+                ).fetchone()[0]
             self.assertEqual(value, "12.50")
             self.assertEqual(result.metadata.variables[0].kind, "character")
             self.assertEqual(result.metadata.variables[0].length, 8)
@@ -321,7 +320,10 @@ class ListingEngineTests(unittest.TestCase):
 
     def test_reserved_internal_output_names_are_rejected(self):
         for name in ("_source_row", "_listing_row", "_SOURCE_ROW"):
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "reserved"):
+            with (
+                self.subTest(name=name),
+                self.assertRaisesRegex(ValueError, "reserved"),
+            ):
                 ListingConfig((ListingColumn("USUBJID", name),)).validate_basic()
 
     def test_result_writer_rejects_reserved_output_names(self):
@@ -330,13 +332,14 @@ class ListingEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             database = Path(path) / "dataset.sqlite"
             with self.assertRaisesRegex(ValueError, "reserved"):
-                ListingResultWriter(
-                    database, (VariableMetadata("_source_row"),)
-                )
+                ListingResultWriter(database, (VariableMetadata("_source_row"),))
             self.assertFalse(database.exists())
 
     def test_adsl_reserved_rename_target_is_rejected(self):
-        variables = (VariableMetadata("USUBJID"), VariableMetadata("AGE", kind="numeric"))
+        variables = (
+            VariableMetadata("USUBJID"),
+            VariableMetadata("AGE", kind="numeric"),
+        )
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)
             source = handle(root, "adae", variables, (("01", 30),))
@@ -362,9 +365,7 @@ class ListingEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)
             source = handle(root, "adae", variables, (("a",), ("B",), ("b",), ("A",)))
-            config = ListingConfig(
-                (ListingColumn("VALUE", "VALUE", sort_order=1),)
-            )
+            config = ListingConfig((ListingColumn("VALUE", "VALUE", sort_order=1),))
             result = ListingEngine(TempManager(root / "temp")).run(source, config)
             with closing(sqlite3.connect(result.database_path)) as connection:
                 values = connection.execute('SELECT "VALUE" FROM dataset').fetchall()

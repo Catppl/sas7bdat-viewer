@@ -61,7 +61,9 @@ def make_handle(
 
 
 class CategoricalConfigurationTests(unittest.TestCase):
-    def test_population_contract_preserves_filters_items_and_treatment_types(self) -> None:
+    def test_population_contract_preserves_filters_items_and_treatment_types(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source_variables = (

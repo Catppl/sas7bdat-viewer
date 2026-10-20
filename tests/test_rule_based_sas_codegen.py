@@ -166,7 +166,9 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertNotIn("as TOTAL", code)
 
         self.assertLess(code.index("create table row1 as"), code.index("data counts;"))
-        self.assertLess(code.index("data counts;"), code.index("data work.rule_based_result;"))
+        self.assertLess(
+            code.index("data counts;"), code.index("data work.rule_based_result;")
+        )
 
         count_lines = [
             line.strip() for line in code.splitlines() if "count(distinct" in line

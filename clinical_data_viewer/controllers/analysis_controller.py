@@ -79,7 +79,9 @@ class AnalysisControllerHost(Protocol):
 
     def retain_analysis_directory(self, path: Path) -> None: ...
 
-    def show_analysis_error(self, title: str, message: str, details: str = "") -> None: ...
+    def show_analysis_error(
+        self, title: str, message: str, details: str = ""
+    ) -> None: ...
 
     def browse_listing_adsl_dataset(self) -> None: ...
 
@@ -144,7 +146,9 @@ class AnalysisController(QObject):
         rule_builder = self._panel.rule_based_builder
         rule_builder.run_requested.connect(self.rule_based.run_rule_based)
         rule_builder.source_selected.connect(self.rule_based.select_rule_based_source)
-        rule_builder.sas_code_requested.connect(self.rule_based.generate_rule_based_sas_code)
+        rule_builder.sas_code_requested.connect(
+            self.rule_based.generate_rule_based_sas_code
+        )
         rule_builder.validation_error.connect(
             lambda message: QMessageBox.warning(
                 self._parent_widget(), "Rule-based Table", message
@@ -158,7 +162,9 @@ class AnalysisController(QObject):
         ae_builder.source_selected.connect(self.ae_table.select_ae_table_source)
         ae_builder.sas_code_requested.connect(self.ae_table.generate_ae_table_sas_code)
         ae_builder.validation_error.connect(
-            lambda message: QMessageBox.warning(self._parent_widget(), "AE Table", message)
+            lambda message: QMessageBox.warning(
+                self._parent_widget(), "AE Table", message
+            )
         )
         ae_builder.browse_adsl_requested.connect(host.browse_ae_table_adsl_dataset)
         ae_builder.cleared.connect(self.ae_table.clear_ae_table_source)
@@ -169,7 +175,9 @@ class AnalysisController(QObject):
         proc_builder.sas_code_requested.connect(
             self.proc_means.generate_proc_means_sas_code
         )
-        proc_builder.r_code_requested.connect(self.proc_means.generate_proc_means_r_code)
+        proc_builder.r_code_requested.connect(
+            self.proc_means.generate_proc_means_r_code
+        )
         proc_builder.validation_error.connect(
             lambda message: QMessageBox.warning(
                 self._parent_widget(), "PROC MEANS Builder", message
@@ -242,7 +250,9 @@ class AnalysisController(QObject):
     def run_rule_based(self, selection: RuleBasedBuilderSelection) -> None:
         self.rule_based.run_rule_based(selection)
 
-    def generate_rule_based_sas_code(self, selection: RuleBasedBuilderSelection) -> None:
+    def generate_rule_based_sas_code(
+        self, selection: RuleBasedBuilderSelection
+    ) -> None:
         self.rule_based.generate_rule_based_sas_code(selection)
 
     def drilldown_rule_based(self, tab, view_row, column_name, display) -> None:
@@ -265,9 +275,7 @@ class AnalysisController(QObject):
             titles.append("Categorical")
         return titles
 
-    def _tab_activity_blocker(
-        self, tab: object, action: str
-    ) -> TabCloseBlocker | None:
+    def _tab_activity_blocker(self, tab: object, action: str) -> TabCloseBlocker | None:
         if self.listing.is_input_tab(tab):
             return TabCloseBlocker(
                 "Listing Running",
@@ -346,9 +354,7 @@ class AnalysisController(QObject):
     def categorical_source(self) -> DatasetTab | None:
         return self.categorical.categorical_source
 
-    def refresh_categorical_adsl_sources(
-        self, datasets=None
-    ) -> None:
+    def refresh_categorical_adsl_sources(self, datasets=None) -> None:
         self.categorical.refresh_categorical_adsl_sources(datasets)
 
     def refresh_categorical_sources(self, datasets=None) -> None:
@@ -374,9 +380,7 @@ class AnalysisController(QObject):
     def drilldown_categorical(
         self, tab: DatasetTab, view_row: int, column_name: str, display: str
     ) -> None:
-        self.categorical.drilldown_categorical(
-            tab, view_row, column_name, display
-        )
+        self.categorical.drilldown_categorical(tab, view_row, column_name, display)
 
     def open_categorical_long_result(self) -> None:
         self.categorical.open_categorical_long_result()
@@ -430,9 +434,7 @@ class AnalysisController(QObject):
     ) -> None:
         self.proc_means.generate_proc_means_sas_code(selection)
 
-    def generate_proc_means_r_code(
-        self, selection: ProcMeansBuilderSelection
-    ) -> None:
+    def generate_proc_means_r_code(self, selection: ProcMeansBuilderSelection) -> None:
         self.proc_means.generate_proc_means_r_code(selection)
 
     def run_proc_means_builder(self, selection: ProcMeansBuilderSelection) -> None:
@@ -441,9 +443,7 @@ class AnalysisController(QObject):
     def drilldown_proc_means(
         self, tab: DatasetTab, view_row: int, statistic_column: str, display: str
     ) -> None:
-        self.proc_means.drilldown_proc_means(
-            tab, view_row, statistic_column, display
-        )
+        self.proc_means.drilldown_proc_means(tab, view_row, statistic_column, display)
 
     def _drilldown_dialog(self):
         """Create the compact Rule-based drill-down chooser."""

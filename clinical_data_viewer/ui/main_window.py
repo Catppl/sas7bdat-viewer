@@ -141,9 +141,7 @@ class MainWindow(QMainWindow):
             self,
             WorkspaceMetadataExporter(self.reader.read_metadata),
         )
-        self.workspace_controller.register_favorites_menu(
-            self.favorite_workspaces_menu
-        )
+        self.workspace_controller.register_favorites_menu(self.favorite_workspaces_menu)
         self.workspace_controller.register_favorites_menu(
             self.toolbar_favorite_workspaces_menu
         )
@@ -431,6 +429,7 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.all_tabs_closed.connect(self.analysis_dock.hide)
         self.analysis_panel.builder.settings_requested.connect(self.show_settings)
+
     def _create_compare_panel(self) -> None:
         self.compare_panel = DatasetComparePanel()
         self.compare_dock = QDockWidget("Dataset Compare", self)
@@ -578,9 +577,7 @@ class MainWindow(QMainWindow):
     def _set_variables_panel_visible(self, visible: bool) -> None:
         self._set_navigation_panel_visible(self.variables_dock, visible)
 
-    def show_workspace_error(
-        self, title: str, message: str, details: str = ""
-    ) -> None:
+    def show_workspace_error(self, title: str, message: str, details: str = "") -> None:
         self._show_error(title, message, details)
 
     def open_or_focus_paths(self, paths: tuple[Path, ...]) -> None:
@@ -654,9 +651,7 @@ class MainWindow(QMainWindow):
     def retain_analysis_directory(self, path: Path) -> None:
         self._retain_directory(path)
 
-    def show_analysis_error(
-        self, title: str, message: str, details: str = ""
-    ) -> None:
+    def show_analysis_error(self, title: str, message: str, details: str = "") -> None:
         self._show_error(title, message, details)
 
     def browse_listing_adsl_dataset(self) -> None:
@@ -1166,23 +1161,29 @@ class MainWindow(QMainWindow):
             )
         )
         tab.proc_means_drilldown_requested.connect(
-            lambda row, column, display, owner=tab: self.analysis_controller.drilldown_proc_means(
-                owner, row, column, display
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_proc_means(
+                    owner, row, column, display
+                )
             )
         )
         tab.categorical_drilldown_requested.connect(
-            lambda row, column, display, owner=tab: self.analysis_controller.drilldown_categorical(
-                owner, row, column, display
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_categorical(
+                    owner, row, column, display
+                )
             )
         )
         tab.rule_based_drilldown_requested.connect(
-            lambda row, column, display, owner=tab: self.analysis_controller.drilldown_rule_based(
-                owner, row, column, display
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_rule_based(
+                    owner, row, column, display
+                )
             )
         )
         tab.ae_table_drilldown_requested.connect(
-            lambda row, column, display, owner=tab: self.analysis_controller.drilldown_ae_table(
-                owner, row, column, display
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_ae_table(owner, row, column, display)
             )
         )
         return tab
@@ -1195,7 +1196,9 @@ class MainWindow(QMainWindow):
             if isinstance(tab, DatasetTab):
                 tab.set_apply_sas_date_time_formats(enabled)
 
-    def _continue_cache(self, tab: DatasetTab, when_complete=None, when_failed=None) -> None:
+    def _continue_cache(
+        self, tab: DatasetTab, when_complete=None, when_failed=None
+    ) -> None:
         initial_handle = tab.handle
 
         def progress_changed(progress: CacheProgress) -> None:
@@ -2082,7 +2085,9 @@ class MainWindow(QMainWindow):
         for worker in self._workers.get(widget, set()):
             worker.cancel()
         if isinstance(widget, DatasetTab):
-            if directories := self.analysis_controller.take_result_release_paths(widget):
+            if directories := self.analysis_controller.take_result_release_paths(
+                widget
+            ):
                 self._pending_directory_releases.setdefault(widget, []).extend(
                     directories
                 )

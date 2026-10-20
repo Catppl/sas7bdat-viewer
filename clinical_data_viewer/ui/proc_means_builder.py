@@ -339,9 +339,7 @@ class ProcMeansBuilder(QWidget):
                 variable.casefold() for variable in self._all_selected_variables()
             }
             removed = tuple(
-                variable
-                for variable in previous
-                if variable.casefold() not in current
+                variable for variable in previous if variable.casefold() not in current
             )
         self.source_label.setText(
             f"Source: {source_text}"
@@ -402,9 +400,7 @@ class ProcMeansBuilder(QWidget):
 
     def _update_enabled_state(self) -> None:
         available = (
-            self._source_available
-            and not self._busy
-            and not self._source_reloading
+            self._source_available and not self._busy and not self._source_reloading
         )
         codegen_available = (
             not self._busy
@@ -439,17 +435,13 @@ class ProcMeansBuilder(QWidget):
                     selected_folds.add(variable.casefold())
         return tuple(selected)
 
-    def _refresh_decimal_groups(
-        self, preserved: tuple[str, ...] | None = None
-    ) -> None:
+    def _refresh_decimal_groups(self, preserved: tuple[str, ...] | None = None) -> None:
         if self._suppress_decimal_group_refresh:
             return
         previous = {
             variable.casefold()
             for variable in (
-                self.selected_decimal_groups()
-                if preserved is None
-                else preserved
+                self.selected_decimal_groups() if preserved is None else preserved
             )
         }
         values = (

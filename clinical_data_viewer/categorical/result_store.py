@@ -38,7 +38,9 @@ class CategoricalResultWriter:
         for position, (key, label) in enumerate(treatment_levels, start=1):
             # SQLite/WHERE identifiers remain stable even when formatted treatment
             # labels contain spaces or punctuation.  The label retains the human value.
-            self.treatment_columns.append((key, _unique(f"TRT_{position}", used), label))
+            self.treatment_columns.append(
+                (key, _unique(f"TRT_{position}", used), label)
+            )
         if config.include_total:
             self.treatment_columns.append((None, _unique("TOTAL", used), "Total"))
         self.variables = (
@@ -155,9 +157,7 @@ class CategoricalResultWriter:
         if self.row_count % 1_000 == 0:
             self.connection.commit()
 
-    def finish(
-        self, directory: Path, source: DatasetHandle
-    ) -> DatasetHandle:
+    def finish(self, directory: Path, source: DatasetHandle) -> DatasetHandle:
         self.connection.execute(
             "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, total_rows INTEGER, complete INTEGER NOT NULL)"
         )
@@ -257,8 +257,13 @@ class CategoricalLongResultBuilder:
                             (
                                 row[0],
                                 row[1],
-                                *(context.get(variable.name) for variable in context_variables),
-                                "(Missing)" if json.loads(row[3]) is None else str(json.loads(row[3])),
+                                *(
+                                    context.get(variable.name)
+                                    for variable in context_variables
+                                ),
+                                "(Missing)"
+                                if json.loads(row[3]) is None
+                                else str(json.loads(row[3])),
                                 "Total" if row[4] is None else _display_json(row[4]),
                                 row[5],
                                 row[6],
@@ -281,10 +286,13 @@ class CategoricalLongResultBuilder:
             marker = directory / "categorical-long-result.tmp"
             marker.touch()
             return DatasetHandle(
-                source.source_path.parent / f"Categorical Long - {source.metadata.name}",
+                source.source_path.parent
+                / f"Categorical Long - {source.metadata.name}",
                 marker,
                 database_path,
-                DatasetMetadata(f"Categorical Long - {source.metadata.name}", row_count, variables),
+                DatasetMetadata(
+                    f"Categorical Long - {source.metadata.name}", row_count, variables
+                ),
                 row_count,
                 True,
                 kind="categorical_long",

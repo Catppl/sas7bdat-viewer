@@ -174,7 +174,9 @@ def build_categorical_configuration(
             {
                 "population_library": "pop",
                 "population_member": (
-                    None if population.kind == "merge" else population.metadata.name.lower()
+                    None
+                    if population.kind == "merge"
+                    else population.metadata.name.lower()
                 ),
             }
         )

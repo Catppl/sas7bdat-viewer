@@ -29,7 +29,9 @@ _REQUIRED = (
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
-        raise ValueError(f"AE configuration block {name} must be an object.")
+        raise ValueError(  # noqa: TRY004 - preserve generator validation contract
+            f"AE configuration block {name} must be an object."
+        )
     return value
 
 
@@ -68,7 +70,9 @@ def _filter(value: object, name: str) -> str:
         raise ValueError(f"{name} must contain language 'sas_like' and ast.")
     text = block.get("text", "")
     if not isinstance(text, str):
-        raise ValueError(f"{name}.text must be a string.")
+        raise ValueError(  # noqa: TRY004 - preserve generator validation contract
+            f"{name}.text must be a string."
+        )
     if text.strip() and block.get("ast") is None:
         raise ValueError(f"{name}.ast cannot be empty when text is provided.")
     try:
@@ -114,7 +118,9 @@ class SasAeTableGenerator:
 
     def _prepare(self, configuration: Mapping[str, object]) -> dict[str, object]:
         if not isinstance(configuration, Mapping):
-            raise ValueError("AE SAS generator requires a JSON object.")
+            raise ValueError(  # noqa: TRY004 - preserve public exception type
+                "AE SAS generator requires a JSON object."
+            )
         if configuration.get("type") != "ae_soc_pt_table":
             raise ValueError(
                 "The configuration is not an AE SOC/PT Table configuration."
@@ -179,7 +185,9 @@ class SasAeTableGenerator:
 
         rows = _mapping(configuration["rows"], "rows")
         if not isinstance(rows.get("include_any_ae"), bool):
-            raise ValueError("rows.include_any_ae must be true or false.")
+            raise ValueError(  # noqa: TRY004 - preserve generator validation contract
+                "rows.include_any_ae must be true or false."
+            )
         total = _mapping(configuration["total"], "total")
         if (
             not isinstance(total.get("enabled"), bool)

@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from ..categorical.drilldown import CategoricalQueryBuilder, _and, _exact_clause, _field, _missing_sql
+from ..categorical.drilldown import (
+    CategoricalQueryBuilder,
+    _and,
+    _exact_clause,
+    _missing_sql,
+)
 from ..domain import DatasetHandle, DatasetMetadata
-from ..filter_engine import quote_identifier
 from .models import RuleBasedConfig, RuleBasedRow
 
 
@@ -15,11 +19,15 @@ class RuleBasedCell:
     treatment: object | None
 
 
-def lookup_cell(result: DatasetHandle, result_source_row: int, column_name: str) -> RuleBasedCell | None:
+def lookup_cell(
+    result: DatasetHandle, result_source_row: int, column_name: str
+) -> RuleBasedCell | None:
     import sqlite3
     from contextlib import closing
 
-    with closing(sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+    with closing(
+        sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)
+    ) as connection:
         row = connection.execute(
             "SELECT row_id, treatment_json FROM rule_based_cell_map "
             "WHERE result_row = ? AND column_name = ?",
@@ -61,14 +69,24 @@ def build_population_cell_filter(
 ) -> tuple[str, tuple[object, ...]]:
     fields = {variable.name.casefold(): variable for variable in metadata.variables}
     population_treatment = (
-        config.denominator.population_treatment_variable
-        or config.treatment_variable
+        config.denominator.population_treatment_variable or config.treatment_variable
     )
     treatment = fields[population_treatment.casefold()]
-    clauses = [(config.denominator.population_filter.sql, config.denominator.population_filter.parameters)]
+    clauses = [
+        (
+            config.denominator.population_filter.sql,
+            config.denominator.population_filter.parameters,
+        )
+    ]
     if treatment_value is not None:
         clauses.append(_exact_clause(treatment, treatment_value))
     return _and(*clauses)
 
 
-__all__ = ["CategoricalQueryBuilder", "RuleBasedCell", "build_cell_filter", "build_population_cell_filter", "lookup_cell"]
+__all__ = [
+    "CategoricalQueryBuilder",
+    "RuleBasedCell",
+    "build_cell_filter",
+    "build_population_cell_filter",
+    "lookup_cell",
+]

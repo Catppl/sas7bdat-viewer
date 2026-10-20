@@ -349,15 +349,17 @@ class SasRuleBasedGenerator:
             population_variable_names = {
                 str(name).casefold() for name in population_variables
             }
-            if population_treatment_variable.casefold() not in population_variable_names:
+            if (
+                population_treatment_variable.casefold()
+                not in population_variable_names
+            ):
                 raise ValueError(
                     "Population variables must include the population treatment variable."
                 )
             population_treatment_metadata = next(
                 metadata
                 for name, metadata in population_variables.items()
-                if str(name).casefold()
-                == population_treatment_variable.casefold()
+                if str(name).casefold() == population_treatment_variable.casefold()
             )
             if (
                 _mapping(

@@ -40,7 +40,10 @@ class SqliteAccessTests(unittest.TestCase):
 
             try:
                 self.assertTrue(
-                    all(call.kwargs.get("uri") is True for call in mocked_connect.call_args_list)
+                    all(
+                        call.kwargs.get("uri") is True
+                        for call in mocked_connect.call_args_list
+                    )
                 )
                 attach_read_only(
                     target,
@@ -59,7 +62,9 @@ class SqliteAccessTests(unittest.TestCase):
                     "ok",
                 )
                 self.assertEqual(
-                    workspace.execute("SELECT value FROM source_db.dataset").fetchone()[0],
+                    workspace.execute("SELECT value FROM source_db.dataset").fetchone()[
+                        0
+                    ],
                     "ok",
                 )
                 self.assertEqual(
@@ -100,7 +105,9 @@ class SqliteAccessTests(unittest.TestCase):
             source.touch()
             connection = connect_attachment_workspace()
             try:
-                with self.assertRaisesRegex(ValueError, "Invalid SQLite database alias"):
+                with self.assertRaisesRegex(
+                    ValueError, "Invalid SQLite database alias"
+                ):
                     attach_read_only(
                         connection,
                         "source-db",

@@ -80,9 +80,7 @@ class HistoryDialog(QDialog):
         entries = self.history.list(self.dataset_path if self._current_only() else None)
         for entry in entries:
             executed_at = format_history_timestamp(entry.executed_at)
-            item = QTreeWidgetItem(
-                [executed_at, entry.dataset_name, entry.where_text]
-            )
+            item = QTreeWidgetItem([executed_at, entry.dataset_name, entry.where_text])
             item.setData(0, Qt.UserRole, entry)
             item.setToolTip(
                 0, format_history_timestamp(entry.executed_at, include_timezone=True)

@@ -38,9 +38,7 @@ class DecimalSpinBox(QSpinBox):
             rect = self.style().subControlRect(QStyle.CC_SpinBox, option, subcontrol)
             center = rect.center()
             painter.drawPolygon(
-                QPolygon(
-                    [QPoint(center.x() + x, center.y() + y) for x, y in points]
-                )
+                QPolygon([QPoint(center.x() + x, center.y() + y) for x, y in points])
             )
         painter.end()
 

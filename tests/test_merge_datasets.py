@@ -233,12 +233,21 @@ class MergeDatasetsTests(unittest.TestCase):
                 )
                 for row in rows
             ]
-            self.assertEqual(pairs, [(float(a) if a else None, float(b) if b else None)
-                                     for a, b in lineage])
+            self.assertEqual(
+                pairs,
+                [
+                    (float(a) if a else None, float(b) if b else None)
+                    for a, b in lineage
+                ],
+            )
 
         variables = (("USUBJID", "character"), ("VALUE", "numeric"))
-        many_left = _handle(self.root, "order_many_left", variables, (("A", 1), ("A", 2)))
-        many_right = _handle(self.root, "order_many_right", variables, (("A", 3), ("A", 4)))
+        many_left = _handle(
+            self.root, "order_many_left", variables, (("A", 1), ("A", 2))
+        )
+        many_right = _handle(
+            self.root, "order_many_right", variables, (("A", 3), ("A", 4))
+        )
         result = self.engine.run(
             many_left,
             many_right,
@@ -247,7 +256,10 @@ class MergeDatasetsTests(unittest.TestCase):
         columns, rows = self._rows(result)
         self.assertEqual(
             [
-                (row[columns.index("_LEFT_SOURCE_ROW")], row[columns.index("_RIGHT_SOURCE_ROW")])
+                (
+                    row[columns.index("_LEFT_SOURCE_ROW")],
+                    row[columns.index("_RIGHT_SOURCE_ROW")],
+                )
                 for row in rows
             ],
             [(1.0, 1.0), (1.0, 2.0), (2.0, 1.0), (2.0, 2.0)],
@@ -255,8 +267,12 @@ class MergeDatasetsTests(unittest.TestCase):
 
     def test_multiple_sort_variables_keep_priority(self) -> None:
         variables = (("USUBJID", "character"), ("VALUE", "numeric"))
-        left = _handle(self.root, "priority_left", variables, (("A", 1), ("B", 1), ("C", 2)))
-        right = _handle(self.root, "priority_right", variables, (("A", 1), ("B", 1), ("C", 2)))
+        left = _handle(
+            self.root, "priority_left", variables, (("A", 1), ("B", 1), ("C", 2))
+        )
+        right = _handle(
+            self.root, "priority_right", variables, (("A", 1), ("B", 1), ("C", 2))
+        )
         result = self.engine.run(
             left,
             right,

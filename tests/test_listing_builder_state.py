@@ -106,7 +106,9 @@ class ListingBuilderStateTests(unittest.TestCase):
 
         actions = builder.table.cellWidget(0, 10)
         buttons = actions.findChildren(QPushButton)
-        self.assertEqual([button.text() for button in buttons], ["Up", "Down", "Remove"])
+        self.assertEqual(
+            [button.text() for button in buttons], ["Up", "Down", "Remove"]
+        )
         self.assertEqual(
             [button.toolTip() for button in buttons],
             [

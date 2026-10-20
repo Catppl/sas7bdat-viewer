@@ -28,13 +28,19 @@ class AnalysisControllerTests(unittest.TestCase):
             ProcMeansController,
             RuleBasedController,
         )
-        self.assertTrue(all(cls.name for cls in (
-            ListingController,
-            RuleBasedController,
-            AeTableController,
-            ProcMeansController,
-            CategoricalController,
-        )))
+
+        self.assertTrue(
+            all(
+                cls.name
+                for cls in (
+                    ListingController,
+                    RuleBasedController,
+                    AeTableController,
+                    ProcMeansController,
+                    CategoricalController,
+                )
+            )
+        )
 
     def test_source_reload_lifecycle_is_forwarded_to_proc_means_module(self) -> None:
         from clinical_data_viewer.controllers.analysis_controller import (
@@ -481,10 +487,12 @@ class AnalysisControllerTests(unittest.TestCase):
             self.assertEqual(blocker.title, "Categorical Table Running")
             controller.categorical._categorical_input_tabs.clear()
 
-            controller.categorical._categorical_results[result] = CategoricalResultContext(
-                source.handle,
-                adsl.handle,
-                CategoricalConfig((CategoricalItem("RACE"),), "TRT01A", "USUBJID"),
+            controller.categorical._categorical_results[result] = (
+                CategoricalResultContext(
+                    source.handle,
+                    adsl.handle,
+                    CategoricalConfig((CategoricalItem("RACE"),), "TRT01A", "USUBJID"),
+                )
             )
             self.assertEqual(
                 set(controller.take_result_release_paths(result)),
@@ -751,7 +759,8 @@ class AnalysisControllerTests(unittest.TestCase):
             controller.show_proc_means_builder()
             self.assertIs(controller.proc_means_source, source)
             self.assertEqual(
-                panel.builder.source_label.text(), "Source: " + str(source.handle.source_path)
+                panel.builder.source_label.text(),
+                "Source: " + str(source.handle.source_path),
             )
 
             controller.proc_means._proc_means_input_tabs.add(source)

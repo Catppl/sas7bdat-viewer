@@ -277,8 +277,10 @@ def startup_request_from_arguments(arguments: Sequence[str]) -> StartupRequest:
             index += 1
             if index >= len(arguments) or not arguments[index].strip():
                 raise ValueError("--workspace requires a folder path.")
-            workspace_path = Path(_unquote_argument(arguments[index])).expanduser().resolve(
-                strict=False
+            workspace_path = (
+                Path(_unquote_argument(arguments[index]))
+                .expanduser()
+                .resolve(strict=False)
             )
             index += 1
             continue
@@ -370,7 +372,9 @@ def main() -> int:
     if startup_error:
         QTimer.singleShot(
             0,
-            lambda: QMessageBox.critical(window, "Invalid Startup Request", startup_error),
+            lambda: QMessageBox.critical(
+                window, "Invalid Startup Request", startup_error
+            ),
         )
     return application.exec()
 

@@ -116,7 +116,9 @@ class ExcelExportUiTests(unittest.TestCase):
             window.close()
             app.processEvents()
 
-    def test_large_export_requires_confirmation_and_preserves_applied_filter(self) -> None:
+    def test_large_export_requires_confirmation_and_preserves_applied_filter(
+        self,
+    ) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -161,7 +163,9 @@ class ExcelExportUiTests(unittest.TestCase):
                 manual_highlights_for_export=dict,
             )
             window = MainWindow(
-                TestSettings(), TempManager(root / "temp"), FilterHistory(root / "history.sqlite")
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
             )
             destination = root / "data.xlsx"
             destination.write_bytes(b"original")
@@ -182,11 +186,19 @@ class ExcelExportUiTests(unittest.TestCase):
             with (
                 patch.object(window, "current_dataset_tab", return_value=tab),
                 patch.object(window.tabs, "indexOf", return_value=0),
-                patch("clinical_data_viewer.ui.main_window.QFileDialog.getSaveFileName", return_value=(str(destination), "")),
-                patch("clinical_data_viewer.ui.main_window.QMessageBox.question", return_value=QMessageBox.No) as question,
+                patch(
+                    "clinical_data_viewer.ui.main_window.QFileDialog.getSaveFileName",
+                    return_value=(str(destination), ""),
+                ),
+                patch(
+                    "clinical_data_viewer.ui.main_window.QMessageBox.question",
+                    return_value=QMessageBox.No,
+                ) as question,
                 patch("clinical_data_viewer.ui.main_window.QMessageBox.information"),
                 patch.object(window, "_submit", side_effect=submit),
-                patch.object(window.excel_exporter, "estimate_bytes", side_effect=estimate),
+                patch.object(
+                    window.excel_exporter, "estimate_bytes", side_effect=estimate
+                ),
                 patch.object(window.excel_exporter, "export", side_effect=export),
             ):
                 window.export_excel_current()

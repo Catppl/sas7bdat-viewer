@@ -48,15 +48,11 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
 
         # A later source-tab WHERE change must not overwrite the Builder filter.
-        builder.set_dataset(
-            metadata, r"C:\data\adlb.sas7bdat", 'ANL01FL = "N"'
-        )
+        builder.set_dataset(metadata, r"C:\data\adlb.sas7bdat", 'ANL01FL = "N"')
         self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
 
         # Switching source does not erase Builder-owned input.
-        builder.set_dataset(
-            metadata, r"C:\data\adae.sas7bdat", 'TRTEMFL = "Y"'
-        )
+        builder.set_dataset(metadata, r"C:\data\adae.sas7bdat", 'TRTEMFL = "Y"')
         self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
 
         builder.set_dataset(None, "")
@@ -158,9 +154,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
                 VariableMetadata("NEWNUM", kind="numeric"),
             ),
         )
-        builder.set_dataset(
-            new_metadata, r"C:\data\adlb.sas7bdat", 'ANL01FL = "N"'
-        )
+        builder.set_dataset(new_metadata, r"C:\data\adlb.sas7bdat", 'ANL01FL = "N"')
 
         self.assertEqual(builder.current_filter_text(), 'PARAMCD = "ALB"')
         self.assertEqual(builder.analysis_variables.selected_variables(), ())
@@ -190,9 +184,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
                 VariableMetadata("NEWNUM", kind="numeric"),
             ),
         )
-        removed = builder.set_dataset(
-            new_metadata, r"C:\data\adlb.sas7bdat"
-        )
+        removed = builder.set_dataset(new_metadata, r"C:\data\adlb.sas7bdat")
 
         self.assertEqual(removed, ("AVAL", "PARAMCD"))
         builder.deleteLater()
@@ -332,7 +324,9 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         builder = ProcMeansBuilder()
         builder.set_dataset(metadata, str(handle.source_path))
         owner = SimpleNamespace(
-            _host=Host(), _panel=SimpleNamespace(builder=builder), _parent_widget=lambda: None
+            _host=Host(),
+            _panel=SimpleNamespace(builder=builder),
+            _parent_widget=lambda: None,
         )
         with tempfile.TemporaryDirectory() as path:
             controller = ProcMeansController(
@@ -420,9 +414,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
                 ):
                     getattr(controller, method_name)(selection)
                 configuration = generate.call_args.args[0]
-                self.assertEqual(
-                    configuration["filter"]["text"], 'ANL01FL = "Y"'
-                )
+                self.assertEqual(configuration["filter"]["text"], 'ANL01FL = "Y"')
                 self.assertTrue(configuration["filter"]["ast"])
                 dialog.assert_called_once()
         builder.deleteLater()
@@ -444,6 +436,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         builder.set_dataset(metadata, r"C:\data\adlb.sas7bdat")
         builder.filter_editor.setText('ANL01FL = "Y" and PARAMCD = "ALB"')
         filter_text = builder.current_filter_text()
+
         class Host:
             def is_open_dataset_tab(self, _tab):
                 return True
@@ -460,16 +453,16 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         source_tab.handle = handle
         source_tab.cache_complete = True
         owner = SimpleNamespace(
-            _host=Host(), _panel=SimpleNamespace(builder=builder), _parent_widget=lambda: None
+            _host=Host(),
+            _panel=SimpleNamespace(builder=builder),
+            _parent_widget=lambda: None,
         )
         with tempfile.TemporaryDirectory() as path:
             controller = ProcMeansController(
                 owner, TempManager(Path(path) / "temp"), AppSettings()
             )
             controller._proc_means_source = source_tab
-            selection = ProcMeansBuilderSelection(
-                ("AVAL",), (), (), ("mean",), ()
-            )
+            selection = ProcMeansBuilderSelection(("AVAL",), (), (), ("mean",), ())
             context = controller._proc_means_context(selection, "Test")
         self.assertIsNotNone(context)
         config = context[1]
@@ -502,6 +495,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
             2,
             True,
         )
+
         class SourceTab:
             def __init__(self, handle):
                 self.handle = handle
@@ -512,16 +506,16 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         builder.set_dataset(metadata, str(handle.source_path))
         builder.filter_editor.setText("ANL01FL =")
         owner = SimpleNamespace(
-            _host=Host(), _panel=SimpleNamespace(builder=builder), _parent_widget=lambda: None
+            _host=Host(),
+            _panel=SimpleNamespace(builder=builder),
+            _parent_widget=lambda: None,
         )
         with tempfile.TemporaryDirectory() as path:
             controller = ProcMeansController(
                 owner, TempManager(Path(path) / "temp"), AppSettings()
             )
             controller._proc_means_source = source_tab
-            selection = ProcMeansBuilderSelection(
-                ("AVAL",), (), (), ("mean",), ()
-            )
+            selection = ProcMeansBuilderSelection(("AVAL",), (), (), ("mean",), ())
             with patch(
                 "clinical_data_viewer.controllers.analysis.proc_means.QMessageBox.warning"
             ) as warning:
@@ -559,6 +553,7 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
             2,
             True,
         )
+
         class SourceTab:
             def __init__(self, handle):
                 self.handle = handle
@@ -569,16 +564,16 @@ class ProcMeansBuilderFilterTests(unittest.TestCase):
         builder.set_dataset(metadata, str(handle.source_path), 'ANL01FL = "N"')
         builder.filter_editor.setText('ANL01FL = "Y"')
         owner = SimpleNamespace(
-            _host=Host(), _panel=SimpleNamespace(builder=builder), _parent_widget=lambda: None
+            _host=Host(),
+            _panel=SimpleNamespace(builder=builder),
+            _parent_widget=lambda: None,
         )
         with tempfile.TemporaryDirectory() as path:
             controller = ProcMeansController(
                 owner, TempManager(Path(path) / "temp"), AppSettings()
             )
             controller._proc_means_source = source_tab
-            selection = ProcMeansBuilderSelection(
-                ("AVAL",), (), (), ("mean",), ()
-            )
+            selection = ProcMeansBuilderSelection(("AVAL",), (), (), ("mean",), ())
             config = ProcMeansConfig(
                 ("AVAL",), statistics=("mean",), filter_text='ANL01FL = "Y"'
             )

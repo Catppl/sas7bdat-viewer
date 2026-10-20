@@ -314,7 +314,9 @@ class SasReaderTests(unittest.TestCase):
                 },
             )
             with XptSequentialReader(source) as reader:
-                formats = {variable.name: variable.format for variable in reader.variables}
+                formats = {
+                    variable.name: variable.format for variable in reader.variables
+                }
 
         self.assertEqual(
             formats,

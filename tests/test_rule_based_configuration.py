@@ -239,11 +239,7 @@ class RuleBasedConfigurationTests(unittest.TestCase):
             population = _handle(root, "adsl", population_variables)
             source_engine = FilterEngine(source_variables)
             config = RuleBasedConfig(
-                (
-                    RuleBasedRow(
-                        "row_001", "Any", source_engine.compile(""), "", 0
-                    ),
-                ),
+                (RuleBasedRow("row_001", "Any", source_engine.compile(""), "", 0),),
                 "TRTAN",
                 "USUBJID",
                 source_engine.compile(""),

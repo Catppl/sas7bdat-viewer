@@ -60,7 +60,9 @@ class RuleBasedConfig:
 
         def require_source(name: str, label: str) -> None:
             if not name or name.casefold() not in fields:
-                raise ValueError(f'{label} "{name}" does not exist in the source dataset.')
+                raise ValueError(
+                    f'{label} "{name}" does not exist in the source dataset.'
+                )
 
         require_source(self.treatment_variable, "Treatment variable")
         require_source(self.subject_id_variable, "Subject ID variable")
@@ -77,7 +79,9 @@ class RuleBasedConfig:
             # source metadata; validating its text separately would duplicate
             # the existing WHERE parser.
         if self.denominator.type == "nonmissing":
-            require_source(self.denominator.analysis_value_variable, "Analysis value variable")
+            require_source(
+                self.denominator.analysis_value_variable, "Analysis value variable"
+            )
         if self.denominator.type == "population":
             if population is None:
                 raise ValueError("Open or browse an ADSL dataset for Population N.")

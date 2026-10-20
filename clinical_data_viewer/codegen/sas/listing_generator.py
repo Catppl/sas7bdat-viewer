@@ -60,9 +60,7 @@ def _variable_block(
     return {}
 
 
-def _variable_metadata(
-    variables: Mapping[str, object]
-) -> dict[str, VariableMetadata]:
+def _variable_metadata(variables: Mapping[str, object]) -> dict[str, VariableMetadata]:
     resolved: dict[str, VariableMetadata] = {}
     for name, value in variables.items():
         block = _mapping(value, "variables")
@@ -196,9 +194,7 @@ def _allocate_width_percentages(weights: list[int]) -> list[str]:
     raw_extras = [
         remaining_width * Decimal(weight) / total_weight for weight in safe_weights
     ]
-    extras = [
-        extra.quantize(increment, rounding=ROUND_DOWN) for extra in raw_extras
-    ]
+    extras = [extra.quantize(increment, rounding=ROUND_DOWN) for extra in raw_extras]
     widths = [width + extra for width, extra in zip(widths, extras, strict=True)]
 
     remaining_steps = int((total - sum(widths, Decimal(0))) / increment)

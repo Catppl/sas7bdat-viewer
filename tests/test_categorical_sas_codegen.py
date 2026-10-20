@@ -23,10 +23,20 @@ def _comparison(variable, value):
 
 def configuration(*, denominator="nonmissing", count="distinct_subjects", digits=1):
     variables = {
-        "USUBJID": {"type": "character", "label": "Subject", "length": 20, "format": ""},
+        "USUBJID": {
+            "type": "character",
+            "label": "Subject",
+            "length": 20,
+            "format": "",
+        },
         "TRTA": {"type": "character", "label": "Treatment", "length": 40, "format": ""},
         "RACE": {"type": "character", "label": "Race", "length": 40, "format": ""},
-        "PARAMCD": {"type": "character", "label": "Parameter", "length": 8, "format": ""},
+        "PARAMCD": {
+            "type": "character",
+            "label": "Parameter",
+            "length": 8,
+            "format": "",
+        },
         "AVAL": {"type": "numeric", "label": "Value", "length": 8, "format": ""},
         "TRTEMFL": {"type": "character", "label": "Flag", "length": 1, "format": ""},
         "ABLFL": {"type": "character", "label": "Baseline", "length": 1, "format": ""},
@@ -43,9 +53,7 @@ def configuration(*, denominator="nonmissing", count="distinct_subjects", digits
             "source_directory": r"C:\project\data",
         },
         "variables": variables,
-        "numerator": {
-            "filter": _filter(_comparison("TRTEMFL", "Y"), 'TRTEMFL = "Y"')
-        },
+        "numerator": {"filter": _filter(_comparison("TRTEMFL", "Y"), 'TRTEMFL = "Y"')},
         "items": [
             {
                 "variable": "RACE",
@@ -58,7 +66,9 @@ def configuration(*, denominator="nonmissing", count="distinct_subjects", digits
         "count": {
             "type": count,
             "subject_variable": "USUBJID",
-            "subject_missing": "exclude" if count == "distinct_subjects" else "not_applicable",
+            "subject_missing": "exclude"
+            if count == "distinct_subjects"
+            else "not_applicable",
         },
         "treatment": {
             "source_variable": "TRTA",
@@ -96,7 +106,9 @@ def configuration(*, denominator="nonmissing", count="distinct_subjects", digits
             "numerator_filter_scope": "source_only",
             "denominator_filter_scope": "independent",
             "item_filter_applies_to_denominator": False,
-            "subject_missing": "exclude" if count == "distinct_subjects" else "not_applicable",
+            "subject_missing": "exclude"
+            if count == "distinct_subjects"
+            else "not_applicable",
             "treatment_missing": "error",
             "percent_method": "freq_divided_by_denom_times_100",
             "total_method": "recompute_from_analysis_universe",
@@ -200,7 +212,9 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         self.generator = SasCategoricalGenerator()
 
     def test_uses_jinja_template_and_rule_based_readability_style(self) -> None:
-        self.assertIn("categorical_table.sas.j2", self.generator.environment.list_templates())
+        self.assertIn(
+            "categorical_table.sas.j2", self.generator.environment.list_templates()
+        )
         code = self.generator.generate(configuration())
         self.assertIn("/* Prepare source data */", code)
         self.assertIn("/* Item 1: RACE */", code)
@@ -223,7 +237,9 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "categorical_table.sas.j2"
             path.write_text("/* custom categorical */\n", encoding="utf-8")
-            rendered = SasCategoricalGenerator(Path(temporary)).generate(configuration())
+            rendered = SasCategoricalGenerator(Path(temporary)).generate(
+                configuration()
+            )
             self.assertEqual(rendered, "/* custom categorical */\n")
 
     def test_population_uses_independent_filter_and_treatment_variable(self) -> None:
@@ -234,13 +250,17 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         self.assertIn("if missing(TRT01A) then do;", code)
         self.assertIn("from pop_src", code)
         self.assertIn("when TRT01A = 'Placebo'", code)
-        denominator_section = code.split("Calculate this Item denominator", 1)[1].split("quit;", 1)[0]
+        denominator_section = code.split("Calculate this Item denominator", 1)[1].split(
+            "quit;", 1
+        )[0]
         self.assertNotIn("RACE", denominator_section)
         self.assertIn("PARAMCD", denominator_section)
 
     def test_nonmissing_and_n1_semantics_are_visible(self) -> None:
         nonmissing = self.generator.generate(configuration())
-        denominator_section = nonmissing.split("Calculate this Item denominator", 1)[1].split("quit;", 1)[0]
+        denominator_section = nonmissing.split("Calculate this Item denominator", 1)[
+            1
+        ].split("quit;", 1)[0]
         self.assertIn("and not missing(AVAL)", denominator_section)
         self.assertNotIn("not missing(RACE)", denominator_section)
 
@@ -273,7 +293,9 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         value = configuration(digits=4)
         value["items"][0]["missing_level"]["include"] = True
         code = self.generator.generate(value)
-        numerator_section = code.split("Count every runtime level", 1)[1].split("quit;", 1)[0]
+        numerator_section = code.split("Count every runtime level", 1)[1].split(
+            "quit;", 1
+        )[0]
         self.assertNotIn("not missing(RACE)", numerator_section)
         self.assertIn("col1 = 'Placebo n (%)'", code)
         self.assertIn("col2 = 'Drug A n (%)'", code)
