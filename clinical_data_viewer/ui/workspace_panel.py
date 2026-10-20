@@ -39,6 +39,7 @@ class WorkspacePanel(QWidget):
     remove_favorite_requested = Signal()
     rename_favorite_requested = Signal()
     close_workspace_requested = Signal()
+    export_metadata_requested = Signal()
     collapse_requested = Signal()
     shown = Signal()
 
@@ -48,6 +49,7 @@ class WorkspacePanel(QWidget):
         self._root: Path | None = None
         self._favorites: tuple[WorkspaceFavorite, ...] = ()
         self._updating = False
+        self._exporting = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 6, 7, 6)
@@ -86,6 +88,9 @@ class WorkspacePanel(QWidget):
         self.rename_action.triggered.connect(self.rename_favorite_requested)
         self.remove_action = more_menu.addAction("Remove from Favorites")
         self.remove_action.triggered.connect(self.remove_favorite_requested)
+        more_menu.addSeparator()
+        self.export_metadata_action = more_menu.addAction("Export Workspace Metadata…")
+        self.export_metadata_action.triggered.connect(self.export_metadata_requested)
         more_menu.addSeparator()
         close_action = more_menu.addAction("Close Workspace")
         close_action.triggered.connect(self.close_workspace_requested)
@@ -210,6 +215,18 @@ class WorkspacePanel(QWidget):
     def selected_paths(self) -> tuple[Path, ...]:
         return tuple(item.data(Qt.UserRole) for item in self.file_list.selectedItems())
 
+    def workspace_paths(self) -> tuple[Path, ...]:
+        """Return the complete snapshot, including search-hidden entries."""
+
+        return tuple(
+            Path(self.file_list.item(index).data(Qt.UserRole))
+            for index in range(self.file_list.count())
+        )
+
+    def set_exporting(self, exporting: bool) -> None:
+        self._exporting = exporting
+        self._sync_controls()
+
     def _workspace_changed(self, index: int) -> None:
         if self._updating or index <= 0:
             return
@@ -267,6 +284,9 @@ class WorkspacePanel(QWidget):
         self.rename_action.setEnabled(favorite is not None and not busy)
         self.remove_action.setEnabled(favorite is not None and not busy)
         self.open_button.setEnabled(self.file_list.count() > 0 and not busy)
+        self.export_metadata_action.setEnabled(
+            self.file_list.count() > 0 and not busy and not self._exporting
+        )
         self.open_folder_button.setVisible(not has_root)
 
     def showEvent(self, event: QShowEvent) -> None:

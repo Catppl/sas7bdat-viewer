@@ -45,6 +45,7 @@ from ..temp_manager import TempManager
 from ..workers import Worker
 from ..workspace import WorkspaceFavoritesStore
 from ..workspace.models import normalize_workspace_path, workspace_path_key
+from ..workspace_metadata_exporter import WorkspaceMetadataExporter
 from .analysis_panel import AnalysisPanel
 from .column_filter_dialog import ColumnFilterDialog
 from .dataset_compare_panel import DatasetComparePanel
@@ -138,6 +139,7 @@ class MainWindow(QMainWindow):
             self.workspace_favorites,
             settings,
             self,
+            WorkspaceMetadataExporter(self.reader.read_metadata),
         )
         self.workspace_controller.register_favorites_menu(
             self.favorite_workspaces_menu

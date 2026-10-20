@@ -92,6 +92,20 @@ class SasDatasetReader:
             return handle
         return self.continue_cache(handle, progress)
 
+    def read_metadata(self, source_path: Path) -> DatasetMetadata:
+        """Read source metadata without copying or materializing data rows."""
+
+        path = Path(source_path).expanduser().resolve(strict=True)
+        if path.suffix.lower() == ".xpt":
+            with self.xpt_reader_factory(path) as reader:
+                variables = reader.variables
+                reported_rows = reader.total_rows
+        elif path.suffix.lower() == ".sas7bdat":
+            variables, reported_rows = self._read_sas_metadata(path)
+        else:
+            raise ValueError(f"Unsupported SAS dataset format: {path.suffix}")
+        return DatasetMetadata(path.stem, reported_rows or 0, variables)
+
     def load_initial(
         self, source_path: Path, progress: ProgressCallback | None = None
     ) -> DatasetHandle:

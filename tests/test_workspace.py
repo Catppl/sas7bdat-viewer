@@ -140,6 +140,7 @@ class WorkspaceControllerTests(unittest.TestCase):
                 WorkspaceFavoritesStore(root / "favorites.sqlite"),
                 Settings(),
                 panel,
+                Mock(),
             )
             controller.open_workspace(first)
             controller.open_workspace(second)
@@ -191,6 +192,110 @@ class WorkspaceControllerTests(unittest.TestCase):
             self.assertEqual(panel.root, root)
             self.assertEqual(panel.search.text(), "transport")
             self.assertEqual(panel.file_list.item(1).data(Qt.UserRole), second)
+            self.assertEqual(panel.workspace_paths(), (first, second))
+            self.assertTrue(panel.export_metadata_action.isEnabled())
+            panel.set_exporting(True)
+            self.assertFalse(panel.export_metadata_action.isEnabled())
+            panel.set_exporting(False)
+            self.assertTrue(panel.export_metadata_action.isEnabled())
+            panel.close()
+
+    def test_workspace_metadata_export_freezes_paths_and_uses_background_task(
+        self,
+    ) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+
+        from clinical_data_viewer.controllers.workspace_controller import (
+            WorkspaceController,
+        )
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.ui.workspace_panel import WorkspacePanel
+        from clinical_data_viewer.workspace.models import (
+            WorkspaceEntry,
+            WorkspaceSnapshot,
+        )
+        from clinical_data_viewer.workspace_metadata_exporter import (
+            WorkspaceMetadataExportResult,
+        )
+
+        class Settings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        class Host:
+            def __init__(self):
+                self.tasks = []
+
+            def show_folder_panel(self):
+                return None
+
+            def submit_workspace_task(self, owner, function, completed, failed):
+                self.tasks.append((owner, function, completed, failed))
+
+            def open_or_focus_paths(self, paths):
+                return None
+
+            def show_workspace_error(self, title, message, details=""):
+                self.error = (title, message, details)
+
+        class Exporter:
+            def __init__(self):
+                self.calls = []
+
+            def export(self, paths, destination, progress):
+                self.calls.append((paths, destination))
+                progress("Reading metadata 1/2: adsl.sas7bdat")
+                return WorkspaceMetadataExportResult(2, 4)
+
+        _application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            first = root / "adsl.sas7bdat"
+            second = root / "adae.xpt"
+            host = Host()
+            panel = WorkspacePanel()
+            exporter = Exporter()
+            controller = WorkspaceController(
+                host,
+                panel,
+                WorkspaceFavoritesStore(root / "favorites.sqlite"),
+                Settings(),
+                panel,
+                exporter,
+            )
+            panel.set_snapshot(
+                WorkspaceSnapshot(
+                    root,
+                    (
+                        WorkspaceEntry(first, first.name),
+                        WorkspaceEntry(second, second.name),
+                    ),
+                )
+            )
+            destination = root / "workspace_metadata.xlsx"
+            with patch.object(
+                QFileDialog,
+                "getSaveFileName",
+                return_value=(str(destination), "Excel files (*.xlsx)"),
+            ):
+                controller.export_metadata()
+            self.assertEqual(len(host.tasks), 1)
+            self.assertFalse(panel.export_metadata_action.isEnabled())
+            _owner, task, completed, _failed = host.tasks[0]
+
+            # Changing the visible snapshot after submission cannot change the
+            # tuple captured by the export task.
+            panel.set_snapshot(WorkspaceSnapshot(root, ()))
+            worker = Mock()
+            worker.report = Mock()
+            result = task(worker)
+            self.assertEqual(exporter.calls[0][0], (first, second))
+            with patch.object(QMessageBox, "information"):
+                completed(result)
+            self.assertFalse(panel.export_metadata_action.isEnabled())
             panel.close()
 
     def test_main_window_wires_folder_panel_without_replacing_open_lifecycle(

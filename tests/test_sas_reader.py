@@ -107,6 +107,66 @@ def write_xpt(path: Path, rows: int, *, version: int = 5) -> None:
 
 
 class SasReaderTests(unittest.TestCase):
+    def test_metadata_only_reader_does_not_copy_or_read_data_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "adsl.sas7bdat"
+            source.write_bytes(b"metadata fixture")
+            manager = TempManager(root / "temp")
+            before = tuple((root / "temp").rglob("*"))
+            fake = FakePyreadstat(source)
+            reader = SasDatasetReader(manager)
+            with patch(
+                "clinical_data_viewer.sas_reader._import_pyreadstat", return_value=fake
+            ):
+                metadata = reader.read_metadata(source)
+
+            self.assertEqual(metadata.name, "adsl")
+            self.assertEqual(metadata.row_count, 3)
+            self.assertEqual(
+                [item.name for item in metadata.variables], ["USUBJID", "AGE"]
+            )
+            self.assertEqual(len(fake.calls), 1)
+            self.assertTrue(fake.calls[0][1]["metadataonly"])
+            self.assertEqual(fake.read_paths, [source.resolve()])
+            self.assertEqual(tuple((root / "temp").rglob("*")), before)
+
+    def test_xpt_metadata_only_reader_closes_without_requesting_rows(self) -> None:
+        class MetadataOnlyXpt:
+            entered = False
+            exited = False
+            read_called = False
+
+            def __init__(self, path):
+                self.path = path
+                self.variables = (VariableMetadata("USUBJID", kind="character"),)
+                self.total_rows = 7
+
+            def __enter__(self):
+                type(self).entered = True
+                return self
+
+            def __exit__(self, *_args):
+                type(self).exited = True
+
+            def read_chunk(self, _rows):
+                type(self).read_called = True
+                raise AssertionError("metadata-only export must not read XPT rows")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "adsl.xpt"
+            source.touch()
+            reader = SasDatasetReader(
+                TempManager(root / "temp"), xpt_reader_factory=MetadataOnlyXpt
+            )
+            metadata = reader.read_metadata(source)
+
+        self.assertEqual(metadata.row_count, 7)
+        self.assertTrue(MetadataOnlyXpt.entered)
+        self.assertTrue(MetadataOnlyXpt.exited)
+        self.assertFalse(MetadataOnlyXpt.read_called)
+
     def test_sas7bdat_metadata_preserves_original_variable_format(self) -> None:
         class MetadataPyreadstat:
             @staticmethod

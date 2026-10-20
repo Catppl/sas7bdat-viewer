@@ -9,6 +9,10 @@ from ..settings import AppSettings
 from ..ui.workspace_panel import WorkspacePanel
 from ..workspace import WorkspaceFavoritesStore, scan_workspace
 from ..workspace.models import default_workspace_label
+from ..workspace_metadata_exporter import (
+    WorkspaceMetadataExporter,
+    WorkspaceMetadataExportResult,
+)
 
 
 class WorkspaceControllerHost(Protocol):
@@ -33,12 +37,14 @@ class WorkspaceController:
         store: WorkspaceFavoritesStore,
         settings: AppSettings,
         parent: QWidget,
+        metadata_exporter: WorkspaceMetadataExporter,
     ) -> None:
         self.host = host
         self.panel = panel
         self.store = store
         self.settings = settings
         self.parent = parent
+        self.metadata_exporter = metadata_exporter
         self._generation = 0
         self._favorite_menus: list[QMenu] = []
 
@@ -50,6 +56,7 @@ class WorkspaceController:
         panel.remove_favorite_requested.connect(self.remove_current_favorite)
         panel.rename_favorite_requested.connect(self.rename_current_favorite)
         panel.close_workspace_requested.connect(self.close_workspace)
+        panel.export_metadata_requested.connect(self.export_metadata)
         panel.shown.connect(self.refresh_favorites)
         self.refresh_favorites()
 
@@ -140,6 +147,65 @@ class WorkspaceController:
         self._generation += 1
         self.panel.clear_workspace()
         self.refresh_favorites()
+
+    def export_metadata(self) -> None:
+        root = self.panel.root
+        paths = self.panel.workspace_paths()
+        if root is None or not paths:
+            return
+        initial = Path(self.settings.last_export_directory or str(root))
+        suggested = initial / f"{root.name or 'workspace'}_metadata.xlsx"
+        destination, _filter = QFileDialog.getSaveFileName(
+            self.parent,
+            "Export Workspace Metadata",
+            str(suggested),
+            "Excel files (*.xlsx)",
+        )
+        if not destination:
+            return
+        output = Path(destination)
+        if output.suffix.lower() != ".xlsx":
+            output = output.with_suffix(".xlsx")
+        self.settings.last_export_directory = str(output.parent)
+        self.settings.save()
+        # Freeze the current snapshot. Refreshing or searching the panel while
+        # the worker runs must not alter this export.
+        frozen_paths = tuple(paths)
+        self.panel.set_exporting(True)
+
+        def completed(result: WorkspaceMetadataExportResult) -> None:
+            self.panel.set_exporting(False)
+            if result.failures:
+                QMessageBox.warning(
+                    self.parent,
+                    "Workspace Metadata Export Complete",
+                    f"Exported {result.dataset_count - len(result.failures):,} of "
+                    f"{result.dataset_count:,} datasets to:\n{output}\n\n"
+                    f"{len(result.failures):,} file(s) could not be read. "
+                    "Their worksheets contain error details.",
+                )
+            else:
+                QMessageBox.information(
+                    self.parent,
+                    "Workspace Metadata Export Complete",
+                    f"Exported metadata for {result.dataset_count:,} datasets "
+                    f"({result.variable_count:,} variables) to:\n{output}",
+                )
+
+        def failed(message: str, details: str) -> None:
+            self.panel.set_exporting(False)
+            self.host.show_workspace_error(
+                "Workspace Metadata Export Failed", message, details
+            )
+
+        self.host.submit_workspace_task(
+            self.panel,
+            lambda worker: self.metadata_exporter.export(
+                frozen_paths, output, worker.report
+            ),
+            completed,
+            failed,
+        )
 
     def toggle_favorite(self) -> None:
         root = self.panel.root

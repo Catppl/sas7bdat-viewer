@@ -95,10 +95,11 @@ def _write_metadata_sheet(
     metadata,
     selected: list[str],
     title,
+    sheet_name: str = "Metadata",
 ) -> None:
     """Write the canonical Metadata sheet shared by both Excel exports."""
 
-    meta_sheet = book.add_worksheet("Metadata")
+    meta_sheet = book.add_worksheet(sheet_name)
     for col, label in enumerate(
         ("Name", "Label", "Type", "Length", "Format", "Exported")
     ):
