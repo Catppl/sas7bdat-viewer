@@ -42,10 +42,14 @@ class ExcelExportView:
     comparison_columns: frozenset[str] = frozenset()
 
 
-def _selected(view: ExcelExportView) -> list[str]:
+def _metadata_selected(view: ExcelExportView) -> list[str]:
     valid = _validated_columns(view.columns, view.handle.metadata)
     excluded = set(view.handle.metadata.export_excluded_columns)
-    result = [column for column in valid if column not in excluded]
+    return [column for column in valid if column not in excluded]
+
+
+def _selected(view: ExcelExportView) -> list[str]:
+    result = _metadata_selected(view)
     if not result:
         raise ValueError("No exportable columns are selected.")
     if len(result) > 16_384:
@@ -84,6 +88,38 @@ def _temporal(
     except (OverflowError, ValueError):
         pass
     return None
+
+
+def _write_metadata_sheet(
+    book: xlsxwriter.Workbook,
+    metadata,
+    selected: list[str],
+    title,
+) -> None:
+    """Write the canonical Metadata sheet shared by both Excel exports."""
+
+    meta_sheet = book.add_worksheet("Metadata")
+    for col, label in enumerate(
+        ("Name", "Label", "Type", "Length", "Format", "Exported")
+    ):
+        meta_sheet.write_string(0, col, label, title)
+    selected_names = set(selected)
+    for row_index, variable in enumerate(metadata.variables, start=1):
+        for col, value in enumerate(
+            (
+                variable.name,
+                variable.label,
+                variable.kind,
+                variable.length,
+                variable.format,
+                "Yes" if variable.name in selected_names else "No",
+            )
+        ):
+            meta_sheet.write(row_index, col, value)
+    meta_sheet.freeze_panes(1, 0)
+    meta_sheet.autofilter(0, 0, len(metadata.variables), 5)
+    for col, width in enumerate((24, 55, 16, 12, 20, 13)):
+        meta_sheet.set_column(col, col, width)
 
 
 class ExcelExporter:
@@ -224,27 +260,7 @@ class ExcelExporter:
                     info.set_column(0, 0, 22)
                     info.set_column(1, 1, 75)
 
-                    meta_sheet = book.add_worksheet("Metadata")
-                    for col, label in enumerate(
-                        ("Name", "Label", "Type", "Length", "Format", "Exported")
-                    ):
-                        meta_sheet.write_string(0, col, label, title)
-                    for row_index, variable in enumerate(metadata.variables, start=1):
-                        for col, value in enumerate(
-                            (
-                                variable.name,
-                                variable.label,
-                                variable.kind,
-                                variable.length,
-                                variable.format,
-                                "Yes" if variable.name in selected else "No",
-                            )
-                        ):
-                            meta_sheet.write(row_index, col, value)
-                    meta_sheet.freeze_panes(1, 0)
-                    meta_sheet.autofilter(0, 0, len(metadata.variables), 5)
-                    for col, width in enumerate((24, 55, 16, 12, 20, 13)):
-                        meta_sheet.set_column(col, col, width)
+                    _write_metadata_sheet(book, metadata, selected, title)
 
                     data = book.add_worksheet("Data")
                     widths = [len(name) for name in selected]
@@ -321,6 +337,35 @@ class ExcelExporter:
                         data.set_column(col, col, min(72, max(12, width + 2)))
             os.replace(temporary, destination)
             return exported
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+
+    def export_metadata(self, view: ExcelExportView, destination: Path) -> int:
+        """Export only the same Metadata sheet used by the full workbook."""
+
+        selected = _metadata_selected(view)
+        metadata = view.handle.metadata
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.stem}-",
+            suffix=".part.xlsx",
+            dir=destination.parent,
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            with xlsxwriter.Workbook(
+                str(temporary),
+                {
+                    "constant_memory": True,
+                    "strings_to_formulas": False,
+                    "strings_to_urls": False,
+                },
+            ) as book:
+                title = book.add_format({"bold": True, "bg_color": "#DCEAF6"})
+                _write_metadata_sheet(book, metadata, selected, title)
+            os.replace(temporary, destination)
+            return len(metadata.variables)
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise

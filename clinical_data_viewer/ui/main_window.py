@@ -176,6 +176,10 @@ class MainWindow(QMainWindow):
             style.standardIcon(QStyle.SP_DialogSaveButton), "Export Excel", self
         )
         self.export_excel_action.triggered.connect(self.export_excel_current)
+        self.export_metadata_action = QAction(
+            style.standardIcon(QStyle.SP_DialogSaveButton), "Export Metadata", self
+        )
+        self.export_metadata_action.triggered.connect(self.export_metadata_current)
         self.clear_action = QAction(
             style.standardIcon(QStyle.SP_DialogResetButton), "Clear Filter", self
         )
@@ -250,6 +254,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.reload_action)
         file_menu.addAction(self.export_action)
         file_menu.addAction(self.export_excel_action)
+        file_menu.addAction(self.export_metadata_action)
         file_menu.addSeparator()
         file_menu.addAction(self.close_tab_action)
         file_menu.addAction(self.exit_action)
@@ -324,6 +329,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.export_action)
         toolbar.addAction(self.export_excel_action)
+        toolbar.addAction(self.export_metadata_action)
         toolbar.addSeparator()
         toolbar.addAction(self.clear_action)
         toolbar.addSeparator()
@@ -1931,16 +1937,7 @@ class MainWindow(QMainWindow):
             path = path.with_suffix(".xlsx")
         self.settings.last_export_directory = str(path.parent)
         self.settings.save()
-        view = ExcelExportView(
-            handle=tab.handle,
-            columns=tuple(tab.visible_columns),
-            compiled_filter=tab.compiled_filter,
-            sort=tab.model.sort_spec,
-            applied_filter_text=tab.current_where_text(),
-            manual_highlights=tuple(tab.manual_highlights_for_export().items()),
-            comparison_rows=frozenset(tab.model.highlighted_rows),
-            comparison_columns=frozenset(tab.model.highlighted_columns),
-        )
+        view = self._excel_export_view(tab)
 
         def failed(message: str, details: str) -> None:
             self._show_error("Excel Export Failed", message, details)
@@ -1986,6 +1983,61 @@ class MainWindow(QMainWindow):
             lambda _worker: self.excel_exporter.estimate_bytes(view),
             estimated,
             failed,
+        )
+
+    def export_metadata_current(self) -> None:
+        tab = self.current_dataset_tab()
+        if not tab or not tab.handle.metadata.variables:
+            return
+        initial_directory = Path(
+            self.settings.last_export_directory or str(tab.handle.source_path.parent)
+        )
+        suggested = initial_directory / f"{tab.handle.source_path.stem}_metadata.xlsx"
+        destination, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Export Dataset Metadata",
+            str(suggested),
+            "Excel files (*.xlsx)",
+        )
+        if not destination:
+            return
+        path = Path(destination)
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+        self.settings.last_export_directory = str(path.parent)
+        self.settings.save()
+        view = self._excel_export_view(tab)
+
+        def completed(variable_count: int) -> None:
+            self.task_status.setText(
+                f"Exported metadata for {variable_count:,} variables to {path.name}"
+            )
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Exported metadata for {variable_count:,} variables to:\n{path}",
+            )
+
+        self._submit(
+            tab,
+            lambda _worker: self.excel_exporter.export_metadata(view, path),
+            completed,
+            lambda message, details: self._show_error(
+                "Metadata Export Failed", message, details
+            ),
+        )
+
+    @staticmethod
+    def _excel_export_view(tab: DatasetTab) -> ExcelExportView:
+        return ExcelExportView(
+            handle=tab.handle,
+            columns=tuple(tab.visible_columns),
+            compiled_filter=tab.compiled_filter,
+            sort=tab.model.sort_spec,
+            applied_filter_text=tab.current_where_text(),
+            manual_highlights=tuple(tab.manual_highlights_for_export().items()),
+            comparison_rows=frozenset(tab.model.highlighted_rows),
+            comparison_columns=frozenset(tab.model.highlighted_columns),
         )
 
     def show_history(self, tab: DatasetTab | None = None) -> None:
@@ -2091,6 +2143,9 @@ class MainWindow(QMainWindow):
             enabled and tab.cache_complete and bool(self._exportable_columns(tab))
         )
         self.export_excel_action.setEnabled(self.export_action.isEnabled())
+        self.export_metadata_action.setEnabled(
+            enabled and bool(tab.handle.metadata.variables)
+        )
         self.clear_action.setEnabled(enabled and tab.cache_complete)
         self.close_tab_action.setEnabled(self.tabs.count() > 0)
         self.open_categorical_long_action.setEnabled(

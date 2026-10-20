@@ -6,6 +6,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from clinical_data_viewer.domain import (
@@ -138,3 +139,38 @@ class ExcelExporterTests(unittest.TestCase):
             ExcelExporter().export(bad_view, destination)
         self.assertEqual(destination.read_bytes(), b"original")
         self.assertEqual(list(self.root.glob("*.part.xlsx")), [])
+
+    def test_metadata_only_matches_full_workbook_without_reading_data(self) -> None:
+        full_destination = self.root / "full.xlsx"
+        metadata_destination = self.root / "metadata.xlsx"
+        exporter = ExcelExporter()
+        exporter.export(self.view, full_destination)
+        with patch(
+            "clinical_data_viewer.excel_exporter._connect",
+            side_effect=AssertionError("metadata export must not open SQLite"),
+        ):
+            self.assertEqual(
+                exporter.export_metadata(self.view, metadata_destination),
+                len(self.view.handle.metadata.variables),
+            )
+
+        with ZipFile(full_destination) as full, ZipFile(metadata_destination) as only:
+            workbook = ET.fromstring(only.read("xl/workbook.xml"))
+            self.assertEqual(
+                [item.attrib["name"] for item in workbook.findall(".//x:sheet", NS)],
+                ["Metadata"],
+            )
+            full_metadata = sheet(full, 2)
+            only_metadata = sheet(only, 1)
+            for row in range(1, len(self.view.handle.metadata.variables) + 2):
+                for column in "ABCDEF":
+                    reference = f"{column}{row}"
+                    self.assertEqual(
+                        value(only_metadata, reference),
+                        value(full_metadata, reference),
+                    )
+            self.assertIsNotNone(only_metadata.find("x:autoFilter", NS))
+            self.assertIsNotNone(
+                only_metadata.find("x:sheetViews/x:sheetView/x:pane", NS)
+            )
+            self.assertIsNotNone(only_metadata.find("x:cols/x:col", NS))
