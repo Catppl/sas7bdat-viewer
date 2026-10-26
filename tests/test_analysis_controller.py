@@ -42,6 +42,43 @@ class AnalysisControllerTests(unittest.TestCase):
             )
         )
 
+    def test_table_shell_gallery_routes_through_main_window_builder_entries(self) -> None:
+        from clinical_data_viewer.controllers.analysis_controller import AnalysisController
+
+        host_routes = {
+            name: Mock()
+            for name in (
+                "show_proc_means_vertical_builder",
+                "show_change_from_baseline_builder",
+                "show_categorical_builder",
+                "show_rule_based_builder",
+                "show_ae_table_builder",
+            )
+        }
+        controller = AnalysisController.__new__(AnalysisController)
+        controller._parent_widget = Mock(return_value=SimpleNamespace(**host_routes))
+        controller._table_shell_gallery = Mock()
+        controller.proc_means_vertical = Mock()
+        controller.change_from_baseline = Mock()
+        controller.categorical = Mock()
+        controller.rule_based = Mock()
+        controller.ae_table = Mock()
+
+        routes = {
+            "proc_means_vertical": "show_proc_means_vertical_builder",
+            "change_from_baseline": "show_change_from_baseline_builder",
+            "categorical": "show_categorical_builder",
+            "rule_based": "show_rule_based_builder",
+            "ae_table": "show_ae_table_builder",
+        }
+        for key, method_name in routes.items():
+            controller._open_table_shell_builder(key)
+            host_routes[method_name].assert_called_once_with()
+            host_routes[method_name].reset_mock()
+
+        controller._table_shell_gallery.close.assert_called()
+        controller.categorical.show_categorical_builder.assert_not_called()
+
     def test_categorical_propcase_collision_warns_without_blocking_result(self) -> None:
         from clinical_data_viewer.controllers.analysis.categorical import (
             CategoricalController,

@@ -112,6 +112,19 @@ class AnalysisControllerHost(Protocol):
         analysis_variable: str,
     ) -> None: ...
 
+    # MainWindow owns Analysis Dock visibility and module-specific sizing.
+    # Gallery navigation uses these public entries rather than bypassing
+    # that layout responsibility through the module controllers.
+    def show_proc_means_vertical_builder(self) -> None: ...
+
+    def show_change_from_baseline_builder(self) -> None: ...
+
+    def show_categorical_builder(self) -> None: ...
+
+    def show_rule_based_builder(self) -> None: ...
+
+    def show_ae_table_builder(self) -> None: ...
+
 
 class AnalysisController(QObject):
     """Coordinate Analysis UI workflows.
@@ -553,14 +566,23 @@ class AnalysisController(QObject):
     def _open_table_shell_builder(self, key: str) -> None:
         if self._table_shell_gallery is not None:
             self._table_shell_gallery.close()
-        routes = {
+        host = self._parent_widget()
+        host_routes = {
+            "proc_means_vertical": "show_proc_means_vertical_builder",
+            "change_from_baseline": "show_change_from_baseline_builder",
+            "categorical": "show_categorical_builder",
+            "rule_based": "show_rule_based_builder",
+            "ae_table": "show_ae_table_builder",
+        }
+        fallback_routes = {
             "proc_means_vertical": self.proc_means_vertical.show_builder,
             "change_from_baseline": self.change_from_baseline.show_builder,
             "categorical": self.categorical.show_categorical_builder,
             "rule_based": self.rule_based.show_rule_based_builder,
             "ae_table": self.ae_table.show_ae_table_builder,
         }
-        route = routes.get(key)
+        host_route = getattr(host, host_routes.get(key, ""), None)
+        route = host_route if callable(host_route) else fallback_routes.get(key)
         if route is not None:
             route()
 
