@@ -8,6 +8,7 @@ from .change_from_baseline import (
 )
 from .listing import ListingController, ListingResultContext
 from .proc_means import ProcMeansController, ProcMeansResultContext
+from .proc_means_vertical import ProcMeansVerticalController, ProcMeansVerticalResultContext
 from .rule_based import RuleBasedController, RuleBasedResultContext
 
 __all__ = [
@@ -21,6 +22,8 @@ __all__ = [
     "ListingResultContext",
     "ProcMeansController",
     "ProcMeansResultContext",
+    "ProcMeansVerticalController",
+    "ProcMeansVerticalResultContext",
     "RuleBasedController",
     "RuleBasedResultContext",
 ]

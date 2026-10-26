@@ -23,6 +23,7 @@ from .categorical_builder import CategoricalBuilder
 from .change_from_baseline_builder import ChangeFromBaselineBuilder
 from .listing_builder import ListingBuilder
 from .proc_means_builder import ProcMeansBuilder
+from .proc_means_vertical_builder import ProcMeansVerticalBuilder
 from .rule_based_builder import RuleBasedBuilder
 
 
@@ -43,6 +44,7 @@ class AnalysisPanel(QWidget):
         layout.addWidget(self.tabs)
         self._create_statistics_tab()
         self._create_builder_tab()
+        self._create_proc_means_vertical_tab()
         self._create_categorical_tab()
         self._create_rule_based_tab()
         self._create_ae_table_tab()
@@ -77,6 +79,9 @@ class AnalysisPanel(QWidget):
 
     def _create_builder_tab(self) -> None:
         self.builder = ProcMeansBuilder()
+
+    def _create_proc_means_vertical_tab(self) -> None:
+        self.proc_means_vertical_builder = ProcMeansVerticalBuilder()
 
     def _create_comparison_tab(self) -> None:
         self.comparison_page = QWidget()
@@ -124,6 +129,12 @@ class AnalysisPanel(QWidget):
 
     def show_builder_tab(self) -> None:
         self._activate(self.builder, "PROC MEANS Builder")
+
+    def show_proc_means_vertical_tab(self) -> None:
+        self._activate(
+            self.proc_means_vertical_builder,
+            "PROC MEANS Table Builder (Vertical)",
+        )
 
     def show_categorical_tab(self) -> None:
         self._activate(self.categorical_builder, "Categorical Table")

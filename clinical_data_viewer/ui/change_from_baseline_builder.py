@@ -301,6 +301,7 @@ class ChangeFromBaselineBuilder(QWidget):
         self.run_button.clicked.connect(self._run)
         buttons.addWidget(self.run_button)
         outer.addLayout(buttons)
+        self.set_dataset(None, "")
 
     def set_source_datasets(self, datasets, selected=None) -> None:
         self.source_selector.set_sources(datasets, selected)
@@ -342,7 +343,10 @@ class ChangeFromBaselineBuilder(QWidget):
             for checkbox in self.statistics.values():
                 checkbox.setChecked(True)
             self.include_total.setChecked(True)
-        self.setEnabled(metadata is not None)
+        # Keep source-independent actions (for example Shell Preview) usable
+        # before a dataset is selected; _sync_busy controls source-dependent
+        # Run and SAS code-generation actions.
+        self.setEnabled(True)
         self._sync_busy()
 
     def set_source_unavailable(self) -> None:

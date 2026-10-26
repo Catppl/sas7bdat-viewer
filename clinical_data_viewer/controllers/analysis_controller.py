@@ -26,6 +26,7 @@ from ..ui.change_from_baseline_builder import ChangeFromBaselineBuilderSelection
 from ..ui.dataset_tab import DatasetTab
 from ..ui.listing_builder import ListingBuilderSelection
 from ..ui.proc_means_builder import ProcMeansBuilderSelection
+from ..ui.proc_means_vertical_builder import ProcMeansVerticalBuilderSelection
 from ..ui.rule_based_builder import RuleBasedBuilderSelection
 from ..workers import Worker
 from .analysis import (
@@ -34,12 +35,14 @@ from .analysis import (
     ChangeFromBaselineController,
     ListingController,
     ProcMeansController,
+    ProcMeansVerticalController,
     RuleBasedController,
 )
 from .analysis.ae_table import AeTableResultContext as _AeTableResultContext
 from .analysis.categorical import CategoricalResultContext as _CategoricalResultContext
 from .analysis.listing import ListingResultContext as _ListingResultContext
 from .analysis.proc_means import ProcMeansResultContext as _ProcMeansResultContext
+from .analysis.proc_means_vertical import ProcMeansVerticalResultContext as _ProcMeansVerticalResultContext
 from .analysis.rule_based import RuleBasedResultContext as _RuleBasedResultContext
 
 # Backwards-compatible imports for callers that used the pre-migration module.
@@ -47,6 +50,7 @@ ListingResultContext = _ListingResultContext
 RuleBasedResultContext = _RuleBasedResultContext
 AeTableResultContext = _AeTableResultContext
 ProcMeansResultContext = _ProcMeansResultContext
+ProcMeansVerticalResultContext = _ProcMeansVerticalResultContext
 CategoricalResultContext = _CategoricalResultContext
 
 
@@ -136,6 +140,7 @@ class AnalysisController(QObject):
         self.rule_based = RuleBasedController(self, temp_manager, settings)
         self.ae_table = AeTableController(self, temp_manager, settings)
         self.proc_means = ProcMeansController(self, temp_manager, settings)
+        self.proc_means_vertical = ProcMeansVerticalController(self, temp_manager, settings)
         self.categorical = CategoricalController(self, temp_manager, settings)
         self.change_from_baseline = ChangeFromBaselineController(
             self, temp_manager, settings
@@ -189,6 +194,17 @@ class AnalysisController(QObject):
             )
         )
         proc_builder.cleared.connect(self.proc_means.clear_proc_means_source)
+
+        vertical_builder = self._panel.proc_means_vertical_builder
+        vertical_builder.run_requested.connect(self.proc_means_vertical.run)
+        vertical_builder.source_selected.connect(self.proc_means_vertical.select_source)
+        vertical_builder.population_selected.connect(self.proc_means_vertical.select_population)
+        vertical_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(
+                self._parent_widget(), "PROC MEANS Table Builder (Vertical)", message
+            )
+        )
+        vertical_builder.cleared.connect(self.proc_means_vertical.clear_source)
 
         categorical_builder = self._panel.categorical_builder
         categorical_builder.run_requested.connect(self.categorical.run_categorical)
@@ -292,6 +308,8 @@ class AnalysisController(QObject):
             titles.append("AE Table")
         if self.proc_means_source is tab:
             titles.append("Proc Means")
+        if self.proc_means_vertical.source is tab:
+            titles.append("Proc Means Vertical")
         if self.categorical_source is tab:
             titles.append("Categorical")
         if self.change_from_baseline_source is tab:
@@ -319,6 +337,11 @@ class AnalysisController(QObject):
                 "PROC MEANS Running",
                 f"This dataset is currently being analyzed. Wait for PROC MEANS to finish before {action} it.",
             )
+        if self.proc_means_vertical.is_input_tab(tab):
+            return TabCloseBlocker(
+                "PROC MEANS Vertical Running",
+                f"This dataset is currently used by a vertical PROC MEANS table. Wait for the calculation to finish before {action} it.",
+            )
         if self.categorical.is_input_tab(tab):
             return TabCloseBlocker(
                 "Categorical Table Running",
@@ -341,7 +364,11 @@ class AnalysisController(QObject):
     def source_reload_started(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module before a dataset handle is replaced."""
         self.proc_means.source_reload_started(tab)
-        self.change_from_baseline.source_reload_started(tab)
+        # The vertical Builder keeps its own source selection; it will be
+        # refreshed when the user reopens it after a source reload.
+        change_from_baseline = getattr(self, "change_from_baseline", None)
+        if change_from_baseline is not None:
+            change_from_baseline.source_reload_started(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_started(tab)
@@ -349,7 +376,9 @@ class AnalysisController(QObject):
     def source_reload_completed(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module after a reload fully completes."""
         self.proc_means.source_reload_completed(tab)
-        self.change_from_baseline.source_reload_completed(tab)
+        change_from_baseline = getattr(self, "change_from_baseline", None)
+        if change_from_baseline is not None:
+            change_from_baseline.source_reload_completed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_completed(tab)
@@ -357,7 +386,9 @@ class AnalysisController(QObject):
     def source_reload_failed(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module that a reload failed."""
         self.proc_means.source_reload_failed(tab)
-        self.change_from_baseline.source_reload_failed(tab)
+        change_from_baseline = getattr(self, "change_from_baseline", None)
+        if change_from_baseline is not None:
+            change_from_baseline.source_reload_failed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_failed(tab)
@@ -374,6 +405,9 @@ class AnalysisController(QObject):
         if paths is not None:
             return paths
         paths = self.proc_means.take_result_release_paths(tab)
+        if paths is not None:
+            return paths
+        paths = self.proc_means_vertical.take_result_release_paths(tab)
         if paths is not None:
             return paths
         paths = self.categorical.take_result_release_paths(tab)
@@ -506,6 +540,23 @@ class AnalysisController(QObject):
 
     def run_proc_means_builder(self, selection: ProcMeansBuilderSelection) -> None:
         self.proc_means.run_proc_means_builder(selection)
+
+    def show_proc_means_vertical_builder(self) -> None:
+        self.proc_means_vertical.show_builder()
+
+    def refresh_proc_means_vertical_sources(self, datasets=None) -> None:
+        self.proc_means_vertical.refresh_sources(datasets)
+
+    def run_proc_means_vertical(
+        self, selection: ProcMeansVerticalBuilderSelection
+    ) -> None:
+        self.proc_means_vertical.run(selection)
+
+    def clear_proc_means_vertical_source(self) -> None:
+        self.proc_means_vertical.clear_source()
+
+    def open_proc_means_vertical_long_result(self) -> None:
+        self.proc_means_vertical.open_long_result()
 
     def drilldown_proc_means(
         self, tab: DatasetTab, view_row: int, statistic_column: str, display: str

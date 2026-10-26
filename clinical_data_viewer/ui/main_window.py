@@ -230,11 +230,23 @@ class MainWindow(QMainWindow):
         self.open_change_from_baseline_long_action.triggered.connect(
             lambda: self.analysis_controller.open_change_from_baseline_long_result()
         )
+        self.open_proc_means_vertical_long_action = QAction(
+            "Open PROC MEANS Vertical Long Result", self
+        )
+        self.open_proc_means_vertical_long_action.triggered.connect(
+            lambda: self.analysis_controller.open_proc_means_vertical_long_result()
+        )
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
         self.proc_means_builder_action = QAction("PROC MEANS Builder", self)
         self.proc_means_builder_action.triggered.connect(self.show_proc_means_builder)
+        self.proc_means_vertical_builder_action = QAction(
+            "PROC MEANS Table Builder (Vertical)", self
+        )
+        self.proc_means_vertical_builder_action.triggered.connect(
+            self.show_proc_means_vertical_builder
+        )
         self.categorical_builder_action = QAction("Categorical Table Builder", self)
         self.categorical_builder_action.triggered.connect(self.show_categorical_builder)
         self.rule_based_builder_action = QAction("Rule-based Table Builder", self)
@@ -281,9 +293,11 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.open_rule_based_long_action)
         view_menu.addAction(self.open_ae_table_long_action)
         view_menu.addAction(self.open_change_from_baseline_long_action)
+        view_menu.addAction(self.open_proc_means_vertical_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
+        tools_menu.addAction(self.proc_means_vertical_builder_action)
         tools_menu.addAction(self.categorical_builder_action)
         tools_menu.addAction(self.rule_based_builder_action)
         tools_menu.addAction(self.ae_table_builder_action)
@@ -443,6 +457,9 @@ class MainWindow(QMainWindow):
         )
         self.analysis_panel.all_tabs_closed.connect(self.analysis_dock.hide)
         self.analysis_panel.builder.settings_requested.connect(self.show_settings)
+        self.analysis_panel.proc_means_vertical_builder.settings_requested.connect(
+            self.show_settings
+        )
 
     def _create_compare_panel(self) -> None:
         self.compare_panel = DatasetComparePanel()
@@ -829,6 +846,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "analysis_controller"):
             analysis_datasets = self.available_analysis_dataset_tabs()
             self.analysis_controller.refresh_proc_means_sources(analysis_datasets)
+            self.analysis_controller.refresh_proc_means_vertical_sources(analysis_datasets)
             self.analysis_controller.refresh_categorical_sources(analysis_datasets)
             self.analysis_controller.refresh_listing_sources(analysis_datasets)
             self.analysis_controller.refresh_rule_based_sources(analysis_datasets)
@@ -1645,11 +1663,19 @@ class MainWindow(QMainWindow):
             self.analysis_panel.builder.set_default_statistics(
                 self.settings.proc_means_statistics
             )
+            self.analysis_panel.proc_means_vertical_builder.set_default_statistics(
+                self.settings.proc_means_statistics
+            )
             if self._last_statistics_request is not None:
                 self._recalculate_statistics()
 
     def show_proc_means_builder(self) -> None:
         self.analysis_controller.show_proc_means_builder()
+        self.analysis_dock.setMinimumWidth(310)
+        self.analysis_dock.show()
+
+    def show_proc_means_vertical_builder(self) -> None:
+        self.analysis_controller.show_proc_means_vertical_builder()
         self.analysis_dock.setMinimumWidth(310)
         self.analysis_dock.show()
 
@@ -2206,6 +2232,9 @@ class MainWindow(QMainWindow):
         )
         self.open_change_from_baseline_long_action.setEnabled(
             tab is not None and tab.handle.kind == "change_from_baseline"
+        )
+        self.open_proc_means_vertical_long_action.setEnabled(
+            tab is not None and tab.handle.kind == "proc_means_vertical"
         )
 
     @staticmethod

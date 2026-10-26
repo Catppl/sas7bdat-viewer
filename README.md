@@ -23,7 +23,7 @@
 - 成功 WHERE 历史持久化；支持当前数据集/全部数据集、回填、单条删除和清空。列头互动筛选会同步生成可编辑的 SAS-like WHERE，并与手写条件作为一条完整条件保存。
 - CSV 仅导出“当前筛选结果 + 当前显示列”，并保持当前排序；编码为 UTF-8 BOM，后台分批写出。存在手工行高亮时会额外增加 `HIGHLIGHT` 列记录颜色名称，因为 CSV 本身不能保存单元格背景色。
 - 列头右侧的筛选箭头提供 Excel 风格互动筛选：可搜索/勾选当前值，也可按 `=`、`!=`、大小比较、Between 和 Contains 设置条件。不同列之间按 AND 组合，并与手写 WHERE 一起生效；完整条件会同步到 WHERE 编辑框，蓝色筛选标签可逐列清除。
-- 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。两种模式均使用当前完整筛选结果。
+- 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。`Tools > PROC MEANS Table Builder (Vertical)` 可按 Analysis Variable 生成临床纵向表：每个分析变量独立输出 n/Mean/SD/Median/Q1,Q3/Min,Max 统计行，Treatment/Visit 等分组横向展开，并支持 Population N、独立 Population Treatment、总 N、Item label 集中维护和 Long Result。两种 Builder 均使用当前完整筛选结果。
 - `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（独立 ADSL treatment/WHERE）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total、单元格 drill-down、配置 JSON v1 和 SAS Code Generator。
 - `Tools > Rule-based Table Builder` 可按多条 Item/Row Filter 生成 distinct `USUBJID` 的临床 `n (%)` 宽表，第一版支持 Population N、Non-missing N 和 Same-universe 三种独立分母，并可从 `View > Open Rule-based Long Result` 打开长表。
 - `Tools > AE Table Builder` 可按 SOC/PT 自动生成 Any AE、System Organ Class 和 Preferred Term 的 distinct `USUBJID` `n (%)` 宽表，同时保存长表、钻取结果和 `ae_table_config.json` v1。
@@ -70,6 +70,8 @@ SASDataViewer.exe --workspace "C:\clinical\project\adam"
 ## PROC MEANS 模块
 
 PROC MEANS 用于查看当前数据子集中的数值型变量统计结果。它只做只读分析，不修改原数据，也不会把结果写回 SAS7BDAT。当前提供 Simple 和 Builder 两种模式。
+
+`Tools > PROC MEANS Table Builder (Vertical)` 是独立的临床纵向表 Builder，不改变现有 Simple 或普通 Builder。可以选择多个 Analysis Variables、多个 Group Variables（例如 Treatment/Visit）和统计量，并通过 Up/Down 调整统计量顺序。每个分析变量形成一个 Item，Item label 可在 Builder 的集中配置框中按 `AVAL = Total Cholesterol (mmol/L)` 逐行维护；`Q1`/`Q3` 与 `Min`/`Max` 会分别合并为一行。Population Dataset 可单独选择，Population Treatment Variable 可以与分析数据集的 Treatment Variable 不同；未选择 Population Dataset 时运行前会提示，确认后使用当前 Analysis Dataset 计算表头 N。Population 中发现缺失 treatment 会阻止运行，并提示在 Population WHERE 中补充非缺失条件。结果为临时 SQLite Tab，同时保存 `proc_means_vertical_config.json`，可从 `View > Open PROC MEANS Vertical Long Result` 打开长表。
 
 ### 打开方式
 
