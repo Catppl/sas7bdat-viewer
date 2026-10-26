@@ -730,6 +730,30 @@ Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 
 这是未签名的 windowed `onedir` 程序：通常比 one-file 启动更快，但 Windows SmartScreen 仍可能显示未知发布者提示。正式内部发布如需消除此提示，应使用组织的代码签名证书签名。EXE 与 `_internal` 必须保持相对位置不变；Windows 文件关联应指向实际解压位置，移动目录后需要重新关联。若内部环境禁止 UPX，可在 `SASDataViewer.spec` 中把 `upx=True` 改为 `False` 后重新构建。
 
+## 新增 Table Builder 的施工手册
+
+以后根据临床 table shell 新增独立 Builder、Python reference engine、配置 JSON、Jinja2 SAS Code Generator 或 Table Shell Gallery 卡片时，请先阅读：
+
+- [Table Shell Builder、SAS Code Generator 与 Gallery 执行手册](docs/table-shell-builder-codegen-gallery-execution-playbook.md)
+
+手册规定了模块目录、`MainWindow`/Controller 职责边界、Shell DOCX/PNG 同步、JSON contract、临时 SQLite、Jinja2 codegen、Gallery 路由、测试矩阵和完整验收顺序。尤其不要把业务计算写入 `MainWindow`；Gallery 必须通过 MainWindow 的 `show_*_builder()` 打开，保证 Analysis Dock 正确显示。
+
+需求仍需确认时，可直接使用：
+
+```text
+请严格按照 docs/table-shell-builder-codegen-gallery-execution-playbook.md，
+根据这份 shell 新增独立 Builder 和 SAS Code Generator，并接入 Table Shell Gallery。
+先审阅需求并列出待确认的业务 contract，我同意后再开始。
+```
+
+Shell 和业务 contract 已确认时，可使用：
+
+```text
+这份 shell 已确认。请严格按照 Table Builder 执行手册开始施工，
+不要修改无关模块；完成 Python、JSON、Jinja2 SAS Generator、
+Gallery 接入及手册规定的回归测试。
+```
+
 ## 项目结构
 
 ```text

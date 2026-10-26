@@ -359,6 +359,30 @@ Start-Process .\dist\zip-test\SASDataViewer\SASDataViewer.exe
 
 Keep the EXE and `_internal` directory together. The build is unsigned, so Windows SmartScreen may show an unknown-publisher warning. Code signing can be added for an internal release.
 
+## Adding a Table Builder
+
+Before adding an independent Builder, Python reference engine, configuration JSON, Jinja2 SAS Code Generator, or Table Shell Gallery card from a clinical table shell, follow:
+
+- [Table Shell Builder, SAS Code Generator, and Gallery implementation playbook](docs/table-shell-builder-codegen-gallery-execution-playbook.md)
+
+The playbook defines module layout, the `MainWindow`/Controller boundary, synchronized DOCX/PNG shell assets, the JSON contract, temporary SQLite results, Jinja2 code generation, Gallery routing, regression tests, and acceptance order. Business calculations must not be placed in `MainWindow`; Gallery navigation must use MainWindow's `show_*_builder()` entry so the Analysis Dock is restored correctly.
+
+For a shell that still needs requirements review, use:
+
+```text
+Follow docs/table-shell-builder-codegen-gallery-execution-playbook.md strictly.
+Review this shell, list every unresolved business contract, and wait for my approval
+before adding its independent Builder, SAS Code Generator, and Gallery card.
+```
+
+For an approved shell, use:
+
+```text
+This shell and its business contract are approved. Follow the Table Builder playbook,
+preserve unrelated modules, and implement the Python reference path, JSON contract,
+Jinja2 SAS Generator, Gallery integration, and required regression tests.
+```
+
 ## Project structure
 
 ```text
