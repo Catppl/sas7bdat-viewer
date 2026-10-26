@@ -11,6 +11,11 @@ from ...change_from_baseline.configuration import (
     build_change_from_baseline_configuration,
 )
 from ...change_from_baseline.result_store import ChangeFromBaselineLongResultBuilder
+from ...change_from_baseline.drilldown import (
+    CategoricalQueryBuilder,
+    build_cell_filter,
+    lookup_cell,
+)
 from ...codegen.sas import SasChangeFromBaselineGenerator
 from ...dataset_utils import is_analysis_dataset
 from ...domain import DatasetHandle
@@ -39,6 +44,7 @@ class ChangeFromBaselineController(AnalysisModuleController):
         self._engine = ChangeFromBaselineEngine(temp_manager)
         self._sas_generator = SasChangeFromBaselineGenerator()
         self._long_result_builder = ChangeFromBaselineLongResultBuilder(temp_manager)
+        self._query_builder = CategoricalQueryBuilder(temp_manager)
         self._source: DatasetTab | None = None
         self._input_tabs: set[DatasetTab] = set()
         self._results: dict[DatasetTab, ChangeFromBaselineResultContext] = {}
@@ -308,6 +314,67 @@ class ChangeFromBaselineController(AnalysisModuleController):
             completed,
             lambda message, details: self._host.show_analysis_error(
                 "Change from Baseline Long Result Failed", message, details
+            ),
+        )
+
+    def drilldown_change_from_baseline(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        """Show source records or distinct subjects contributing to a cell."""
+        context = self._results.get(tab)
+        source_row = tab.model.source_row_id(view_row)
+        if context is None or source_row is None or not display:
+            return
+        cell = lookup_cell(tab.handle, source_row, column_name)
+        if cell is None:
+            return
+        dialog, records, subjects, denominator = self._drilldown_dialog()
+        dialog.setWindowTitle("Change from Baseline Drill-down")
+        denominator.hide()
+        dialog.layout().itemAt(0).widget().setText(
+            "Choose source rows to display for this Change from Baseline cell."
+        )
+        dialog.exec()
+        selected = dialog.selected_button
+        if selected not in {records, subjects}:
+            return
+        try:
+            where_sql, parameters = build_cell_filter(
+                context.source.metadata,
+                context.config,
+                cell,
+                subjects=selected is subjects,
+            )
+        except (KeyError, ValueError, StopIteration) as error:
+            QMessageBox.warning(
+                self._parent_widget(), "Change from Baseline Drill-down", str(error)
+            )
+            return
+        mode = "Distinct Subjects" if selected is subjects else "Contributing Records"
+        title = self._host.unique_analysis_tab_title(f"Query: {mode}")
+        self._host.set_analysis_task_status(f"Building {title}…")
+        generation = tab.generation
+
+        def completed(handle: DatasetHandle) -> None:
+            if not self._host.is_open_dataset_tab(tab) or generation != tab.generation:
+                self._host.discard_analysis_result(handle)
+                return
+            self._host.show_analysis_result_tab(
+                self._host.create_analysis_result_tab(handle), title
+            )
+
+        self._host.submit_analysis_task(
+            tab,
+            lambda _worker: self._query_builder.run(
+                context.source,
+                where_sql,
+                parameters,
+                title,
+                subject_id_variable="USUBJID" if selected is subjects else None,
+            ),
+            completed,
+            lambda message, details: self._host.show_analysis_error(
+                "Change from Baseline Drill-down Failed", message, details
             ),
         )
 

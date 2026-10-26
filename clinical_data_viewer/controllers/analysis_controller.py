@@ -445,6 +445,13 @@ class AnalysisController(QObject):
     def open_change_from_baseline_long_result(self) -> None:
         self.change_from_baseline.open_long_result()
 
+    def drilldown_change_from_baseline(
+        self, tab, view_row: int, column_name: str, display: str
+    ) -> None:
+        self.change_from_baseline.drilldown_change_from_baseline(
+            tab, view_row, column_name, display
+        )
+
     @property
     def ae_table_source(self) -> DatasetTab | None:
         return self.ae_table.ae_table_source

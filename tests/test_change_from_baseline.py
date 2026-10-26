@@ -14,6 +14,10 @@ from clinical_data_viewer.change_from_baseline import (
 from clinical_data_viewer.change_from_baseline.result_store import (
     ChangeFromBaselineLongResultBuilder,
 )
+from clinical_data_viewer.change_from_baseline.drilldown import (
+    build_cell_filter,
+    lookup_cell,
+)
 from clinical_data_viewer.domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from clinical_data_viewer.filter_engine import FilterEngine
 from clinical_data_viewer.temp_manager import TempManager
@@ -52,6 +56,60 @@ def make_handle(root: Path, rows: tuple[tuple[object, ...], ...]) -> DatasetHand
 
 
 class ChangeFromBaselineTests(unittest.TestCase):
+    def test_result_cells_map_back_to_source_group_and_statistic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                (
+                    ("S1", "ALB", 1, "A", 1.0),
+                    ("S2", "ALB", 1, "A", 2.0),
+                    ("S3", "ALB", 1, "B", 3.0),
+                ),
+            )
+            config = ChangeFromBaselineConfig(
+                "CHG",
+                "PARAMCD",
+                row_variables=("AVISITN",),
+                treatment_variable="TRT01A",
+                data_filter=FilterEngine(source.metadata.variables).compile(
+                    'PARAMCD = "ALB"'
+                ),
+                data_filter_text='PARAMCD = "ALB"',
+            )
+            result = ChangeFromBaselineEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            cell = lookup_cell(result, 1, "TRT_1_MEAN")
+            self.assertIsNotNone(cell)
+            assert cell is not None
+            self.assertEqual(cell.item, "ALB")
+            self.assertEqual(cell.row_values, (("AVISITN", 1.0),))
+            self.assertEqual(cell.treatment, "A")
+            self.assertEqual(cell.statistic, "mean")
+            where, parameters = build_cell_filter(source.metadata, config, cell)
+            self.assertIn('"PARAMCD" = ?', where)
+            self.assertIn('"AVISITN" = ?', where)
+            self.assertIn('"TRT01A" = ?', where)
+            self.assertIn('"CHG"', where)
+            self.assertEqual(parameters, ("ALB", "ALB", 1.0, "A"))
+
+    def test_total_cell_filter_does_not_add_treatment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(root, (("S1", "ALB", 1, "A", 1.0),))
+            config = ChangeFromBaselineConfig(
+                "CHG", "PARAMCD", treatment_variable="TRT01A"
+            )
+            result = ChangeFromBaselineEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            cell = lookup_cell(result, 1, "TOTAL_MEAN")
+            self.assertIsNotNone(cell)
+            assert cell is not None
+            where, _parameters = build_cell_filter(source.metadata, config, cell)
+            self.assertNotIn('"TRT01A"', where)
+
     def test_change_table_has_small_n_large_n_total_and_where_item_order(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

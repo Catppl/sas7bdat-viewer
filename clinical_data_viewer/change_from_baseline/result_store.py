@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -32,6 +33,8 @@ class ChangeResultSchema:
     long_variables: tuple[VariableMetadata, ...]
     decimal_base: str
     statistic_decimal_offsets: tuple[tuple[str, int], ...]
+    statistic_columns: tuple[tuple[str, str], ...]
+    drilldown_columns: tuple[tuple[str, str], ...]
 
 
 def build_result_schema(
@@ -48,6 +51,7 @@ def build_result_schema(
     used = {"item"}
     wide = [VariableMetadata("ITEM", "Item", "character", 200)]
     statistic_columns: list[tuple[str, str]] = []
+    drilldown_columns: list[tuple[str, str]] = []
     for name in row_variables:
         source_variable = source_fields[name.casefold()]
         output_name = _unique_name(source_variable.name, used)
@@ -79,6 +83,7 @@ def build_result_schema(
                 name, f"{label} N" if has_treatment_columns else "N", "numeric"
             )
         )
+        drilldown_columns.append((name, "SUBJECT_N"))
     if include_total and treatment_levels:
         for statistic in statistics:
             name = _unique_name(f"TOTAL_{statistic.upper()}", used)
@@ -90,6 +95,7 @@ def build_result_schema(
             statistic_columns.append((name, statistic))
         name = _unique_name("TOTAL_SUBJECT_N", used)
         wide.append(VariableMetadata(name, "Total N", "numeric"))
+        drilldown_columns.append((name, "SUBJECT_N"))
 
     long_used = {"item", "treatment", "statistic", "value", "small_n", "subject_n"}
     long_row_variables: list[VariableMetadata] = []
@@ -119,7 +125,14 @@ def build_result_schema(
     decimal_offsets = tuple(
         (name, decimals.get(statistic, 0)) for name, statistic in statistic_columns
     )
-    return ChangeResultSchema(tuple(wide), tuple(long), decimal_base, decimal_offsets)
+    return ChangeResultSchema(
+        tuple(wide),
+        tuple(long),
+        decimal_base,
+        decimal_offsets,
+        tuple(statistic_columns),
+        tuple((*statistic_columns, *drilldown_columns)),
+    )
 
 
 class ChangeFromBaselineResultWriter:
@@ -148,6 +161,13 @@ class ChangeFromBaselineResultWriter:
             + long_defs
             + ")"
         )
+        self.connection.execute(
+            "CREATE TABLE change_from_baseline_cell_map ("
+            "result_row INTEGER NOT NULL, column_name TEXT NOT NULL, "
+            "item_json TEXT NOT NULL, row_values_json TEXT NOT NULL, "
+            "treatment_json TEXT, statistic TEXT NOT NULL, "
+            "PRIMARY KEY (result_row, column_name))"
+        )
 
     def add_wide(self, values: tuple[object, ...], base_decimals: int = 0) -> int:
         names = ", ".join(quote_identifier(v.name) for v in self.schema.wide_variables)
@@ -168,6 +188,31 @@ class ChangeFromBaselineResultWriter:
         self.connection.execute(
             f"INSERT INTO change_from_baseline_long (_source_row, {names}) VALUES (?, {placeholders})",
             (self.long_count, *values),
+        )
+
+    def add_cell_map(
+        self,
+        result_row: int,
+        column_name: str,
+        item: object,
+        row_values: tuple[tuple[str, object], ...],
+        treatment: object | None,
+        statistic: str,
+    ) -> None:
+        self.connection.execute(
+            "INSERT INTO change_from_baseline_cell_map "
+            "(result_row, column_name, item_json, row_values_json, "
+            "treatment_json, statistic) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                result_row,
+                column_name,
+                json.dumps(item, ensure_ascii=False),
+                json.dumps(dict(row_values), ensure_ascii=False),
+                json.dumps(treatment, ensure_ascii=False)
+                if treatment is not None
+                else None,
+                statistic,
+            ),
         )
 
     def finish(
@@ -192,6 +237,7 @@ class ChangeFromBaselineResultWriter:
             self.schema.wide_variables,
             decimal_base_column=self.schema.decimal_base,
             statistic_decimal_offsets=self.schema.statistic_decimal_offsets,
+            change_from_baseline_statistic_keys=self.schema.drilldown_columns,
             display_column_names=tuple(
                 (variable.name, variable.label or variable.name)
                 for variable in self.schema.wide_variables

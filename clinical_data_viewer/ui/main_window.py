@@ -1203,6 +1203,13 @@ class MainWindow(QMainWindow):
                 self.analysis_controller.drilldown_ae_table(owner, row, column, display)
             )
         )
+        tab.change_from_baseline_drilldown_requested.connect(
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_change_from_baseline(
+                    owner, row, column, display
+                )
+            )
+        )
         return tab
 
     def _set_apply_sas_date_time_formats(self, enabled: bool) -> None:

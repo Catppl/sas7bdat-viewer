@@ -397,17 +397,50 @@ class ChangeFromBaselineEngine:
             config.include_total,
             config.statistic_decimals,
         )
+        group_specs = list(treatment_levels)
+        if not group_specs:
+            group_specs = [("__all__", None, "All")]
+        # Keep the generated column-to-source mapping in the same order as the
+        # wide result schema, including the distinct-subject columns.
+        wide_cursor = 1 + len(config.row_variables)
+        group_column_names: list[tuple[tuple[str, ...], str]] = []
+        for _group in group_specs:
+            statistic_names = tuple(
+                schema.wide_variables[wide_cursor + offset].name
+                for offset in range(len(config.statistics))
+            )
+            wide_cursor += len(config.statistics)
+            subject_name = schema.wide_variables[wide_cursor].name
+            wide_cursor += 1
+            group_column_names.append((statistic_names, subject_name))
+        total_column_names: tuple[tuple[str, ...], str] | None = None
+        if config.include_total and treatment_levels:
+            statistic_names = tuple(
+                schema.wide_variables[wide_cursor + offset].name
+                for offset in range(len(config.statistics))
+            )
+            wide_cursor += len(config.statistics)
+            total_column_names = (
+                statistic_names,
+                schema.wide_variables[wide_cursor].name,
+            )
         directory = self.temp_manager.create_dataset_directory()
         writer = ChangeFromBaselineResultWriter(directory / "dataset.sqlite", schema)
         labels = {str(value).casefold(): label for value, label in config.item_labels}
         try:
-            group_specs = list(treatment_levels)
-            if not group_specs:
-                group_specs = [("__all__", None, "All")]
             for raw_item, row_values in base_keys:
                 wide: list[object] = [self._item_label(raw_item, labels), *row_values]
                 long_rows: list[tuple[object, ...]] = []
-                for treatment_key, treatment_value, treatment_label in group_specs:
+                row_mapping = tuple(
+                    (variable.name, value)
+                    for variable, value in zip(row_fields, row_values, strict=True)
+                )
+                cell_mappings: list[tuple[str, object | None, str]] = []
+                for group_index, (
+                    treatment_key,
+                    treatment_value,
+                    treatment_label,
+                ) in enumerate(group_specs):
                     key = (raw_item, row_values, treatment_value)
                     group = groups.get(key, _Group([], set()))
                     stats = calculate_value_statistics(
@@ -420,6 +453,12 @@ class ChangeFromBaselineEngine:
                     for statistic in config.statistics:
                         value = stats.get(statistic)
                         wide.append(value)
+                        column_name = group_column_names[group_index][0][
+                            config.statistics.index(statistic)
+                        ]
+                        cell_mappings.append(
+                            (column_name, treatment_value, statistic)
+                        )
                         long_rows.append(
                             (
                                 self._item_label(raw_item, labels),
@@ -432,6 +471,8 @@ class ChangeFromBaselineEngine:
                             )
                         )
                     wide.append(stats.get("subjects"))
+                    subject_column = group_column_names[group_index][1]
+                    cell_mappings.append((subject_column, treatment_value, "SUBJECT_N"))
                     long_rows.append(
                         (
                             self._item_label(raw_item, labels),
@@ -463,6 +504,11 @@ class ChangeFromBaselineEngine:
                     )
                     for statistic in config.statistics:
                         wide.append(stats.get(statistic))
+                        assert total_column_names is not None
+                        column_name = total_column_names[0][
+                            config.statistics.index(statistic)
+                        ]
+                        cell_mappings.append((column_name, None, statistic))
                         long_rows.append(
                             (
                                 self._item_label(raw_item, labels),
@@ -475,6 +521,9 @@ class ChangeFromBaselineEngine:
                             )
                         )
                     wide.append(stats.get("subjects"))
+                    assert total_column_names is not None
+                    total_subject_column = total_column_names[1]
+                    cell_mappings.append((total_subject_column, None, "SUBJECT_N"))
                     long_rows.append(
                         (
                             self._item_label(raw_item, labels),
@@ -486,7 +535,16 @@ class ChangeFromBaselineEngine:
                             stats.get("subjects"),
                         )
                     )
-                writer.add_wide(tuple(wide))
+                result_row = writer.add_wide(tuple(wide))
+                for column_name, treatment_value, statistic in cell_mappings:
+                    writer.add_cell_map(
+                        result_row,
+                        column_name,
+                        raw_item,
+                        row_mapping,
+                        treatment_value if treatment_levels else None,
+                        statistic,
+                    )
                 for long_row in long_rows:
                     writer.add_long(long_row)
             configuration_path = directory / "change_from_baseline_config.json"

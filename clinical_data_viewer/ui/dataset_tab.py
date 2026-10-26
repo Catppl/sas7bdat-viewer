@@ -192,6 +192,7 @@ class DatasetTab(QWidget):
     categorical_drilldown_requested = Signal(int, str, str)
     rule_based_drilldown_requested = Signal(int, str, str)
     ae_table_drilldown_requested = Signal(int, str, str)
+    change_from_baseline_drilldown_requested = Signal(int, str, str)
 
     def __init__(
         self,
@@ -488,6 +489,13 @@ class DatasetTab(QWidget):
             self.ae_table_drilldown_requested.emit(
                 index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
             )
+            return
+        if self.handle.kind == "change_from_baseline":
+            statistic_columns = dict(metadata.change_from_baseline_statistic_keys)
+            if column_name in statistic_columns:
+                self.change_from_baseline_drilldown_requested.emit(
+                    index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
+                )
             return
         if self.handle.kind != "compare":
             return
