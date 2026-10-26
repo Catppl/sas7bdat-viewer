@@ -44,15 +44,20 @@ def _sas_filter_left(expression: dict[str, object]) -> str:
     return sas_filter_operand(expression["left"])
 
 
-def sas_filter_expression(expression: dict[str, object] | None) -> str:
+def sas_filter_expression(
+    expression: dict[str, object] | None, *, compact_and: bool = False
+) -> str:
     """Render a serialized Viewer filter AST as a SAS WHERE expression."""
     if expression is None:
         return ""
     expression_type = expression["type"]
     if expression_type == "boolean":
-        left = sas_filter_expression(expression["left"])
-        right = sas_filter_expression(expression["right"])
-        return f"({left} {expression['operator']} {right})"
+        left = sas_filter_expression(expression["left"], compact_and=compact_and)
+        right = sas_filter_expression(expression["right"], compact_and=compact_and)
+        rendered = f"{left} {expression['operator']} {right}"
+        if compact_and and str(expression["operator"]).casefold() == "and":
+            return rendered
+        return f"({rendered})"
     if expression_type == "not":
         return f"not ({sas_filter_expression(expression['expression'])})"
     variable = _sas_filter_left(expression)

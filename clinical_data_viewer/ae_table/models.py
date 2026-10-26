@@ -33,7 +33,16 @@ class AeTableConfig:
     any_ae_label: str = "Any AE"
     include_total: bool = True
     percent_digits: int = 1
-    hierarchy_missing_policy: str = "exclude"
+    # Kept for compatibility with pre-v1 callers that supplied one policy for
+    # both hierarchy levels. New callers should use the two explicit fields.
+    hierarchy_missing_policy: str | None = None
+    soc_missing_policy: str = "exclude"
+    pt_missing_policy: str = "exclude"
+
+    def missing_policy_for(self, level: str) -> str:
+        if self.hierarchy_missing_policy is not None:
+            return self.hierarchy_missing_policy
+        return self.soc_missing_policy if level == "soc" else self.pt_missing_policy
 
     def validate(
         self, source: DatasetMetadata, population: DatasetMetadata | None = None
@@ -44,8 +53,12 @@ class AeTableConfig:
             raise ValueError("Percent decimal digits must be between 0 and 4.")
         if self.subject_id_variable != "USUBJID":
             raise ValueError("AE Table count variable is fixed to USUBJID.")
-        if self.hierarchy_missing_policy not in {"exclude", "uncoded"}:
-            raise ValueError("Missing SOC / PT policy must be Exclude or Uncoded.")
+        policies = {
+            "soc": self.missing_policy_for("soc"),
+            "pt": self.missing_policy_for("pt"),
+        }
+        if any(policy not in {"exclude", "uncoded"} for policy in policies.values()):
+            raise ValueError("Missing SOC and PT policies must be Exclude or Uncoded.")
         fields = {v.name.casefold(): v for v in source.variables}
         for name, label in (
             (self.soc_variable, "SOC variable"),

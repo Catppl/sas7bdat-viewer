@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -78,6 +79,37 @@ def make_handle(
 
 
 class CategoricalEngineTests(unittest.TestCase):
+    def test_result_keeps_configured_item_order(self) -> None:
+        variables = SOURCE_VARIABLES + (VariableMetadata("SEX"),)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                variables,
+                (
+                    ("S1", "A", "WHITE", "ALB", 1, 1.0, "Y", "F"),
+                    ("S2", "A", "BLACK", "ALB", 1, 2.0, "Y", "M"),
+                ),
+            )
+            config = CategoricalConfig(
+                (CategoricalItem("SEX"), CategoricalItem("RACE")),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig(
+                    "nonmissing", analysis_value_variable="AVAL"
+                ),
+            )
+            result = CategoricalEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                items = [
+                    row[0].replace("\u00a0", "").strip()
+                    for row in connection.execute('SELECT "ITEM_LEVEL" FROM dataset')
+                ]
+        self.assertEqual(items[0], "SEX")
+        self.assertIn("RACE", items)
+        self.assertLess(items.index("SEX"), items.index("RACE"))
+
     def test_distinct_subject_count_excludes_blank_and_null_subjects(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -744,3 +776,59 @@ class CategoricalEngineTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "level order"):
             config.validate(DatasetMetadata("ADLB", 0, SOURCE_VARIABLES))
+
+    def test_propcase_changes_display_only_and_warns_on_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (
+                    ("S1", "A", "CARDIAC AND VASCULAR DISORDERS", "P1", 1, 1, "Y"),
+                    ("S2", "A", "Cardiac And Vascular Disorders", "P1", 1, 1, "Y"),
+                    ("S3", "A", "INJECTION SITE REACTION OR PAIN", "P2", 1, 1, "Y"),
+                ),
+            )
+            config = CategoricalConfig(
+                (
+                    CategoricalItem(
+                        "RACE", context_variables=("PARAMCD",), propcase_levels=True
+                    ),
+                ),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", "AVAL"),
+            )
+            engine = CategoricalEngine(TempManager(root / "temp"))
+            warnings = engine.display_warnings(source, config)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("remain separate rows", warnings[0])
+            self.assertIn("PARAMCD=P1", warnings[0])
+
+            result = engine.run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                displayed = [
+                    row[0]
+                    for row in connection.execute(
+                        'SELECT "ITEM_LEVEL" FROM dataset ORDER BY _source_row'
+                    )
+                ]
+                raw_levels = [
+                    json.loads(row[0])
+                    for row in connection.execute(
+                        "SELECT level_json FROM categorical_long ORDER BY row_order"
+                    )
+                ]
+            self.assertEqual(
+                displayed.count(
+                    "\u00a0\u00a0\u00a0\u00a0Cardiac and Vascular Disorders"
+                ),
+                2,
+            )
+            self.assertIn(
+                "\u00a0\u00a0\u00a0\u00a0Injection Site Reaction or Pain",
+                displayed,
+            )
+            self.assertIn("CARDIAC AND VASCULAR DISORDERS", raw_levels)
+            self.assertIn("Cardiac And Vascular Disorders", raw_levels)

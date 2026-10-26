@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+from .widgets import ClickOnlyComboBox
 
 
 class AnalysisSourceSelector(QWidget):
@@ -14,7 +16,7 @@ class AnalysisSourceSelector(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)
-        self.combo = QComboBox()
+        self.combo = ClickOnlyComboBox()
         self.combo.currentIndexChanged.connect(self._selection_changed)
         layout.addWidget(self.combo)
         self.hint = QLabel()

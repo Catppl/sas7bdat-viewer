@@ -1626,22 +1626,33 @@ class MainWindow(QMainWindow):
 
     def show_proc_means_builder(self) -> None:
         self.analysis_controller.show_proc_means_builder()
+        self.analysis_dock.setMinimumWidth(310)
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:
         self.analysis_controller.show_categorical_builder()
+        compact_width = 210
+        self.analysis_dock.setMinimumWidth(compact_width)
+        self.analysis_dock.resize(compact_width, self.analysis_dock.height())
         self.analysis_dock.show()
 
     def show_rule_based_builder(self) -> None:
         self.analysis_controller.show_rule_based_builder()
+        self.analysis_dock.setMinimumWidth(310)
         self.analysis_dock.show()
 
     def show_ae_table_builder(self) -> None:
         self.analysis_controller.show_ae_table_builder()
+        # AE Table is designed for a compact form; keep its initial dock
+        # width at roughly two thirds of the standard analysis dock width.
+        compact_width = 210
+        self.analysis_dock.setMinimumWidth(compact_width)
+        self.analysis_dock.resize(compact_width, self.analysis_dock.height())
         self.analysis_dock.show()
 
     def show_listing_builder(self) -> None:
         self.analysis_controller.show_listing_builder()
+        self.analysis_dock.setMinimumWidth(310)
         self.analysis_dock.show()
 
     def _run_proc_means(self, tab: DatasetTab, variable_name: str) -> None:

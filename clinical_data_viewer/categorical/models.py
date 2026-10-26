@@ -15,6 +15,9 @@ class CategoricalItem:
     context_variables: tuple[str, ...] = ()
     include_missing_level: bool = False
     level_order: tuple[object, ...] = ()
+    # Presentation only. Raw values remain authoritative for grouping,
+    # sorting, drill-down, and long-result traceability.
+    propcase_levels: bool = False
 
 
 @dataclass(frozen=True, slots=True)

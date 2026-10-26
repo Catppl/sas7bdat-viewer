@@ -5,7 +5,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..filter_history import FilterHistory, format_history_timestamp
+from .widgets import ClickOnlyComboBox
 
 
 class HistoryDialog(QDialog):
@@ -34,7 +34,7 @@ class HistoryDialog(QDialog):
         layout = QVBoxLayout(self)
         scope_row = QHBoxLayout()
         scope_row.addWidget(QLabel("Show:"))
-        self.scope = QComboBox()
+        self.scope = ClickOnlyComboBox()
         self.scope.addItems(["Current dataset", "All datasets"])
         self.scope.setEnabled(dataset_path is not None)
         self.scope.currentIndexChanged.connect(self.refresh)

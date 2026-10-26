@@ -11,6 +11,13 @@
 */
 options validvarname=any;
 
+/* Item labels: edit the display text in this block only. */
+proc format;
+    value $cat_item_label
+{% for item in items %}        {{ item.variable_label | sas_string }} = {{ item.label | sas_string }}
+{% endfor %}    ;
+run;
+
 /* Prepare source data */
 {% if source.format == "xpt" %}
 libname {{ source_library }} xport {{ source.source_path | sas_string }};
@@ -20,7 +27,7 @@ libname {{ source_library }} {{ source.source_directory | sas_string }};
 
 data cat_src;
     set {{ source_reference }};
-{% if numerator_filter %}    if not ({{ numerator_filter }}) then delete;
+{% if numerator_filter %}    if {{ numerator_filter }};
 {% endif %}    if missing({{ treatment }}) then do;
         put "ERROR: Categorical source contains missing treatment values.";
         abort cancel;
@@ -37,7 +44,7 @@ libname {{ denominator.population.library }} {{ denominator.population.input.sou
 
 data pop_src;
     set {{ denominator.population.reference }};
-{% if denominator.population.filter %}    if not ({{ denominator.population.filter }}) then delete;
+{% if denominator.population.filter %}    if {{ denominator.population.filter }};
 {% endif %}    if missing({{ denominator_treatment }}) then do;
         put "ERROR: Population denominator contains missing treatment values.";
         abort cancel;
@@ -158,7 +165,7 @@ run;
 /* Build this Item's clinical rows and auditable long result. */
 data {{ item.members.rows }}(keep=item col1-col{{ output_columns }})
      {{ item.members.long }}(
-         keep=item_order item_variable item_label context level_text treatment
+         keep=item_order item_variable item_label context raw_level_text treatment
               trt_order freq denom pct
      );
     set {{ item.members.calculation }};
@@ -166,7 +173,7 @@ data {{ item.members.rows }}(keep=item col1-col{{ output_columns }})
 {% for context in item.contexts %}        {{ context.alias }}_miss {{ context.alias }}_key {{ context.alias }}
 {% endfor %}        level_miss level_key level
     ;
-    length item item_variable item_label level_text treatment _ctx_value $200
+    length item item_variable item_label level_text raw_level_text treatment _ctx_value $200
            context $1000;
     length col1-col{{ output_columns }} $200;
 
@@ -179,7 +186,7 @@ data {{ item.members.rows }}(keep=item col1-col{{ output_columns }})
 {% endfor %}
 {% if item.contexts %}    if first.{{ item.contexts[-1].alias }} then do;
 {% else %}    if _n_ = 1 then do;
-{% endif %}        item = {{ item.label | sas_string }};
+{% endif %}        item = put({{ item.variable_label | sas_string }}, $cat_item_label.);
         if not missing(context) then
             item = cat(strip(item), ' — ', strip(context));
         call missing(of col1-col{{ output_columns }});
@@ -190,6 +197,12 @@ data {{ item.members.rows }}(keep=item col1-col{{ output_columns }})
         level_text = '(Missing)';
 {% if item.kind == "character" %}    else level_text = strip(level);
 {% else %}    else level_text = strip(put(level, best32.));
+{% endif %}    raw_level_text = level_text;
+{% if item.propcase_levels %}    if not missing(level) then do;
+        level_text = propcase(level_text);
+        level_text = prxchange('s/\bAnd\b/and/i', -1, level_text);
+        level_text = prxchange('s/\bOr\b/or/i', -1, level_text);
+    end;
 {% endif %}    item = cat('    ', strip(level_text));
 
     array cnt {*} count1-count{{ output_columns }};
@@ -212,7 +225,7 @@ data {{ item.members.rows }}(keep=item col1-col{{ output_columns }})
     output {{ item.members.rows }};
 
     item_variable = {{ item.variable_label | sas_string }};
-    item_label = {{ item.label | sas_string }};
+    item_label = put({{ item.variable_label | sas_string }}, $cat_item_label.);
     do i = 1 to dim(cnt);
         trt_order = i;
         select (i);
@@ -250,7 +263,7 @@ data {{ long_output_dataset }};
     set
 {% for item in items %}        {{ item.members.long }}
 {% endfor %}    ;
-    level = level_text;
+    level = raw_level_text;
     keep item_order item_variable item_label context level treatment
          trt_order freq denom pct;
 run;
@@ -264,7 +277,7 @@ data {{ output_dataset }};
 run;
 
 data {{ long_output_dataset }};
-    length item_variable item_label level_text treatment $200 context $1000;
+    length item_variable item_label raw_level_text treatment $200 context $1000;
     length item_order trt_order freq denom pct 8;
     stop;
 run;

@@ -3,7 +3,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..compare_engine import CompareConfig, MatchVariable
+from .widgets import ClickOnlyComboBox
 
 
 class DatasetComparePanel(QWidget):
@@ -46,8 +46,10 @@ class DatasetComparePanel(QWidget):
         for side, label in (("main", "Main Dataset"), ("qc", "QC Dataset")):
             row = QHBoxLayout()
             row.addWidget(QLabel(label))
-            combo = QComboBox()
-            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo = ClickOnlyComboBox()
+            combo.setSizeAdjustPolicy(
+                ClickOnlyComboBox.AdjustToMinimumContentsLengthWithIcon
+            )
             combo.setMinimumContentsLength(16)
             combo.currentIndexChanged.connect(self._datasets_changed)
             setattr(self, f"{side}_dataset", combo)

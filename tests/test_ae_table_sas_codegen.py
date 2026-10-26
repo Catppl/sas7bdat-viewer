@@ -166,9 +166,51 @@ class AeSasGeneratorTests(unittest.TestCase):
         self.assertIn("libname pop ", code)
         self.assertNotIn("libname population ", code)
         self.assertIn("set pop.ADSL", code)
-        self.assertIn("if not (SAFFL = 'Y') then delete;", code)
+        self.assertIn("if SAFFL = 'Y';", code)
+        self.assertNotIn("if not (SAFFL = 'Y') then delete;", code)
+        self.assertIn("if TRTEMFL = 'Y';", code)
         self.assertIn("from pop0", code)
         self.assertIn("from ae0", code)
+
+        ae_length = code.index("length _trt _trt_key _soc _soc_key _pt _pt_key _subjid $200;")
+        ae_set = code.index("set analysis.adae;")
+        pop_length = code.index("length _trt _trt_key _subjid $200;")
+        pop_set = code.index("set pop.ADSL;")
+        self.assertLess(ae_length, ae_set)
+        self.assertLess(pop_length, pop_set)
+
+    def test_combined_filters_stay_in_one_if_expression(self):
+        cfg = configuration(denominator="population")
+        cfg["dataset_filter"]["text"] = 'TRTEMFL = "Y" and AOCC01FL = "Y"'
+        cfg["dataset_filter"]["ast"] = {
+            "type": "boolean",
+            "operator": "and",
+            "left": {
+                "type": "comparison",
+                "variable": "TRTEMFL",
+                "operator": "=",
+                "operand": {
+                    "type": "literal",
+                    "value_type": "character",
+                    "value": "Y",
+                },
+                "prefix": False,
+            },
+            "right": {
+                "type": "comparison",
+                "variable": "AOCC01FL",
+                "operator": "=",
+                "operand": {
+                    "type": "literal",
+                    "value_type": "character",
+                    "value": "Y",
+                },
+                "prefix": False,
+            },
+        }
+        code = SasAeTableGenerator().generate(cfg)
+        self.assertIn("if TRTEMFL = 'Y' and AOCC01FL = 'Y';", code)
+        self.assertNotIn("if (TRTEMFL = 'Y' and AOCC01FL = 'Y');", code)
 
     def test_population_can_use_a_different_treatment_variable(self):
         cfg = configuration(denominator="population")
@@ -204,6 +246,20 @@ class AeSasGeneratorTests(unittest.TestCase):
         code = SasAeTableGenerator().generate(cfg)
         self.assertIn("libname analysis xport", code)
         self.assertIn("_soc = 'Uncoded'", code)
+
+    def test_soc_and_pt_missing_policies_are_rendered_independently(self):
+        cfg = configuration()
+        cfg["hierarchy"]["missing"] = {
+            "policy": "per_variable",
+            "label": "Uncoded",
+            "soc_policy": "uncoded",
+            "pt_policy": "exclude",
+        }
+        code = SasAeTableGenerator().generate(cfg)
+        self.assertIn("Missing SOC policy: uncoded", code)
+        self.assertIn("Missing PT policy: exclude", code)
+        self.assertIn("if missing(AEBODSYS) then _soc = 'Uncoded';", code)
+        self.assertIn("if missing(AEDECOD) then _pt = '';", code)
 
     def test_numeric_treatment_uses_raw_best_format_and_case_keys(self):
         cfg = configuration(treatment_type="numeric")

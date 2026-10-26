@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -16,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ..merge_datasets import MergeDatasetsConfig, MergeSortItem
 from ..merge_datasets.result_store import build_result_schema
+from .widgets import ClickOnlyComboBox
 
 
 class _SortRow(QWidget):
@@ -25,7 +25,7 @@ class _SortRow(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 1, 2, 1)
         layout.addWidget(QLabel(variable), 1)
-        self.direction = QComboBox()
+        self.direction = ClickOnlyComboBox()
         self.direction.addItem("ASC", "ASC")
         self.direction.addItem("DESC", "DESC")
         self.direction.setCurrentIndex(0 if direction == "ASC" else 1)
@@ -78,8 +78,8 @@ class DatasetMergePanel(QWidget):
         layout.addWidget(description)
 
         form = QFormLayout()
-        self.left_dataset = QComboBox()
-        self.right_dataset = QComboBox()
+        self.left_dataset = ClickOnlyComboBox()
+        self.right_dataset = ClickOnlyComboBox()
         for combo in (self.left_dataset, self.right_dataset):
             combo.currentIndexChanged.connect(self._datasets_changed)
             form.addRow(
@@ -100,7 +100,7 @@ class DatasetMergePanel(QWidget):
         self.sort_editor.setPlaceholderText("Result variable, then press Enter")
         self.sort_editor.returnPressed.connect(self._add_sort_from_editor)
         sort_input.addWidget(self.sort_editor, 1)
-        self.sort_direction = QComboBox()
+        self.sort_direction = ClickOnlyComboBox()
         self.sort_direction.addItem("ASC", "ASC")
         self.sort_direction.addItem("DESC", "DESC")
         sort_input.addWidget(self.sort_direction)
@@ -115,7 +115,7 @@ class DatasetMergePanel(QWidget):
 
         join_row = QHBoxLayout()
         join_row.addWidget(QLabel("Join Type"))
-        self.join_type = QComboBox()
+        self.join_type = ClickOnlyComboBox()
         self.join_type.addItem("Left Join", "left")
         self.join_type.addItem("Right Join", "right")
         self.join_type.addItem("Inner Join", "inner")

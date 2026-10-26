@@ -6,7 +6,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 from ..domain import DatasetMetadata
 from ..listing.models import ListingColumn, ListingMergeAdsl
 from .analysis_source_selector import AnalysisSourceSelector
+from .widgets import ClickOnlyComboBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +86,7 @@ class ListingBuilder(QWidget):
         self.merge_enabled = QCheckBox("Merge ADSL")
         self.merge_enabled.toggled.connect(self._merge_toggled)
         form.addRow(self.merge_enabled)
-        self.adsl = QComboBox()
+        self.adsl = ClickOnlyComboBox()
         self.adsl.currentIndexChanged.connect(lambda _index: self._refresh_rename_map())
         adsl_row = QHBoxLayout()
         adsl_row.addWidget(self.adsl, 1)
@@ -105,7 +105,7 @@ class ListingBuilder(QWidget):
         self.drop.setPlaceholderText("e.g. AGE, SEX")
         self.drop.textChanged.connect(self._refresh_rename_map)
         form.addRow("Drop ADSL Vars", self.drop)
-        self.duplicate_policy = QComboBox()
+        self.duplicate_policy = ClickOnlyComboBox()
         self.duplicate_policy.addItem("Ignore duplicates", "ignore")
         self.duplicate_policy.addItem("Rename ADSL duplicates", "rename")
         self.duplicate_policy.currentIndexChanged.connect(
@@ -134,7 +134,7 @@ class ListingBuilder(QWidget):
         columns_box = QGroupBox("Columns")
         columns_layout = QVBoxLayout(columns_box)
         add_row = QHBoxLayout()
-        self.variable_picker = QComboBox()
+        self.variable_picker = ClickOnlyComboBox()
         add_row.addWidget(self.variable_picker, 1)
         add_variable = QPushButton("+ Add Variable")
         add_variable.clicked.connect(self._add_variable)
@@ -337,10 +337,10 @@ class ListingBuilder(QWidget):
             self.table.setCellWidget(row, column, QLineEdit(text))
         sort = self._sort_editor()
         self.table.setCellWidget(row, 5, sort)
-        direction = QComboBox()
+        direction = ClickOnlyComboBox()
         direction.addItems(("ASC", "DESC"))
         self.table.setCellWidget(row, 6, direction)
-        report = QComboBox()
+        report = ClickOnlyComboBox()
         report.addItems(("DISPLAY", "ORDER", "GROUP"))
         self.table.setCellWidget(row, 7, report)
         include = QCheckBox()
@@ -430,11 +430,11 @@ class ListingBuilder(QWidget):
             self.table.setCellWidget(row, column, QLineEdit(text))
         sort = self._sort_editor(values[4])
         self.table.setCellWidget(row, 5, sort)
-        direction = QComboBox()
+        direction = ClickOnlyComboBox()
         direction.addItems(("ASC", "DESC"))
         direction.setCurrentText(values[5])
         self.table.setCellWidget(row, 6, direction)
-        report = QComboBox()
+        report = ClickOnlyComboBox()
         report.addItems(("DISPLAY", "ORDER", "GROUP"))
         report.setCurrentText(values[6])
         self.table.setCellWidget(row, 7, report)

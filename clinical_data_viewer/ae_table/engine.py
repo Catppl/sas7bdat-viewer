@@ -128,7 +128,15 @@ class AeTableEngine:
         return values
 
     def _aggregate(
-        self, handle, config_filter, soc, pt, treatment, subject, missing_policy
+        self,
+        handle,
+        config_filter,
+        soc,
+        pt,
+        treatment,
+        subject,
+        soc_missing_policy,
+        pt_missing_policy,
     ):
         where = f" WHERE {config_filter.sql}" if config_filter.sql else ""
         sql = (
@@ -154,13 +162,13 @@ class AeTableEngine:
                 tkey = _key(treatment_value)
                 any_counts[tkey].add(subject_value)
                 any_counts[TOTAL_KEY].add(subject_value)
-                soc_value = _hierarchy_value(soc_value, soc, missing_policy)
+                soc_value = _hierarchy_value(soc_value, soc, soc_missing_policy)
                 if soc_value is None:
                     continue
                 skey = _key(soc_value)
                 soc_counts[(skey, tkey)].add(subject_value)
                 soc_counts[(skey, TOTAL_KEY)].add(subject_value)
-                pt_value = _hierarchy_value(pt_value, pt, missing_policy)
+                pt_value = _hierarchy_value(pt_value, pt, pt_missing_policy)
                 if pt_value is None:
                     continue
                 pt_counts[(skey, _key(pt_value), tkey)].add(subject_value)
@@ -231,7 +239,8 @@ class AeTableEngine:
             pt,
             treatment,
             subject,
-            config.hierarchy_missing_policy,
+            config.missing_policy_for("soc"),
+            config.missing_policy_for("pt"),
         )
         denom = self._denom(source, population, config, treatment, subject)
         # Derive labels directly from observed values (JSON keys preserve type).

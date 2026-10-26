@@ -3,7 +3,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..column_filters import ColumnFilterSpec
 from ..domain import DistinctValuesResult, VariableMetadata
+from .widgets import ClickOnlyComboBox
 
 
 class ColumnFilterDialog(QDialog):
@@ -114,7 +114,7 @@ class ColumnFilterDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         row = QHBoxLayout()
-        self.operator = QComboBox()
+        self.operator = ClickOnlyComboBox()
         operators = ["=", "!=", ">", ">=", "<", "<=", "Between"]
         if self.variable.kind == "character":
             operators.append("Contains")

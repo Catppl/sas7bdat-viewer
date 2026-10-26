@@ -267,7 +267,8 @@ class CategoricalController(AnalysisModuleController):
             self._categorical_input_tabs.add(population_tab)
         builder.set_busy(True, "Calculating categorical table in the background…")
 
-        def completed(handle: DatasetHandle) -> None:
+        def completed(result: tuple[DatasetHandle, tuple[str, ...]]) -> None:
+            handle, display_warnings = result
             self._categorical_input_tabs.clear()
             builder.set_busy(
                 False, f"Created {handle.metadata.row_count:,} result rows."
@@ -286,19 +287,38 @@ class CategoricalController(AnalysisModuleController):
                 source_handle, population_handle, config
             )
             self._host.show_analysis_result_tab(result_tab, "Categorical Table Result")
+            self._show_propcase_warnings(display_warnings)
 
         def failed(message: str, details: str) -> None:
             self._categorical_input_tabs.clear()
             builder.set_busy(False, "Categorical Table failed.")
             self._host.show_analysis_error("Categorical Table Failed", message, details)
 
+        def calculate(worker: Worker) -> tuple[DatasetHandle, tuple[str, ...]]:
+            display_warnings = self._categorical_engine.display_warnings(
+                source_handle, config
+            )
+            handle = self._categorical_engine.run(
+                source_handle, config, population_handle, worker.report
+            )
+            return handle, display_warnings
+
         self._host.submit_analysis_task(
             builder,
-            lambda worker: self._categorical_engine.run(
-                source_handle, config, population_handle, worker.report
-            ),
+            calculate,
             completed,
             failed,
+        )
+
+    def _show_propcase_warnings(self, warnings: tuple[str, ...]) -> None:
+        if not warnings:
+            return
+        QMessageBox.warning(
+            self._parent_widget(),
+            "Categorical Table Propcase Warning",
+            "Some raw levels have the same Propcase display text. "
+            "Calculation continued and the raw levels remain separate:\n\n"
+            + "\n".join(warnings),
         )
 
     def generate_categorical_sas_code(

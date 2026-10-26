@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..domain import DatasetMetadata
 from .analysis_source_selector import AnalysisSourceSelector
+from .widgets import ClickOnlyComboBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,8 @@ class AeTableBuilderSelection:
     any_ae_label: str
     include_total: bool
     percent_digits: int
-    hierarchy_missing_policy: str
+    soc_missing_policy: str
+    pt_missing_policy: str
 
 
 class AeTableBuilder(QWidget):
@@ -75,20 +76,36 @@ class AeTableBuilder(QWidget):
         self.source_label = QLabel("Select a fully loaded source dataset.")
         self.source_label.setWordWrap(True)
         form.addRow(self.source_label)
-        self.treatment = QComboBox()
+        self.treatment = ClickOnlyComboBox()
         self.treatment.currentIndexChanged.connect(self._source_treatment_changed)
         form.addRow("Treatment variable", self.treatment)
         subject = QLabel("USUBJID")
         subject.setTextInteractionFlags(Qt.TextSelectableByMouse)
         form.addRow("Subject ID", subject)
-        self.soc = QComboBox()
+        self.soc = ClickOnlyComboBox()
         form.addRow("SOC variable", self.soc)
-        self.pt = QComboBox()
+        self.pt = ClickOnlyComboBox()
         form.addRow("PT variable", self.pt)
-        self.missing_policy = QComboBox()
-        self.missing_policy.addItem("Exclude", "exclude")
-        self.missing_policy.addItem('Show as "Uncoded"', "uncoded")
-        form.addRow("Missing SOC / PT", self.missing_policy)
+        self.soc_missing_policy = ClickOnlyComboBox()
+        self.pt_missing_policy = ClickOnlyComboBox()
+        for combo in (self.soc_missing_policy, self.pt_missing_policy):
+            combo.addItem("Exclude", "exclude")
+            combo.addItem('Show as "Uncoded"', "uncoded")
+            combo.setCurrentIndex(combo.findData("uncoded"))
+        self.soc_missing_label = QLabel("Missing SOC")
+        self.pt_missing_label = QLabel("Missing PT")
+        form.addRow(self.soc_missing_label, self.soc_missing_policy)
+        form.addRow(self.pt_missing_label, self.pt_missing_policy)
+        self.soc.currentTextChanged.connect(
+            lambda value: self.soc_missing_label.setText(
+                f"Missing SOC ({value})" if value else "Missing SOC"
+            )
+        )
+        self.pt.currentTextChanged.connect(
+            lambda value: self.pt_missing_label.setText(
+                f"Missing PT ({value})" if value else "Missing PT"
+            )
+        )
         layout.addWidget(source)
         filters = QGroupBox("Dataset Filter")
         f = QVBoxLayout(filters)
@@ -104,12 +121,12 @@ class AeTableBuilder(QWidget):
         layout.addWidget(filters)
         denom = QGroupBox("Denominator")
         df = QFormLayout(denom)
-        self.denominator_type = QComboBox()
+        self.denominator_type = ClickOnlyComboBox()
         self.denominator_type.addItem("Population N (ADSL)", "population")
         self.denominator_type.addItem("Same-universe N", "same_universe")
         self.denominator_type.currentIndexChanged.connect(self._sync_denominator)
         df.addRow("Type", self.denominator_type)
-        self.adsl = QComboBox()
+        self.adsl = ClickOnlyComboBox()
         self.adsl.currentIndexChanged.connect(self._adsl_changed)
         row = QHBoxLayout()
         row.addWidget(self.adsl, 1)
@@ -117,7 +134,7 @@ class AeTableBuilder(QWidget):
         browse.clicked.connect(self.browse_adsl_requested)
         row.addWidget(browse)
         df.addRow("ADSL dataset", row)
-        self.population_treatment = QComboBox()
+        self.population_treatment = ClickOnlyComboBox()
         self.population_treatment.currentIndexChanged.connect(
             self._population_treatment_changed
         )
@@ -146,7 +163,9 @@ class AeTableBuilder(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         scroll.setWidget(content)
-        buttons = QHBoxLayout()
+        # Keep controls usable when the analysis dock is in its compact AE
+        # layout; a horizontal row would force the whole page wide again.
+        buttons = QVBoxLayout()
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
         buttons.addWidget(clear)
@@ -178,6 +197,8 @@ class AeTableBuilder(QWidget):
                 "treatment": self.treatment.currentText(),
                 "soc": self.soc.currentText(),
                 "pt": self.pt.currentText(),
+                "soc_missing_policy": self.soc_missing_policy.currentData(),
+                "pt_missing_policy": self.pt_missing_policy.currentData(),
             }
             self._metadata = metadata
             if self._filter_text == self._source_filter_snapshot:
@@ -204,6 +225,13 @@ class AeTableBuilder(QWidget):
                     if index >= 0:
                         combo.setCurrentIndex(index)
                         break
+            for combo, key in (
+                (self.soc_missing_policy, "soc_missing_policy"),
+                (self.pt_missing_policy, "pt_missing_policy"),
+            ):
+                index = combo.findData(previous[key])
+                if index >= 0:
+                    combo.setCurrentIndex(index)
             self._population_treatment_user_selected = False
             self._refresh_population_treatment_variables()
         self.source_label.setText(
@@ -319,6 +347,12 @@ class AeTableBuilder(QWidget):
     def clear(self):
         self.dataset_filter.clear()
         self.population_where.clear()
+        self.soc_missing_policy.setCurrentIndex(
+            self.soc_missing_policy.findData("uncoded")
+        )
+        self.pt_missing_policy.setCurrentIndex(
+            self.pt_missing_policy.findData("uncoded")
+        )
         self.status.clear()
         self.cleared.emit()
 
@@ -343,7 +377,8 @@ class AeTableBuilder(QWidget):
             self.any_label.text().strip() or "Any AE",
             self.include_total.isChecked(),
             self.percent_digits.value(),
-            self.missing_policy.currentData(),
+            self.soc_missing_policy.currentData(),
+            self.pt_missing_policy.currentData(),
         )
 
     def _run(self):

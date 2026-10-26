@@ -42,6 +42,23 @@ class AnalysisControllerTests(unittest.TestCase):
             )
         )
 
+    def test_categorical_propcase_collision_warns_without_blocking_result(self) -> None:
+        from clinical_data_viewer.controllers.analysis.categorical import (
+            CategoricalController,
+        )
+
+        controller = object.__new__(CategoricalController)
+        controller._parent_widget = Mock(return_value=None)
+        with patch(
+            "clinical_data_viewer.controllers.analysis.categorical.QMessageBox.warning"
+        ) as warning:
+            controller._show_propcase_warnings(
+                ('RACE: raw levels HEADACHE, Headache all display as "Headache".',)
+            )
+        warning.assert_called_once()
+        self.assertIn("Calculation continued", warning.call_args.args[2])
+        self.assertIn("remain separate", warning.call_args.args[2])
+
     def test_source_reload_lifecycle_is_forwarded_to_proc_means_module(self) -> None:
         from clinical_data_viewer.controllers.analysis_controller import (
             AnalysisController,

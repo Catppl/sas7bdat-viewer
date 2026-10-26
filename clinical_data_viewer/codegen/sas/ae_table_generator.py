@@ -76,7 +76,7 @@ def _filter(value: object, name: str) -> str:
     if text.strip() and block.get("ast") is None:
         raise ValueError(f"{name}.ast cannot be empty when text is provided.")
     try:
-        return sas_filter_expression(block.get("ast"))
+        return sas_filter_expression(block.get("ast"), compact_and=True)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Unsupported {name} AST: {exc}") from exc
 
@@ -147,10 +147,19 @@ class SasAeTableGenerator:
         soc = _variable(hierarchy.get("soc_variable"), "SOC variable", variables)
         pt = _variable(hierarchy.get("pt_variable"), "PT variable", variables)
         missing_block = _mapping(hierarchy.get("missing"), "hierarchy.missing")
-        if (
-            missing_block.get("policy") not in {"exclude", "uncoded"}
-            or missing_block.get("label") != "Uncoded"
-        ):
+        if missing_block.get("label") != "Uncoded":
+            raise ValueError("Unsupported AE hierarchy missing policy.")
+        legacy_policy = missing_block.get("policy")
+        soc_missing_policy = str(
+            missing_block.get("soc_policy", legacy_policy or "")
+        )
+        pt_missing_policy = str(
+            missing_block.get("pt_policy", legacy_policy or "")
+        )
+        if soc_missing_policy not in {"exclude", "uncoded"} or pt_missing_policy not in {
+            "exclude",
+            "uncoded",
+        }:
             raise ValueError("Unsupported AE hierarchy missing policy.")
 
         count = _mapping(configuration["count"], "count")
@@ -305,7 +314,8 @@ class SasAeTableGenerator:
             "dataset_filter": _filter(
                 configuration["dataset_filter"], "dataset_filter"
             ),
-            "missing_policy": str(missing_block["policy"]),
+            "soc_missing_policy": soc_missing_policy,
+            "pt_missing_policy": pt_missing_policy,
             "denominator": dtype,
             "population": population,
             "population_input": population.get("input") if population else None,
@@ -320,10 +330,10 @@ class SasAeTableGenerator:
             "source_library": source_library,
             "source_member": source_member,
             "soc_missing_literal": "'Uncoded'"
-            if str(missing_block["policy"]) == "uncoded"
+            if soc_missing_policy == "uncoded"
             else "''",
             "pt_missing_literal": "'Uncoded'"
-            if str(missing_block["policy"]) == "uncoded"
+            if pt_missing_policy == "uncoded"
             else "''",
             "raw_treatment": _raw_value(trt, variable_types[trt.casefold()]),
             "population_raw_treatment": (

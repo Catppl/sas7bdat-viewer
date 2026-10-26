@@ -59,6 +59,137 @@ class CategoricalBuilderStateTests(unittest.TestCase):
         self.assertEqual(builder.items.selected_items(), ())
         self.assertEqual(builder.population_where.text(), "")
 
+    def test_compact_width_keeps_scroll_and_actions_reachable(self) -> None:
+        from PySide6.QtWidgets import QPushButton, QScrollArea
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.categorical_builder import CategoricalBuilder
+
+        builder = CategoricalBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                tuple(
+                    VariableMetadata(name)
+                    for name in ("USUBJID", "TRT01A", "RACE")
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        builder.resize(210, 500)
+        builder.show()
+        self.application.processEvents()
+
+        scroll = builder.findChild(QScrollArea)
+        self.assertIsNotNone(scroll)
+        assert scroll is not None
+        self.assertGreater(scroll.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
+        scroll.horizontalScrollBar().setValue(scroll.horizontalScrollBar().maximum())
+        self.application.processEvents()
+
+        buttons = {
+            button.text(): button for button in builder.findChildren(QPushButton)
+        }
+        builder.items.editor.setText("RACE")
+        builder.items._add()
+        builder.items.remove_button.click()
+        self.assertEqual(builder.items.selected_items(), ())
+        builder.items.editor.setText("RACE")
+        builder.items._add()
+        run_requests = []
+        sas_requests = []
+        browse_requests = []
+        builder.run_requested.connect(run_requests.append)
+        builder.sas_code_requested.connect(sas_requests.append)
+        builder.browse_adsl_requested.connect(lambda: browse_requests.append(True))
+        buttons["Browse…"].click()
+        buttons["Run Categorical Table"].click()
+        buttons["SAS Code Generator…"].click()
+        self.assertEqual(len(browse_requests), 1)
+        self.assertEqual(len(run_requests), 1)
+        self.assertEqual(len(sas_requests), 1)
+        for text in ("Clear", "SAS Code Generator…", "Run Categorical Table"):
+            self.assertTrue(buttons[text].isVisible())
+            self.assertTrue(buttons[text].isEnabled())
+            self.assertEqual(buttons[text].width(), builder.width())
+        builder.close()
+        self.application.processEvents()
+
+    def test_item_move_buttons_control_result_item_order(self) -> None:
+        from PySide6.QtCore import Qt
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.categorical_builder import CategoricalBuilder
+
+        builder = CategoricalBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                tuple(
+                    VariableMetadata(name) for name in ("USUBJID", "TRT", "RACE", "SEX")
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        for variable in ("RACE", "SEX", "USUBJID"):
+            builder.items.editor.setText(variable)
+            builder.items._add()
+        builder.items.items.item(1).setCheckState(1, Qt.Checked)
+        self.assertEqual(
+            tuple(item.variable for item in builder.items.selected_items()),
+            ("RACE", "SEX", "USUBJID"),
+        )
+
+        builder.items.items.setCurrentRow(2)
+        builder.items.move_up_button.click()
+        moved = builder.items.selected_items()
+        self.assertEqual(
+            tuple(item.variable for item in moved),
+            ("RACE", "USUBJID", "SEX"),
+        )
+        self.assertTrue(moved[2].propcase_levels)
+        builder.items.move_down_button.click()
+        self.assertEqual(
+            tuple(item.variable for item in builder.items.selected_items()),
+            ("RACE", "SEX", "USUBJID"),
+        )
+        builder.close()
+        self.application.processEvents()
+
+    def test_each_item_has_an_independent_propcase_checkbox(self) -> None:
+        from PySide6.QtCore import Qt
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.categorical_builder import CategoricalBuilder
+
+        builder = CategoricalBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                tuple(
+                    VariableMetadata(name)
+                    for name in ("USUBJID", "TRT", "RACE", "SEX")
+                ),
+            ),
+            "adae.sas7bdat",
+        )
+        for variable in ("RACE", "SEX"):
+            builder.items.editor.setText(variable)
+            builder.items._add()
+        self.assertEqual(builder.items.items.headerItem().text(1), "Propcase")
+        builder.items.items.item(0).setCheckState(1, Qt.Checked)
+        selected = builder.items.selected_items()
+        self.assertTrue(selected[0].propcase_levels)
+        self.assertFalse(selected[1].propcase_levels)
+        builder.clear()
+        self.assertEqual(builder.items.selected_items(), ())
+        builder.close()
+        self.application.processEvents()
+
     def test_source_reload_refreshes_schema_without_overwriting_builder_filter(
         self,
     ) -> None:

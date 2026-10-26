@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -43,6 +44,20 @@ def _json(value: object) -> str:
 
 def _display(value: object) -> str:
     return "(Missing)" if value is None else str(value)
+
+
+_LOWERCASE_DISPLAY_WORDS = re.compile(r"\b(?:and|or)\b", re.IGNORECASE)
+
+
+def _display_level(value: object, *, propcase: bool) -> str:
+    """Format one level for display without changing its raw identity."""
+
+    text = _display(value)
+    if value is None or not propcase:
+        return text
+    return _LOWERCASE_DISPLAY_WORDS.sub(
+        lambda match: match.group(0).lower(), text.title()
+    )
 
 
 def _count_value(
@@ -204,6 +219,75 @@ class CategoricalEngine:
             )
         treatments.sort(key=lambda entry: self._treatment_sort_key(entry[1]))
         return treatments
+
+    def display_warnings(
+        self,
+        source: DatasetHandle,
+        config: CategoricalConfig,
+    ) -> tuple[str, ...]:
+        """Report raw levels that collapse to one Propcase display label.
+
+        Collisions are checked within each Item/context group after applying
+        Numerator WHERE. They are warnings only: raw levels remain separate
+        rows and calculation continues unchanged.
+        """
+
+        if not source.cache_complete:
+            raise ValueError("The source dataset must finish loading first.")
+        fields = self._fields(source)
+        warnings: list[str] = []
+        with closing(self._connection(source)) as connection:
+            for item in config.items:
+                if not item.propcase_levels:
+                    continue
+                item_variable = fields[item.variable.casefold()]
+                contexts = tuple(
+                    fields[name.casefold()] for name in item.context_variables
+                )
+                columns = (*contexts, item_variable)
+                query = (
+                    "SELECT DISTINCT "
+                    + ", ".join(quote_identifier(column.name) for column in columns)
+                    + " FROM dataset"
+                )
+                if config.numerator_filter.sql:
+                    query += " WHERE " + config.numerator_filter.sql
+                displays: dict[tuple[str, str], set[str]] = defaultdict(set)
+                for row in connection.execute(
+                    query, config.numerator_filter.parameters
+                ):
+                    raw_level = _canonical(row[-1], item_variable)
+                    if _missing(raw_level, item_variable):
+                        continue
+                    context_key = _json(
+                        {
+                            name: _canonical(value, variable)
+                            for name, value, variable in zip(
+                                item.context_variables, row[:-1], contexts
+                            )
+                        }
+                    )
+                    display = _display_level(raw_level, propcase=True)
+                    displays[(context_key, display)].add(_json(raw_level))
+                for (context_key, display), raw_values in displays.items():
+                    if len(raw_values) < 2:
+                        continue
+                    context = json.loads(context_key)
+                    context_text = ", ".join(
+                        f"{name}={_display(context.get(name))}"
+                        for name in item.context_variables
+                    )
+                    raw_text = ", ".join(
+                        _display(json.loads(value)) for value in sorted(raw_values)
+                    )
+                    location = item.variable
+                    if context_text:
+                        location += f" ({context_text})"
+                    warnings.append(
+                        f'{location}: raw levels {raw_text} all display as "{display}". '
+                        "They remain separate rows."
+                    )
+        return tuple(warnings)
 
     @staticmethod
     def _merged_treatments(
@@ -689,7 +773,7 @@ class CategoricalEngine:
                     long_cells[treatment_key] = (frequency, denom)
                     treatment_json[treatment_key] = treatment_key
                 writer.add_level_row(
-                    f"\u00a0\u00a0\u00a0\u00a0{_display(level)}",
+                    f"\u00a0\u00a0\u00a0\u00a0{_display_level(level, propcase=item.propcase_levels)}",
                     item.variable,
                     item.label or item.variable,
                     cells,

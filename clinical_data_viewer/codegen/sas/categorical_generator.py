@@ -74,7 +74,7 @@ def _filter(value: object, label: str) -> str:
     if text.strip() and block.get("ast") is None:
         raise ValueError(f"{label}.ast cannot be empty when text is provided.")
     try:
-        return sas_filter_expression(block.get("ast"))
+        return sas_filter_expression(block.get("ast"), compact_and=True)
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"Unsupported {label} AST: {error}") from error
 
@@ -487,6 +487,30 @@ class SasCategoricalGenerator:
                 )
             if missing_level.get("label") != "(Missing)":
                 raise ValueError("Unsupported Categorical missing level label.")
+            item_display_value = item.get("display")
+            # Configurations produced before per-Item display controls existed
+            # remain readable; newly written v1 JSON always stores this block.
+            item_display = (
+                {"value_case": "original", "lowercase_words": []}
+                if item_display_value is None
+                else _mapping(item_display_value, "item.display")
+            )
+            value_case = item_display.get("value_case")
+            lowercase_words = item_display.get("lowercase_words")
+            if value_case == "original":
+                if lowercase_words != []:
+                    raise ValueError(
+                        "Original categorical level display cannot lowercase words."
+                    )
+                propcase_levels = False
+            elif value_case == "propcase":
+                if lowercase_words != ["and", "or"]:
+                    raise ValueError(
+                        "Categorical Propcase display requires lowercase words and/or."
+                    )
+                propcase_levels = True
+            else:
+                raise ValueError("Unsupported Categorical level display case.")
             level_order = _mapping(item.get("level_order"), "item.level_order")
             if level_order.get("method") != "runtime_value_ascending":
                 raise ValueError("Unsupported Categorical item level order.")
@@ -556,6 +580,7 @@ class SasCategoricalGenerator:
                     "length": variable_lengths[folded],
                     "contexts": contexts,
                     "include_missing": bool(missing_level["include"]),
+                    "propcase_levels": propcase_levels,
                     "members": members,
                 }
             )

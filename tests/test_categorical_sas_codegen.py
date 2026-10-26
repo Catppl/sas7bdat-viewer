@@ -60,6 +60,7 @@ def configuration(*, denominator="nonmissing", count="distinct_subjects", digits
                 "label": "Race category",
                 "context_variables": ["PARAMCD"],
                 "missing_level": {"include": False, "label": "(Missing)"},
+                "display": {"value_case": "original", "lowercase_words": []},
                 "level_order": {"method": "runtime_value_ascending"},
             }
         ],
@@ -229,6 +230,11 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         self.assertNotIn("cats(", code)
         self.assertNotIn("__cde", code)
         self.assertNotIn("categorical_treatment_frequency_intermediate", code)
+        self.assertIn("/* Item labels: edit the display text in this block only. */", code)
+        self.assertIn("value $cat_item_label", code)
+        self.assertEqual(code.count("'Race category'"), 1)
+        self.assertIn("item = put('RACE', $cat_item_label.);", code)
+        self.assertIn("item_label = put('RACE', $cat_item_label.);", code)
         count_lines = [line for line in code.splitlines() if "count(distinct" in line]
         self.assertTrue(count_lines)
         self.assertTrue(all("case when" in line for line in count_lines))
@@ -242,11 +248,37 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
             )
             self.assertEqual(rendered, "/* custom categorical */\n")
 
+    def test_multiple_item_labels_are_centralized_in_one_format_block(self) -> None:
+        cfg = configuration()
+        cfg["variables"]["SEX"] = {
+            "type": "character",
+            "label": "Sex",
+            "length": 1,
+            "format": "",
+        }
+        cfg["items"].append(
+            {
+                "variable": "SEX",
+                "label": "Sex category",
+                "context_variables": [],
+                "missing_level": {"include": False, "label": "(Missing)"},
+                "display": {"value_case": "original", "lowercase_words": []},
+                "level_order": {"method": "runtime_value_ascending"},
+            }
+        )
+        code = self.generator.generate(cfg)
+        label_block = code.split("value $cat_item_label", 1)[1].split("run;", 1)[0]
+        self.assertIn("'RACE' = 'Race category'", label_block)
+        self.assertIn("'SEX' = 'Sex category'", label_block)
+        self.assertEqual(code.count("'Race category'"), 1)
+        self.assertEqual(code.count("'Sex category'"), 1)
+
     def test_population_uses_independent_filter_and_treatment_variable(self) -> None:
         code = self.generator.generate(configuration(denominator="population"))
         self.assertIn("libname pop ", code)
         self.assertIn("set pop.adsl;", code)
-        self.assertIn("if not (SAFFL = 'Y') then delete;", code)
+        self.assertIn("if SAFFL = 'Y';", code)
+        self.assertNotIn("if not (SAFFL = 'Y') then delete;", code)
         self.assertIn("if missing(TRT01A) then do;", code)
         self.assertIn("from pop_src", code)
         self.assertIn("when TRT01A = 'Placebo'", code)
@@ -316,6 +348,31 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
                 self.assertIn(f"round(_pct, {increment})", rendered)
                 self.assertIn(number_format, rendered)
 
+    def test_propcase_display_is_item_specific_and_long_level_stays_raw(self) -> None:
+        value = configuration()
+        value["items"][0]["display"] = {
+            "value_case": "propcase",
+            "lowercase_words": ["and", "or"],
+        }
+        code = self.generator.generate(value)
+        self.assertIn("level_text = propcase(level_text);", code)
+        self.assertIn("prxchange('s/\\bAnd\\b/and/i'", code)
+        self.assertIn("prxchange('s/\\bOr\\b/or/i'", code)
+        self.assertIn("raw_level_text = level_text;", code)
+        self.assertIn("level = raw_level_text;", code)
+        self.assertLess(
+            code.index("raw_level_text = level_text;"),
+            code.index("level_text = propcase(level_text);"),
+        )
+
+        original = self.generator.generate(configuration())
+        self.assertNotIn("level_text = propcase(level_text);", original)
+
+        legacy = configuration()
+        del legacy["items"][0]["display"]
+        legacy_code = self.generator.generate(legacy)
+        self.assertNotIn("level_text = propcase(level_text);", legacy_code)
+
     def test_numeric_treatment_literals_and_no_total(self) -> None:
         value = configuration()
         value["variables"]["TRTA"]["type"] = "numeric"
@@ -346,7 +403,8 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         value = configuration()
         value["numerator"]["filter"]["text"] = "THIS TEXT MUST NOT BE COPIED"
         code = self.generator.generate(value)
-        self.assertIn("if not (TRTEMFL = 'Y') then delete;", code)
+        self.assertIn("if TRTEMFL = 'Y';", code)
+        self.assertNotIn("if not (TRTEMFL = 'Y') then delete;", code)
         self.assertNotIn("THIS TEXT MUST NOT BE COPIED", code)
 
     def test_merge_and_malformed_contracts_are_rejected(self) -> None:

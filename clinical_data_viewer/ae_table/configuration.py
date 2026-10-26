@@ -86,6 +86,14 @@ def build_ae_table_configuration(
     debugging, and validation; it is not a persistent ordering instruction.
     """
     config.validate(source.metadata, population.metadata if population else None)
+    soc_policy = config.missing_policy_for("soc")
+    pt_policy = config.missing_policy_for("pt")
+    missing = {
+        "label": "Uncoded",
+        "policy": soc_policy if soc_policy == pt_policy else "per_variable",
+        "soc_policy": soc_policy,
+        "pt_policy": pt_policy,
+    }
     denominator: dict[str, object] = {"type": config.denominator.type}
     if config.denominator.type == "population":
         if population is None:
@@ -126,7 +134,7 @@ def build_ae_table_configuration(
             "type": "soc_pt",
             "soc_variable": config.soc_variable,
             "pt_variable": config.pt_variable,
-            "missing": {"policy": config.hierarchy_missing_policy, "label": "Uncoded"},
+            "missing": missing,
         },
         "count": {"type": "distinct", "variable": "USUBJID"},
         "treatment": {

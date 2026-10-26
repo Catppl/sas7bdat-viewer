@@ -185,7 +185,8 @@ class AeTableController(AnalysisModuleController):
                 selection.any_ae_label,
                 selection.include_total,
                 selection.percent_digits,
-                selection.hierarchy_missing_policy,
+                soc_missing_policy=selection.soc_missing_policy,
+                pt_missing_policy=selection.pt_missing_policy,
             )
             config.validate(
                 tab.handle.metadata,

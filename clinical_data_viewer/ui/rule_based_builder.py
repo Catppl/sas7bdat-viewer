@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..domain import DatasetMetadata
 from .analysis_source_selector import AnalysisSourceSelector
+from .widgets import ClickOnlyComboBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +98,7 @@ class RuleBasedBuilder(QWidget):
 
         setup = QGroupBox("Table Setup")
         setup_layout = QFormLayout(setup)
-        self.treatment = QComboBox()
+        self.treatment = ClickOnlyComboBox()
         self.subject_label = QLabel("USUBJID")
         self.subject_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.include_total = QCheckBox("Include Total column")
@@ -122,7 +122,7 @@ class RuleBasedBuilder(QWidget):
         denominator_layout = QVBoxLayout(denominator)
         type_row = QHBoxLayout()
         type_row.addWidget(QLabel("Type"))
-        self.denominator_type = QComboBox()
+        self.denominator_type = ClickOnlyComboBox()
         self.denominator_type.addItem("Population N (ADSL)", "population")
         self.denominator_type.addItem("Non-missing N", "nonmissing")
         self.denominator_type.addItem("Same-universe N", "same_universe")
@@ -134,14 +134,14 @@ class RuleBasedBuilder(QWidget):
         population_page = QWidget()
         population_layout = QFormLayout(population_page)
         adsl_row = QHBoxLayout()
-        self.adsl = QComboBox()
+        self.adsl = ClickOnlyComboBox()
         self.adsl.currentIndexChanged.connect(self._mark_adsl_user_selection)
         adsl_row.addWidget(self.adsl, 1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self.browse_adsl_requested)
         adsl_row.addWidget(browse)
         population_layout.addRow("ADSL dataset", adsl_row)
-        self.population_treatment = QComboBox()
+        self.population_treatment = ClickOnlyComboBox()
         self.population_treatment.currentIndexChanged.connect(
             self._mark_population_treatment_user_selection
         )
@@ -153,7 +153,7 @@ class RuleBasedBuilder(QWidget):
 
         nonmissing_page = QWidget()
         nonmissing_layout = QFormLayout(nonmissing_page)
-        self.nonmissing_value = QComboBox()
+        self.nonmissing_value = ClickOnlyComboBox()
         nonmissing_layout.addRow("Analysis value", self.nonmissing_value)
         self.denominator_stack.addWidget(nonmissing_page)
 

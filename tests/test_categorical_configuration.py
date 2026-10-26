@@ -139,6 +139,10 @@ class CategoricalConfigurationTests(unittest.TestCase):
             self.assertIsNotNone(value["numerator"]["filter"]["ast"])
             self.assertEqual(value["items"][0]["context_variables"], ["PARAMCD"])
             self.assertTrue(value["items"][0]["missing_level"]["include"])
+            self.assertEqual(
+                value["items"][0]["display"],
+                {"value_case": "original", "lowercase_words": []},
+            )
             self.assertEqual(value["count"]["type"], "distinct_subjects")
             self.assertEqual(value["treatment"]["source_variable"], "TRTA")
             self.assertEqual(
@@ -267,6 +271,28 @@ class CategoricalConfigurationTests(unittest.TestCase):
             self.assertIn("种族", raw)
             self.assertEqual(json.loads(raw), written)
             self.assertEqual(categorical_configuration_json(written), raw)
+
+    def test_propcase_item_display_contract_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            variables = (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("TRT"),
+                VariableMetadata("RACE"),
+                VariableMetadata("AVAL", kind="numeric"),
+            )
+            source = make_handle(root, "adae", variables)
+            config = CategoricalConfig(
+                (CategoricalItem("RACE", propcase_levels=True),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", "AVAL"),
+            )
+            value = build_categorical_configuration(source, config)
+            self.assertEqual(
+                value["items"][0]["display"],
+                {"value_case": "propcase", "lowercase_words": ["and", "or"]},
+            )
 
     def test_engine_writes_json_and_orders_numeric_contexts_and_levels_numerically(
         self,

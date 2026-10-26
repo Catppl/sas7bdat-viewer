@@ -5,20 +5,20 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +27,7 @@ from ..categorical import CategoricalItem
 from ..domain import DatasetMetadata
 from .analysis_source_selector import AnalysisSourceSelector
 from .proc_means_builder import VariableTokenEditor
+from .widgets import ClickOnlyComboBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,37 @@ class CategoricalBuilderSelection:
     percent_digits: int
     # Optional to preserve positional compatibility with older callers.
     population_treatment_variable: str = ""
+
+
+class _CategoricalItemTable(QTreeWidget):
+    """Two-column Item table with the small row API used by the Builder."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setColumnCount(2)
+        self.setHeaderLabels(("Item Variable", "Propcase"))
+        header = self.header()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+
+    def count(self) -> int:
+        return self.topLevelItemCount()
+
+    def item(self, row: int) -> QTreeWidgetItem:
+        return self.topLevelItem(row)
+
+    def currentRow(self) -> int:
+        current = self.currentItem()
+        return self.indexOfTopLevelItem(current) if current is not None else -1
+
+    def setCurrentRow(self, row: int) -> None:
+        self.setCurrentItem(self.topLevelItem(row) if row >= 0 else None)
+
+    def takeItem(self, row: int) -> QTreeWidgetItem:
+        return self.takeTopLevelItem(row)
+
+    def insertItem(self, row: int, item: QTreeWidgetItem) -> None:
+        self.insertTopLevelItem(row, item)
 
 
 class CategoricalItemEditor(QWidget):
@@ -70,15 +102,34 @@ class CategoricalItemEditor(QWidget):
         self.editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.editor.returnPressed.connect(self._add)
         row.addWidget(self.editor, 1)
-        self.remove_button = QPushButton("Remove")
-        self.remove_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.remove_button.clicked.connect(self._remove)
-        row.addWidget(self.remove_button, 0)
         layout.addLayout(row)
-        self.items = QListWidget()
+        self.items = _CategoricalItemTable()
         self.items.setMaximumHeight(75)
         self.items.currentItemChanged.connect(self._load_current)
+        self.items.currentItemChanged.connect(
+            lambda current, _previous: self._update_move_buttons(
+                self.items.indexOfTopLevelItem(current) if current is not None else -1
+            )
+        )
+        self.items.itemChanged.connect(self._item_changed)
         layout.addWidget(self.items)
+        item_actions = QHBoxLayout()
+        self.move_up_button = QPushButton("Move Up")
+        self.move_up_button.setObjectName("categoricalItemMoveUp")
+        self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
+        item_actions.addWidget(self.move_up_button)
+        self.move_down_button = QPushButton("Move Down")
+        self.move_down_button.setObjectName("categoricalItemMoveDown")
+        self.move_down_button.clicked.connect(lambda: self._move_selected(1))
+        item_actions.addWidget(self.move_down_button)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setObjectName("categoricalItemRemove")
+        self.remove_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.remove_button.clicked.connect(self._remove)
+        item_actions.addWidget(self.remove_button)
+        item_actions.addStretch(1)
+        layout.addLayout(item_actions)
+        self._update_move_buttons(-1)
         self.label_editor = QLineEdit()
         self.label_editor.setPlaceholderText("Item label (optional)")
         self.label_editor.editingFinished.connect(self._save_current)
@@ -134,15 +185,17 @@ class CategoricalItemEditor(QWidget):
                     tuple(valid_contexts),
                     config.include_missing_level,
                     config.level_order,
+                    config.propcase_levels,
                 )
             self._configs = configs
             current = (
-                self.items.currentItem().text() if self.items.currentItem() else ""
+                self.items.currentItem().text(0) if self.items.currentItem() else ""
             )
             self.items.clear()
-            self.items.addItems(self._configs)
+            for config in self._configs.values():
+                self._append_item(config)
             if current:
-                index = self.items.findItems(current, Qt.MatchFixedString)
+                index = self.items.findItems(current, Qt.MatchFixedString, 0)
                 if index:
                     self.items.setCurrentItem(index[0])
             self._load_current(self.items.currentItem(), None)
@@ -165,9 +218,17 @@ class CategoricalItemEditor(QWidget):
     def selected_items(self) -> tuple[CategoricalItem, ...]:
         self._save_current()
         return tuple(
-            self._configs[self.items.item(index).text()]
+            self._configs[self.items.item(index).text(0)]
             for index in range(self.items.count())
         )
+
+    def _append_item(self, config: CategoricalItem) -> None:
+        item = QTreeWidgetItem((config.variable, ""))
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(
+            1, Qt.Checked if config.propcase_levels else Qt.Unchecked
+        )
+        self.items.addTopLevelItem(item)
 
     def _add(self) -> None:
         requested = self.editor.text().strip()
@@ -186,7 +247,9 @@ class CategoricalItemEditor(QWidget):
             self._configs[variable.name] = CategoricalItem(
                 variable.name, variable.label
             )
-            self.items.addItem(variable.name)
+            self._updating = True
+            self._append_item(self._configs[variable.name])
+            self._updating = False
             self.items.setCurrentRow(self.items.count() - 1)
         self.editor.clear()
         self.changed.emit()
@@ -195,20 +258,43 @@ class CategoricalItemEditor(QWidget):
         current = self.items.currentItem()
         if current is None:
             return
-        name = current.text()
-        row = self.items.row(current)
+        name = current.text(0)
+        row = self.items.indexOfTopLevelItem(current)
         self._configs.pop(name, None)
         self.items.takeItem(row)
         self.changed.emit()
 
-    def _load_current(self, current: QListWidgetItem | None, _previous) -> None:
+    def _move_selected(self, offset: int) -> None:
+        row = self.items.currentRow()
+        target = row + offset
+        if row < 0 or target < 0 or target >= self.items.count():
+            return
+        self._save_current()
+        item = self.items.takeItem(row)
+        self.items.insertItem(target, item)
+        self.items.setCurrentRow(target)
+        self.changed.emit()
+
+    def _update_move_buttons(self, row: int) -> None:
+        count = self.items.count()
+        self.move_up_button.setEnabled(row > 0)
+        self.move_down_button.setEnabled(0 <= row < count - 1)
+        self.remove_button.setEnabled(row >= 0)
+
+    def _load_current(self, current: QTreeWidgetItem | None, _previous) -> None:
         self._updating = True
         if current is None:
             self.label_editor.clear()
             self.contexts.set_variables(())
             self.include_missing.setChecked(False)
         else:
-            item = self._configs[current.text()]
+            item = self._configs.get(current.text(0))
+            if item is None:
+                self.label_editor.clear()
+                self.contexts.set_variables(())
+                self.include_missing.setChecked(False)
+                self._updating = False
+                return
             self.label_editor.setText(item.label)
             self.contexts.set_variables(item.context_variables)
             self.include_missing.setChecked(item.include_missing_level)
@@ -220,13 +306,32 @@ class CategoricalItemEditor(QWidget):
         current = self.items.currentItem()
         if current is None:
             return
-        existing = self._configs[current.text()]
-        self._configs[current.text()] = CategoricalItem(
+        name = current.text(0)
+        existing = self._configs[name]
+        self._configs[name] = CategoricalItem(
             existing.variable,
             self.label_editor.text().strip(),
             self.contexts.selected_variables(),
             self.include_missing.isChecked(),
             existing.level_order,
+            current.checkState(1) == Qt.Checked,
+        )
+        self.changed.emit()
+
+    def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._updating or column != 1:
+            return
+        name = item.text(0)
+        existing = self._configs.get(name)
+        if existing is None:
+            return
+        self._configs[name] = CategoricalItem(
+            existing.variable,
+            existing.label,
+            existing.context_variables,
+            existing.include_missing_level,
+            existing.level_order,
+            item.checkState(1) == Qt.Checked,
         )
         self.changed.emit()
 
@@ -257,8 +362,10 @@ class CategoricalBuilder(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setMinimumWidth(0)
         content = QWidget()
         content.setObjectName("categoricalBuilderContent")
+        content.setMinimumWidth(0)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)
@@ -278,9 +385,9 @@ class CategoricalBuilder(QWidget):
 
         setup = QGroupBox("Table Setup")
         setup_layout = QFormLayout(setup)
-        self.treatment = QComboBox()
-        self.subject = QComboBox()
-        self.count_type = QComboBox()
+        self.treatment = ClickOnlyComboBox()
+        self.subject = ClickOnlyComboBox()
+        self.count_type = ClickOnlyComboBox()
         self.count_type.addItem("Distinct subjects", "distinct_subject")
         self.count_type.addItem("Record count", "record")
         self.percent_digits = QSpinBox()
@@ -307,7 +414,7 @@ class CategoricalBuilder(QWidget):
         denominator_layout = QVBoxLayout(denominator)
         type_row = QHBoxLayout()
         type_row.addWidget(QLabel("Type"))
-        self.denominator_type = QComboBox()
+        self.denominator_type = ClickOnlyComboBox()
         self.denominator_type.addItem("Population N (ADSL)", "population")
         self.denominator_type.addItem("Non-missing N", "nonmissing")
         self.denominator_type.addItem(
@@ -320,14 +427,14 @@ class CategoricalBuilder(QWidget):
         self.population_page = QWidget()
         population_layout = QFormLayout(self.population_page)
         adsl_row = QHBoxLayout()
-        self.adsl = QComboBox()
+        self.adsl = ClickOnlyComboBox()
         self.adsl.currentIndexChanged.connect(self._adsl_changed)
         adsl_row.addWidget(self.adsl, 1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self.browse_adsl_requested)
         adsl_row.addWidget(browse)
         population_layout.addRow("ADSL dataset", adsl_row)
-        self.population_treatment = QComboBox()
+        self.population_treatment = ClickOnlyComboBox()
         self.population_treatment.currentIndexChanged.connect(
             self._mark_population_treatment_user_selection
         )
@@ -338,12 +445,12 @@ class CategoricalBuilder(QWidget):
         self.denominator_stack.addWidget(self.population_page)
         self.nonmissing_page = QWidget()
         nonmissing_layout = QFormLayout(self.nonmissing_page)
-        self.nonmissing_value = QComboBox()
+        self.nonmissing_value = ClickOnlyComboBox()
         nonmissing_layout.addRow("Analysis value", self.nonmissing_value)
         self.denominator_stack.addWidget(self.nonmissing_page)
         self.n1_page = QWidget()
         n1_layout = QFormLayout(self.n1_page)
-        self.n1_value = QComboBox()
+        self.n1_value = ClickOnlyComboBox()
         self.baseline_where = QLineEdit()
         self.baseline_where.setPlaceholderText('e.g. ABLFL = "Y"')
         self.postbaseline_where = QLineEdit()
@@ -357,7 +464,9 @@ class CategoricalBuilder(QWidget):
         self.status = QLabel("")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        buttons = QHBoxLayout()
+        # Keep all actions reachable when the Analysis dock uses the compact
+        # Categorical/AE layout instead of forcing a wide horizontal row.
+        buttons = QVBoxLayout()
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
         buttons.addWidget(clear)

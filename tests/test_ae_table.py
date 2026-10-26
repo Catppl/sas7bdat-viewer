@@ -108,7 +108,12 @@ class AeTableTests(unittest.TestCase):
             )
             self.assertEqual(
                 configuration["hierarchy"]["missing"],
-                {"policy": "uncoded", "label": "Uncoded"},
+                {
+                    "policy": "uncoded",
+                    "label": "Uncoded",
+                    "soc_policy": "uncoded",
+                    "pt_policy": "uncoded",
+                },
             )
             self.assertEqual(configuration["resolved_hierarchy"][1]["soc"], "GI")
 
@@ -139,6 +144,77 @@ class AeTableTests(unittest.TestCase):
                         )
                     }
                 self.assertEqual(found, expected_subjects)
+
+    def test_soc_and_pt_missing_policies_are_independent(self):
+        variables = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
+        rows = (
+            ("S1", "A", None, "Headache"),
+            ("S2", "A", "GI", None),
+            ("S3", "A", "GI", "Nausea"),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            source = handle(root, "adae", variables, rows)
+            config = AeTableConfig(
+                "SOC",
+                "PT",
+                "TRT",
+                soc_missing_policy="uncoded",
+                pt_missing_policy="exclude",
+            )
+            result = AeTableEngine(TempManager(root / "temp")).run(source, config)
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                items = [
+                    row[0].replace("\u00a0", "")
+                    for row in connection.execute(
+                        'SELECT "ITEM" FROM dataset ORDER BY _source_row'
+                    )
+                ]
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
+        self.assertEqual(items, ["Any AE", "GI", "Nausea", "Uncoded", "Headache"])
+        self.assertEqual(
+            configuration["hierarchy"]["missing"],
+            {
+                "policy": "per_variable",
+                "label": "Uncoded",
+                "soc_policy": "uncoded",
+                "pt_policy": "exclude",
+            },
+        )
+
+    def test_mixed_policy_drilldown_uses_the_selected_level_policy(self):
+        variables = tuple(VariableMetadata(n) for n in ("USUBJID", "TRT", "SOC", "PT"))
+        rows = (
+            ("S1", "A", None, "Headache"),
+            ("S2", "A", "Uncoded", "Headache"),
+            ("S3", "A", "GI", None),
+            ("S4", "A", "GI", "Uncoded"),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            source = handle(root, "adae", variables, rows)
+            config = AeTableConfig(
+                "SOC",
+                "PT",
+                "TRT",
+                soc_missing_policy="uncoded",
+                pt_missing_policy="uncoded",
+            )
+            for cell, expected in (
+                (AeTableCell("pt", "Uncoded", "Headache", "A"), {"S1", "S2"}),
+                (AeTableCell("pt", "GI", "Uncoded", "A"), {"S3", "S4"}),
+            ):
+                sql, params = build_cell_filter(source.metadata, config, cell)
+                with closing(sqlite3.connect(source.database_path)) as connection:
+                    found = {
+                        row[0]
+                        for row in connection.execute(
+                            f'SELECT "USUBJID" FROM dataset WHERE {sql}', params
+                        )
+                    }
+                self.assertEqual(found, expected)
 
     def test_denominator_drilldown_never_contains_soc_pt(self):
         source_vars = tuple(
@@ -245,7 +321,12 @@ class AeTableTests(unittest.TestCase):
             self.assertEqual(configuration["resolved_hierarchy"][0]["row_type"], "any")
             self.assertEqual(
                 configuration["hierarchy"]["missing"],
-                {"policy": "exclude", "label": "Uncoded"},
+                {
+                    "policy": "exclude",
+                    "label": "Uncoded",
+                    "soc_policy": "exclude",
+                    "pt_policy": "exclude",
+                },
             )
 
     def test_population_filter_is_independent_and_merge_contract(self):

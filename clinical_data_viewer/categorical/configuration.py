@@ -110,6 +110,10 @@ def build_categorical_configuration(
                 "include": item.include_missing_level,
                 "label": "(Missing)",
             },
+            "display": {
+                "value_case": "propcase" if item.propcase_levels else "original",
+                "lowercase_words": ["and", "or"] if item.propcase_levels else [],
+            },
             "level_order": {"method": "runtime_value_ascending"},
         }
         for item in config.items

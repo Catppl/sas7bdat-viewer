@@ -7,7 +7,6 @@ from PySide6.QtGui import QAction, QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -26,6 +25,7 @@ from ..workspace.models import (
     WorkspaceSnapshot,
     workspace_path_key,
 )
+from .widgets import ClickOnlyComboBox
 
 
 class WorkspacePanel(QWidget):
@@ -68,9 +68,9 @@ class WorkspacePanel(QWidget):
         layout.addLayout(title_row)
 
         workspace_row = QHBoxLayout()
-        self.workspace_selector = QComboBox()
+        self.workspace_selector = ClickOnlyComboBox()
         self.workspace_selector.setSizeAdjustPolicy(
-            QComboBox.AdjustToMinimumContentsLengthWithIcon
+            ClickOnlyComboBox.AdjustToMinimumContentsLengthWithIcon
         )
         self.workspace_selector.setMinimumContentsLength(12)
         self.workspace_selector.currentIndexChanged.connect(self._workspace_changed)

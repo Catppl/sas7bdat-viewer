@@ -17,7 +17,8 @@ class AeTableCell:
 def _hierarchy_clause(metadata, variable_name: str, value: object, config):
     """Match the engine's merged Uncoded level back to source values."""
     variable = _field(metadata, variable_name)
-    if config.hierarchy_missing_policy == "uncoded" and value == "Uncoded":
+    level = "soc" if variable_name.casefold() == config.soc_variable.casefold() else "pt"
+    if config.missing_policy_for(level) == "uncoded" and value == "Uncoded":
         # The engine maps missing and the literal value Uncoded to one level.
         return (
             f"({_missing_sql(variable.name, variable.kind, missing=True)} OR {quote_identifier(variable.name)} = ?)",
