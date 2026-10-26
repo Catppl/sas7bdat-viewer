@@ -12,6 +12,61 @@ PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is not installed")
 class UiSmokeTests(unittest.TestCase):
+    def test_gallery_opens_categorical_builder_and_restores_analysis_dock(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication, QPushButton
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+            )
+            try:
+                window.show()
+                application.processEvents()
+                window.analysis_dock.hide()
+                window.show_table_shell_gallery()
+                application.processEvents()
+                gallery = window.analysis_controller._table_shell_gallery
+                self.assertIsNotNone(gallery)
+                assert gallery is not None
+                card = next(
+                    card for card in gallery._cards if card.shell.key == "categorical"
+                )
+                QTest.mouseClick(card, Qt.LeftButton)
+                application.processEvents()
+                self.assertIsNotNone(gallery._preview_dialog)
+                assert gallery._preview_dialog is not None
+                open_button = next(
+                    button
+                    for button in gallery._preview_dialog.findChildren(QPushButton)
+                    if button.text() == "Open Builder"
+                )
+                QTest.mouseClick(open_button, Qt.LeftButton)
+                application.processEvents()
+                self.assertTrue(window.analysis_dock.isVisible())
+                self.assertIs(
+                    window.analysis_panel.tabs.currentWidget(),
+                    window.analysis_panel.categorical_builder,
+                )
+            finally:
+                window.close()
+                application.processEvents()
+
     def test_row_comparison_persists_until_replaced_or_source_tab_closes(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
