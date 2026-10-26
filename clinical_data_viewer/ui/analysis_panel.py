@@ -20,6 +20,7 @@ from ..settings import PROC_MEANS_STATISTICS
 from ..statistics import StatisticsResult
 from .ae_table_builder import AeTableBuilder
 from .categorical_builder import CategoricalBuilder
+from .change_from_baseline_builder import ChangeFromBaselineBuilder
 from .listing_builder import ListingBuilder
 from .proc_means_builder import ProcMeansBuilder
 from .rule_based_builder import RuleBasedBuilder
@@ -45,6 +46,7 @@ class AnalysisPanel(QWidget):
         self._create_categorical_tab()
         self._create_rule_based_tab()
         self._create_ae_table_tab()
+        self._create_change_from_baseline_tab()
         self._create_listing_tab()
         self._create_comparison_tab()
 
@@ -105,6 +107,9 @@ class AnalysisPanel(QWidget):
     def _create_ae_table_tab(self) -> None:
         self.ae_table_builder = AeTableBuilder()
 
+    def _create_change_from_baseline_tab(self) -> None:
+        self.change_from_baseline_builder = ChangeFromBaselineBuilder()
+
     def _create_listing_tab(self) -> None:
         self.listing_builder = ListingBuilder()
 
@@ -128,6 +133,12 @@ class AnalysisPanel(QWidget):
 
     def show_ae_table_tab(self) -> None:
         self._activate(self.ae_table_builder, "AE Table")
+
+    def show_change_from_baseline_tab(self) -> None:
+        self._activate(
+            self.change_from_baseline_builder,
+            "Change from Baseline (Horizontal)",
+        )
 
     def show_listing_tab(self) -> None:
         self._activate(self.listing_builder, "Listing Generator")

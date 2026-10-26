@@ -2,6 +2,10 @@
 
 from .ae_table import AeTableController, AeTableResultContext
 from .categorical import CategoricalController, CategoricalResultContext
+from .change_from_baseline import (
+    ChangeFromBaselineController,
+    ChangeFromBaselineResultContext,
+)
 from .listing import ListingController, ListingResultContext
 from .proc_means import ProcMeansController, ProcMeansResultContext
 from .rule_based import RuleBasedController, RuleBasedResultContext
@@ -11,6 +15,8 @@ __all__ = [
     "AeTableResultContext",
     "CategoricalController",
     "CategoricalResultContext",
+    "ChangeFromBaselineController",
+    "ChangeFromBaselineResultContext",
     "ListingController",
     "ListingResultContext",
     "ProcMeansController",

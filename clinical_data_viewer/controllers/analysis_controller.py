@@ -22,6 +22,7 @@ from ..temp_manager import TempManager
 from ..ui.ae_table_builder import AeTableBuilderSelection
 from ..ui.analysis_panel import AnalysisPanel
 from ..ui.categorical_builder import CategoricalBuilderSelection
+from ..ui.change_from_baseline_builder import ChangeFromBaselineBuilderSelection
 from ..ui.dataset_tab import DatasetTab
 from ..ui.listing_builder import ListingBuilderSelection
 from ..ui.proc_means_builder import ProcMeansBuilderSelection
@@ -30,6 +31,7 @@ from ..workers import Worker
 from .analysis import (
     AeTableController,
     CategoricalController,
+    ChangeFromBaselineController,
     ListingController,
     ProcMeansController,
     RuleBasedController,
@@ -135,6 +137,9 @@ class AnalysisController(QObject):
         self.ae_table = AeTableController(self, temp_manager, settings)
         self.proc_means = ProcMeansController(self, temp_manager, settings)
         self.categorical = CategoricalController(self, temp_manager, settings)
+        self.change_from_baseline = ChangeFromBaselineController(
+            self, temp_manager, settings
+        )
 
         builder = self._panel.listing_builder
         builder.run_requested.connect(self.listing.run_listing)
@@ -202,6 +207,19 @@ class AnalysisController(QObject):
             host.browse_categorical_adsl_dataset
         )
         categorical_builder.cleared.connect(self.categorical.clear_categorical_source)
+
+        change_builder = self._panel.change_from_baseline_builder
+        change_builder.run_requested.connect(self.change_from_baseline.run)
+        change_builder.shell_preview_requested.connect(
+            self.change_from_baseline.show_shell_preview
+        )
+        change_builder.source_selected.connect(self.change_from_baseline.select_source)
+        change_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(
+                self._parent_widget(), "Change from Baseline", message
+            )
+        )
+        change_builder.cleared.connect(self.change_from_baseline.clear_source)
 
     @property
     def listing_source(self) -> DatasetTab | None:
@@ -273,6 +291,8 @@ class AnalysisController(QObject):
             titles.append("Proc Means")
         if self.categorical_source is tab:
             titles.append("Categorical")
+        if self.change_from_baseline_source is tab:
+            titles.append("Change from Baseline")
         return titles
 
     def _tab_activity_blocker(self, tab: object, action: str) -> TabCloseBlocker | None:
@@ -301,6 +321,11 @@ class AnalysisController(QObject):
                 "Categorical Table Running",
                 f"This dataset is currently used by a Categorical Table. Wait for the calculation to finish before {action} it.",
             )
+        if self.change_from_baseline.is_input_tab(tab):
+            return TabCloseBlocker(
+                "Change from Baseline Running",
+                f"This dataset is currently used by a Change from Baseline table. Wait for the calculation to finish before {action} it.",
+            )
         return None
 
     def tab_close_blocker(self, tab: object) -> TabCloseBlocker | None:
@@ -313,6 +338,7 @@ class AnalysisController(QObject):
     def source_reload_started(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module before a dataset handle is replaced."""
         self.proc_means.source_reload_started(tab)
+        self.change_from_baseline.source_reload_started(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_started(tab)
@@ -320,6 +346,7 @@ class AnalysisController(QObject):
     def source_reload_completed(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module after a reload fully completes."""
         self.proc_means.source_reload_completed(tab)
+        self.change_from_baseline.source_reload_completed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_completed(tab)
@@ -327,6 +354,7 @@ class AnalysisController(QObject):
     def source_reload_failed(self, tab: DatasetTab) -> None:
         """Notify the bound analysis module that a reload failed."""
         self.proc_means.source_reload_failed(tab)
+        self.change_from_baseline.source_reload_failed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_failed(tab)
@@ -346,6 +374,9 @@ class AnalysisController(QObject):
         if paths is not None:
             return paths
         paths = self.categorical.take_result_release_paths(tab)
+        if paths is not None:
+            return paths
+        paths = self.change_from_baseline.take_result_release_paths(tab)
         if paths is not None:
             return paths
         return ()
@@ -384,6 +415,27 @@ class AnalysisController(QObject):
 
     def open_categorical_long_result(self) -> None:
         self.categorical.open_categorical_long_result()
+
+    @property
+    def change_from_baseline_source(self) -> DatasetTab | None:
+        return self.change_from_baseline.source
+
+    def refresh_change_from_baseline_sources(self, datasets=None) -> None:
+        self.change_from_baseline.refresh_sources(datasets)
+
+    def show_change_from_baseline_builder(self) -> None:
+        self.change_from_baseline.show_builder()
+
+    def clear_change_from_baseline_source(self) -> None:
+        self.change_from_baseline.clear_source()
+
+    def run_change_from_baseline(
+        self, selection: ChangeFromBaselineBuilderSelection
+    ) -> None:
+        self.change_from_baseline.run(selection)
+
+    def open_change_from_baseline_long_result(self) -> None:
+        self.change_from_baseline.open_long_result()
 
     @property
     def ae_table_source(self) -> DatasetTab | None:

@@ -224,6 +224,12 @@ class MainWindow(QMainWindow):
         self.open_ae_table_long_action.triggered.connect(
             lambda: self.analysis_controller.open_ae_table_long_result()
         )
+        self.open_change_from_baseline_long_action = QAction(
+            "Open Change from Baseline Long Result", self
+        )
+        self.open_change_from_baseline_long_action.triggered.connect(
+            lambda: self.analysis_controller.open_change_from_baseline_long_result()
+        )
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
@@ -235,6 +241,12 @@ class MainWindow(QMainWindow):
         self.rule_based_builder_action.triggered.connect(self.show_rule_based_builder)
         self.ae_table_builder_action = QAction("AE Table Builder", self)
         self.ae_table_builder_action.triggered.connect(self.show_ae_table_builder)
+        self.change_from_baseline_builder_action = QAction(
+            "Change from Baseline (Horizontal)", self
+        )
+        self.change_from_baseline_builder_action.triggered.connect(
+            self.show_change_from_baseline_builder
+        )
         self.listing_builder_action = QAction("Listing Generator", self)
         self.listing_builder_action.triggered.connect(self.show_listing_builder)
         self.compare_datasets_action = QAction("Compare Datasets", self)
@@ -268,12 +280,14 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.open_categorical_long_action)
         view_menu.addAction(self.open_rule_based_long_action)
         view_menu.addAction(self.open_ae_table_long_action)
+        view_menu.addAction(self.open_change_from_baseline_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
         tools_menu.addAction(self.categorical_builder_action)
         tools_menu.addAction(self.rule_based_builder_action)
         tools_menu.addAction(self.ae_table_builder_action)
+        tools_menu.addAction(self.change_from_baseline_builder_action)
         tools_menu.addAction(self.listing_builder_action)
         tools_menu.addAction(self.compare_datasets_action)
         tools_menu.addAction(self.merge_datasets_action)
@@ -819,6 +833,9 @@ class MainWindow(QMainWindow):
             self.analysis_controller.refresh_listing_sources(analysis_datasets)
             self.analysis_controller.refresh_rule_based_sources(analysis_datasets)
             self.analysis_controller.refresh_ae_table_sources(analysis_datasets)
+            self.analysis_controller.refresh_change_from_baseline_sources(
+                analysis_datasets
+            )
             self.analysis_controller.refresh_categorical_adsl_sources(datasets)
             self.analysis_controller.refresh_listing_adsl_sources(datasets)
             self.analysis_controller.refresh_rule_based_adsl_sources(datasets)
@@ -1650,6 +1667,11 @@ class MainWindow(QMainWindow):
         self.analysis_dock.resize(compact_width, self.analysis_dock.height())
         self.analysis_dock.show()
 
+    def show_change_from_baseline_builder(self) -> None:
+        self.analysis_controller.show_change_from_baseline_builder()
+        self.analysis_dock.setMinimumWidth(310)
+        self.analysis_dock.show()
+
     def show_listing_builder(self) -> None:
         self.analysis_controller.show_listing_builder()
         self.analysis_dock.setMinimumWidth(310)
@@ -2174,6 +2196,9 @@ class MainWindow(QMainWindow):
         )
         self.open_ae_table_long_action.setEnabled(
             tab is not None and tab.handle.kind == "ae_table"
+        )
+        self.open_change_from_baseline_long_action.setEnabled(
+            tab is not None and tab.handle.kind == "change_from_baseline"
         )
 
     @staticmethod

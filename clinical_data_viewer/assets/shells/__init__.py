@@ -1,0 +1,1 @@
+"""Reviewable table shell assets."""

@@ -20,6 +20,10 @@ a = Analysis(
             "clinical_data_viewer/codegen/r/templates",
             "clinical_data_viewer/codegen/r/templates",
         ),
+        (
+            "clinical_data_viewer/assets/shells",
+            "clinical_data_viewer/assets/shells",
+        ),
     ],
     hiddenimports=pyreadstat_hiddenimports + pandas_hiddenimports + xlsxwriter_hiddenimports + ["scipy.stats"],
     hookspath=[],
