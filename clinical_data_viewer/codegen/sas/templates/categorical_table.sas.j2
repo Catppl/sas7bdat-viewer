@@ -155,10 +155,27 @@ data {{ item.members.calculation }};
 {% else %}    level_key = level;
 {% endif %}run;
 
+{% if item.level_sort_method == "frequency_descending" %}data {{ item.members.calculation }};
+    set {{ item.members.calculation }};
+{% if total_enabled %}    _level_freq = count{{ total_order }};
+{% else %}    _level_freq = 0;
+{% for level in levels %}    _level_freq = _level_freq + count{{ level.order }};
+{% endfor %}{% endif %}run;
+{% elif item.level_sort_method == "custom" %}data {{ item.members.calculation }};
+    set {{ item.members.calculation }};
+    if missing(level) then level_order = {{ item.custom_missing_order }};
+{% for custom in item.custom_level_values %}    else if {{ custom.match }} then level_order = {{ custom.order }};
+{% endfor %}    else level_order = 1000000;
+{% endif %}run;
+
 proc sort data={{ item.members.calculation }};
     by
 {% for context in item.contexts %}        {{ context.alias }}_miss {{ context.alias }}_key {{ context.alias }}
-{% endfor %}        level_miss level_key level
+{% endfor %}        {% if item.level_sort_method == "custom" %}level_order level_key level
+{% else %}level_miss{% if item.level_sort_method == "runtime_value_descending" %} descending level_key descending level
+{% elif item.level_sort_method == "frequency_descending" %} descending _level_freq level_key level
+{% else %} level_key level
+{% endif %}{% endif %}
     ;
 run;
 

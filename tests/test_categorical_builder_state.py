@@ -190,6 +190,45 @@ class CategoricalBuilderStateTests(unittest.TestCase):
         builder.close()
         self.application.processEvents()
 
+    def test_item_level_sort_options_and_custom_text_are_saved(self) -> None:
+        from PySide6.QtCore import Qt
+
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.categorical_builder import CategoricalBuilder
+
+        builder = CategoricalBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADAE",
+                1,
+                tuple(VariableMetadata(name) for name in ("USUBJID", "TRT", "RACE")),
+            ),
+            "adae.sas7bdat",
+        )
+        builder.items.editor.setText("RACE")
+        builder.items._add()
+        current = builder.items.items.currentItem()
+        assert current is not None
+        combo = builder.items.items.itemWidget(current, 2)
+        combo.setCurrentText("Custom")
+        builder.items.custom_order_editor.setText("Y, n, (Missing)")
+        builder.items.custom_order_editor.editingFinished.emit()
+        selected = builder.items.selected_items()[0]
+        self.assertEqual(selected.level_sort_method, "custom")
+        self.assertEqual(selected.level_order, ("Y", "n", None))
+
+        # Propcase is independent from the level sort method, and Custom
+        # character values are matched case-insensitively.
+        builder.items.items.item(0).setCheckState(1, Qt.Checked)
+        selected = builder.items.selected_items()[0]
+        self.assertTrue(selected.propcase_levels)
+        self.assertEqual(selected.level_sort_method, "custom")
+        builder.items.custom_order_editor.setText("Y, y")
+        with self.assertRaisesRegex(ValueError, "more than once"):
+            builder.items._parse_custom_order("RACE")
+        builder.close()
+        self.application.processEvents()
+
     def test_source_reload_refreshes_schema_without_overwriting_builder_filter(
         self,
     ) -> None:

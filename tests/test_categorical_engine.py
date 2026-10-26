@@ -767,15 +767,67 @@ class CategoricalEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "record count"):
             config.validate(DatasetMetadata("ADLB", 0, SOURCE_VARIABLES))
 
-    def test_custom_level_order_is_explicitly_reserved(self) -> None:
+    def test_custom_level_order_is_supported(self) -> None:
         config = CategoricalConfig(
-            (CategoricalItem("RACE", level_order=("WHITE", "BLACK")),),
+            (
+                CategoricalItem(
+                    "RACE",
+                    level_order=("WHITE", "BLACK"),
+                    level_sort_method="custom",
+                ),
+            ),
             "TRT",
             "USUBJID",
             denominator=DenominatorConfig("nonmissing", analysis_value_variable="AVAL"),
         )
-        with self.assertRaisesRegex(ValueError, "level order"):
-            config.validate(DatasetMetadata("ADLB", 0, SOURCE_VARIABLES))
+        config.validate(DatasetMetadata("ADLB", 0, SOURCE_VARIABLES))
+
+    def test_all_level_sort_methods_are_independent_per_item(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                "adae",
+                SOURCE_VARIABLES,
+                (
+                    ("S1", "A", "A", "P1", 1, 1, "Y"),
+                    ("S2", "A", "a", "P1", 1, 1, "Y"),
+                    ("S3", "A", "B", "P1", 1, 1, "Y"),
+                    ("S4", "A", "C", "P1", 1, 1, "Y"),
+                    ("S5", "A", "C", "P1", 1, 1, "Y"),
+                    ("S6", "A", "C", "P1", 1, 1, "Y"),
+                ),
+            )
+
+            def levels(method: str, custom: tuple[object, ...] = ()) -> list[str]:
+                config = CategoricalConfig(
+                    (
+                        CategoricalItem(
+                            "RACE",
+                            level_order=custom,
+                            level_sort_method=method,
+                        ),
+                    ),
+                    "TRT",
+                    "USUBJID",
+                    denominator=DenominatorConfig("nonmissing", "AVAL"),
+                )
+                result = CategoricalEngine(TempManager(root / f"temp-{method}")).run(
+                    source, config
+                )
+                with closing(sqlite3.connect(result.database_path)) as connection:
+                    return [
+                        value[0].replace("\u00a0", "").strip()
+                        for value in connection.execute('SELECT "ITEM_LEVEL" FROM dataset')
+                        if value[0].startswith("\u00a0")
+                    ]
+
+            self.assertEqual(levels("runtime_value_ascending"), ["A", "a", "B", "C"])
+            self.assertEqual(levels("runtime_value_descending"), ["C", "B", "a", "A"])
+            self.assertEqual(levels("frequency_descending"), ["C", "A", "a", "B"])
+            self.assertEqual(
+                levels("custom", ("b", "a", "c")), ["B", "A", "a", "C"]
+            )
 
     def test_propcase_changes_display_only_and_warns_on_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

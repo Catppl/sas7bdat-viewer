@@ -6,6 +6,12 @@ from ..domain import DatasetMetadata
 from ..filter_engine import CompiledFilter
 
 
+def _is_missing_level(value: object, variable: object) -> bool:
+    return value is None or (
+        getattr(variable, "kind", "") == "character" and value == ""
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CategoricalItem:
     """One categorical variable and its optional analysis context."""
@@ -18,6 +24,7 @@ class CategoricalItem:
     # Presentation only. Raw values remain authoritative for grouping,
     # sorting, drill-down, and long-result traceability.
     propcase_levels: bool = False
+    level_sort_method: str = "runtime_value_ascending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,11 +122,38 @@ class CategoricalConfig:
         ):
             source_field(self.subject_id_variable, "Subject ID variable")
         item_names: set[str] = set()
+        allowed_level_sort = {
+            "runtime_value_ascending",
+            "runtime_value_descending",
+            "frequency_descending",
+            "custom",
+        }
         for item in self.items:
             source_field(item.variable, "Item variable")
-            if item.level_order:
+            if item.level_sort_method not in allowed_level_sort:
                 raise ValueError(
-                    "Custom categorical level order is reserved and not supported yet."
+                    f'Unsupported level sort method "{item.level_sort_method}".'
+                )
+            if item.level_sort_method == "custom" and not item.level_order:
+                raise ValueError(
+                    f'Custom level order for Item "{item.variable}" cannot be empty.'
+                )
+            if item.level_sort_method != "custom" and item.level_order:
+                raise ValueError(
+                    f'Item "{item.variable}" has custom levels but is not using Custom sort.'
+                )
+            item_variable = known[item.variable.casefold()]
+            level_keys = [
+                "<missing>"
+                if _is_missing_level(value, item_variable)
+                else str(value).casefold()
+                if item_variable.kind == "character"
+                else repr(value)
+                for value in item.level_order
+            ]
+            if len(level_keys) != len(set(level_keys)):
+                raise ValueError(
+                    f'Custom level order for Item "{item.variable}" contains duplicates.'
                 )
             folded = item.variable.casefold()
             if folded in item_names:

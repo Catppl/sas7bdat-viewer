@@ -95,10 +95,16 @@ def configuration(*, denominator="nonmissing", count="distinct_subjects", digits
                 "missing": "last",
             },
             "levels": {
-                "method": "runtime_value_ascending",
+                "method": "configured_per_item",
+                "allowed_methods": [
+                    "runtime_value_ascending",
+                    "runtime_value_descending",
+                    "frequency_descending",
+                    "custom",
+                ],
                 "character_collation": "case_insensitive",
                 "numeric_order": "numeric",
-                "missing": "last",
+                "missing": "last_unless_explicit_custom",
             },
         },
         "calculation": {
@@ -372,6 +378,36 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         del legacy["items"][0]["display"]
         legacy_code = self.generator.generate(legacy)
         self.assertNotIn("level_text = propcase(level_text);", legacy_code)
+
+    def test_all_level_sort_methods_are_rendered(self) -> None:
+        for method, expected in (
+            ("runtime_value_ascending", "level_key level"),
+            ("runtime_value_descending", "descending level_key descending level"),
+            ("frequency_descending", "descending _level_freq level_key level"),
+        ):
+            with self.subTest(method=method):
+                value = configuration()
+                value["items"][0]["level_order"] = {"method": method}
+                code = self.generator.generate(value)
+                self.assertIn(expected, code)
+
+        custom = configuration()
+        custom["items"][0]["level_order"] = {
+            "method": "custom",
+            "values": ["drug b", "Drug A", None],
+        }
+        custom_code = self.generator.generate(custom)
+        self.assertIn("level_order level_key level", custom_code)
+        self.assertIn("lowcase(level) = 'drug b'", custom_code)
+        self.assertIn("missing(level) then level_order", custom_code)
+
+        duplicate = configuration()
+        duplicate["items"][0]["level_order"] = {
+            "method": "custom",
+            "values": ["A", "a"],
+        }
+        with self.assertRaisesRegex(ValueError, "values must be unique"):
+            self.generator.generate(duplicate)
 
     def test_numeric_treatment_literals_and_no_total(self) -> None:
         value = configuration()

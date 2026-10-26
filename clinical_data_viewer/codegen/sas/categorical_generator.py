@@ -135,6 +135,18 @@ def _literal(value: object, kind: str, label: str) -> str:
     return _numeric(value, label)
 
 
+def _custom_level_key(value: object, kind: str) -> tuple[str, object]:
+    """Normalize Custom level values using the same matching semantics as the engine."""
+
+    if value is None:
+        return ("missing", "")
+    if kind == "character":
+        return ("character", str(value).casefold())
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return ("numeric", float(value))
+    return ("numeric", repr(value))
+
+
 class SasCategoricalGenerator:
     """Render readable SAS from the Categorical Table JSON v1 contract."""
 
@@ -254,13 +266,28 @@ class SasCategoricalGenerator:
         for name in ("contexts", "levels"):
             block = _mapping(sort.get(name), f"sort.{name}")
             expected = {
-                "method": "runtime_value_ascending",
+                "method": (
+                    "configured_per_item"
+                    if name == "levels"
+                    else "runtime_value_ascending"
+                ),
                 "character_collation": "case_insensitive",
                 "numeric_order": "numeric",
-                "missing": "last",
+                "missing": (
+                    "last_unless_explicit_custom"
+                    if name == "levels"
+                    else "last"
+                ),
             }
             if any(block.get(key) != value for key, value in expected.items()):
                 raise ValueError(f"Unsupported Categorical {name} sorting contract.")
+            if name == "levels" and block.get("allowed_methods") != [
+                "runtime_value_ascending",
+                "runtime_value_descending",
+                "frequency_descending",
+                "custom",
+            ]:
+                raise ValueError("Unsupported Categorical level sort methods.")
 
         calculation = _mapping(configuration["calculation"], "calculation")
         expected_calculation = {
@@ -512,8 +539,33 @@ class SasCategoricalGenerator:
             else:
                 raise ValueError("Unsupported Categorical level display case.")
             level_order = _mapping(item.get("level_order"), "item.level_order")
-            if level_order.get("method") != "runtime_value_ascending":
+            level_sort_method = level_order.get("method")
+            if level_sort_method not in {
+                "runtime_value_ascending",
+                "runtime_value_descending",
+                "frequency_descending",
+                "custom",
+            }:
                 raise ValueError("Unsupported Categorical item level order.")
+            custom_level_values = level_order.get("values", [])
+            if level_sort_method == "custom":
+                if not isinstance(custom_level_values, list) or not custom_level_values:
+                    raise ValueError(
+                        "Custom Categorical item level order requires values."
+                    )
+                if len(custom_level_values) != len(
+                    {
+                        _custom_level_key(value, variable_types[folded])
+                        for value in custom_level_values
+                    }
+                ):
+                    raise ValueError(
+                        "Custom Categorical item level order values must be unique."
+                    )
+            elif custom_level_values:
+                raise ValueError(
+                    "Only custom Categorical item level order may contain values."
+                )
             context_values = item.get("context_variables")
             if not isinstance(context_values, list):
                 raise ValueError(  # noqa: TRY004 - invalid contract is reported uniformly
@@ -581,6 +633,41 @@ class SasCategoricalGenerator:
                     "contexts": contexts,
                     "include_missing": bool(missing_level["include"]),
                     "propcase_levels": propcase_levels,
+                    "level_sort_method": level_sort_method,
+                    "custom_level_values": [
+                        {
+                            "value": value,
+                            "literal": (
+                                None
+                                if value is None
+                                else _literal(
+                                    value, variable_types[folded], "custom level"
+                                )
+                            ),
+                            "match": (
+                                "lowcase(level) = "
+                                f"{sas_string(str(value).casefold())}"
+                                if value is not None and variable_types[folded] == "character"
+                                else (
+                                    "missing(level)"
+                                    if value is None
+                                    else "level = "
+                                    f"{_literal(value, variable_types[folded], 'custom level')}"
+                                )
+                            ),
+                            "order": index,
+                        }
+                        for index, value in enumerate(custom_level_values, start=1)
+                        if value is not None
+                    ],
+                    "custom_missing_order": next(
+                        (
+                            index
+                            for index, value in enumerate(custom_level_values, start=1)
+                            if value is None
+                        ),
+                        999999,
+                    ),
                     "members": members,
                 }
             )

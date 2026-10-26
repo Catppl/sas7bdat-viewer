@@ -54,11 +54,12 @@ class _CategoricalItemTable(QTreeWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setColumnCount(2)
-        self.setHeaderLabels(("Item Variable", "Propcase"))
+        self.setColumnCount(3)
+        self.setHeaderLabels(("Item Variable", "Propcase", "Level Sort"))
         header = self.header()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
 
     def count(self) -> int:
         return self.topLevelItemCount()
@@ -143,6 +144,18 @@ class CategoricalItemEditor(QWidget):
         self.include_missing = QCheckBox("Include missing level")
         self.include_missing.toggled.connect(lambda _checked: self._save_current())
         layout.addWidget(self.include_missing)
+        custom_row = QHBoxLayout()
+        custom_row.addWidget(QLabel("Custom level order"))
+        self.custom_order_editor = QLineEdit()
+        self.custom_order_editor.setPlaceholderText(
+            "Comma-separated raw values; character matching ignores case"
+        )
+        self.custom_order_editor.editingFinished.connect(self._save_current)
+        custom_row.addWidget(self.custom_order_editor, 1)
+        layout.addLayout(custom_row)
+        self.custom_order_label = custom_row.itemAt(0).widget()
+        self.custom_order_label.setVisible(False)
+        self.custom_order_editor.setVisible(False)
 
     def set_metadata(
         self, metadata: DatasetMetadata | None, *, preserve: bool = False
@@ -186,6 +199,7 @@ class CategoricalItemEditor(QWidget):
                     config.include_missing_level,
                     config.level_order,
                     config.propcase_levels,
+                    config.level_sort_method,
                 )
             self._configs = configs
             current = (
@@ -214,6 +228,9 @@ class CategoricalItemEditor(QWidget):
         self.label_editor.clear()
         self.contexts.set_variables(())
         self.include_missing.setChecked(False)
+        self.custom_order_editor.clear()
+        self.custom_order_label.setVisible(False)
+        self.custom_order_editor.setVisible(False)
 
     def selected_items(self) -> tuple[CategoricalItem, ...]:
         self._save_current()
@@ -223,12 +240,26 @@ class CategoricalItemEditor(QWidget):
         )
 
     def _append_item(self, config: CategoricalItem) -> None:
-        item = QTreeWidgetItem((config.variable, ""))
+        item = QTreeWidgetItem((config.variable, "", ""))
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(
             1, Qt.Checked if config.propcase_levels else Qt.Unchecked
         )
         self.items.addTopLevelItem(item)
+        combo = ClickOnlyComboBox()
+        for label, method in (
+            ("Ascending", "runtime_value_ascending"),
+            ("Descending", "runtime_value_descending"),
+            ("Frequency descending", "frequency_descending"),
+            ("Custom", "custom"),
+        ):
+            combo.addItem(label, method)
+        index = combo.findData(config.level_sort_method)
+        combo.setCurrentIndex(max(index, 0))
+        combo.currentIndexChanged.connect(
+            lambda _index, tree_item=item: self._level_sort_changed(tree_item)
+        )
+        self.items.setItemWidget(item, 2, combo)
 
     def _add(self) -> None:
         requested = self.editor.text().strip()
@@ -287,6 +318,9 @@ class CategoricalItemEditor(QWidget):
             self.label_editor.clear()
             self.contexts.set_variables(())
             self.include_missing.setChecked(False)
+            self.custom_order_editor.clear()
+            self.custom_order_label.setVisible(False)
+            self.custom_order_editor.setVisible(False)
         else:
             item = self._configs.get(current.text(0))
             if item is None:
@@ -298,6 +332,10 @@ class CategoricalItemEditor(QWidget):
             self.label_editor.setText(item.label)
             self.contexts.set_variables(item.context_variables)
             self.include_missing.setChecked(item.include_missing_level)
+            self.custom_order_editor.setText(self._custom_order_text(item))
+            is_custom = item.level_sort_method == "custom"
+            self.custom_order_label.setVisible(is_custom)
+            self.custom_order_editor.setVisible(is_custom)
         self._updating = False
 
     def _save_current(self) -> None:
@@ -308,15 +346,89 @@ class CategoricalItemEditor(QWidget):
             return
         name = current.text(0)
         existing = self._configs[name]
+        level_sort_method = self._current_level_sort_method(current)
+        try:
+            level_order = (
+                self._parse_custom_order(name)
+                if level_sort_method == "custom"
+                else ()
+            )
+        except ValueError as error:
+            self.validation_error.emit(str(error))
+            return
         self._configs[name] = CategoricalItem(
             existing.variable,
             self.label_editor.text().strip(),
             self.contexts.selected_variables(),
             self.include_missing.isChecked(),
-            existing.level_order,
+            level_order,
             current.checkState(1) == Qt.Checked,
+            level_sort_method,
         )
         self.changed.emit()
+
+    @staticmethod
+    def _custom_order_text(item: CategoricalItem) -> str:
+        return ", ".join(
+            "(Missing)" if value is None else str(value) for value in item.level_order
+        )
+
+    def _current_level_sort_method(self, current: QTreeWidgetItem) -> str:
+        combo = self.items.itemWidget(current, 2)
+        return str(combo.currentData()) if combo is not None else "runtime_value_ascending"
+
+    def _parse_custom_order(self, variable: str) -> tuple[object, ...]:
+        text = self.custom_order_editor.text().strip()
+        if not text:
+            return ()
+        values: list[object] = []
+        variable_metadata = next(
+            (
+                value
+                for value in (self._metadata.variables if self._metadata else ())
+                if value.name.casefold() == variable.casefold()
+            ),
+            None,
+        )
+        for token in (part.strip() for part in text.split(",")):
+            if not token:
+                continue
+            if token.casefold() == "(missing)":
+                value: object = None
+            elif variable_metadata is not None and variable_metadata.kind == "numeric":
+                try:
+                    number = float(token)
+                except ValueError as error:
+                    raise ValueError(
+                        f'Custom level "{token}" for {variable} must be numeric.'
+                    ) from error
+                value = int(number) if number.is_integer() else number
+            else:
+                value = token
+            duplicate = (
+                any(
+                    isinstance(existing, str)
+                    and isinstance(value, str)
+                    and existing.casefold() == value.casefold()
+                    for existing in values
+                )
+                if isinstance(value, str)
+                else value in values
+            )
+            if duplicate:
+                raise ValueError(f'Custom level "{token}" is listed more than once.')
+            values.append(value)
+        return tuple(values)
+
+    def _level_sort_changed(self, current: QTreeWidgetItem) -> None:
+        if self._updating or current is not self.items.currentItem():
+            return
+        method = self._current_level_sort_method(current)
+        self._updating = True
+        self.custom_order_label.setVisible(method == "custom")
+        self.custom_order_editor.setVisible(method == "custom")
+        self._updating = False
+        self._save_current()
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._updating or column != 1:
@@ -332,6 +444,7 @@ class CategoricalItemEditor(QWidget):
             existing.include_missing_level,
             existing.level_order,
             item.checkState(1) == Qt.Checked,
+            existing.level_sort_method,
         )
         self.changed.emit()
 

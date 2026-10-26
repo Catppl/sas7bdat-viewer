@@ -114,7 +114,14 @@ def build_categorical_configuration(
                 "value_case": "propcase" if item.propcase_levels else "original",
                 "lowercase_words": ["and", "or"] if item.propcase_levels else [],
             },
-            "level_order": {"method": "runtime_value_ascending"},
+            "level_order": {
+                "method": item.level_sort_method,
+                **(
+                    {"values": list(item.level_order)}
+                    if item.level_sort_method == "custom"
+                    else {}
+                ),
+            },
         }
         for item in config.items
     ]
@@ -218,10 +225,16 @@ def build_categorical_configuration(
                 "missing": "last",
             },
             "levels": {
-                "method": "runtime_value_ascending",
+                "method": "configured_per_item",
+                "allowed_methods": [
+                    "runtime_value_ascending",
+                    "runtime_value_descending",
+                    "frequency_descending",
+                    "custom",
+                ],
                 "character_collation": "case_insensitive",
                 "numeric_order": "numeric",
-                "missing": "last",
+                "missing": "last_unless_explicit_custom",
             },
         },
         "calculation": {

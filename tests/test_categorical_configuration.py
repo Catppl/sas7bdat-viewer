@@ -294,6 +294,18 @@ class CategoricalConfigurationTests(unittest.TestCase):
                 {"value_case": "propcase", "lowercase_words": ["and", "or"]},
             )
 
+            custom = CategoricalConfig(
+                (CategoricalItem("RACE", level_order=("WHITE", "BLACK"), level_sort_method="custom"),),
+                "TRT",
+                "USUBJID",
+                denominator=DenominatorConfig("nonmissing", "AVAL"),
+            )
+            custom_value = build_categorical_configuration(source, custom)
+            self.assertEqual(
+                custom_value["items"][0]["level_order"],
+                {"method": "custom", "values": ["WHITE", "BLACK"]},
+            )
+
     def test_engine_writes_json_and_orders_numeric_contexts_and_levels_numerically(
         self,
     ) -> None:

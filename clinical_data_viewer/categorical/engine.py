@@ -733,22 +733,88 @@ class CategoricalEngine:
             fields[name.casefold()] for name in item.context_variables
         )
 
-        def row_sort_key(key: tuple[str, str]) -> tuple[object, ...]:
-            context = json.loads(key[0])
-            level = json.loads(key[1])
+        def context_sort_key(context_key: str) -> tuple[object, ...]:
+            context = json.loads(context_key)
             return (
                 *(
                     self._value_sort_key(context.get(name), variable)
                     for name, variable in zip(item.context_variables, context_variables)
                 ),
-                self._value_sort_key(level, item_variable),
             )
 
-        ordered = sorted(rows, key=row_sort_key)
-        grouped: dict[str, list[str]] = defaultdict(list)
-        for context_key, level_key in ordered:
-            grouped[context_key].append(level_key)
-        for context_key, levels in grouped.items():
+        context_keys = sorted(
+            {context_key for context_key, _level_key in rows},
+            key=context_sort_key,
+        )
+        custom_ranks = {
+            self._custom_level_key(value, item_variable): index
+            for index, value in enumerate(item.level_order)
+        }
+
+        def level_frequency(level_key: str, context_key: str) -> int:
+            values = rows[(context_key, level_key)]
+            if config.include_total and None in values:
+                return values[None]
+            return sum(values.values())
+
+        def level_sort_key(level_key: str, context_key: str) -> tuple[object, ...]:
+            level = json.loads(level_key)
+            if item.level_sort_method == "frequency_descending":
+                return (
+                    -level_frequency(level_key, context_key),
+                    self._value_sort_key(level, item_variable),
+                )
+            if item.level_sort_method == "custom":
+                rank = custom_ranks.get(
+                    self._custom_level_key(level, item_variable)
+                )
+                if rank is not None:
+                    return (0, rank)
+                return (1, self._value_sort_key(level, item_variable))
+            return self._value_sort_key(level, item_variable)
+
+        for context_key in context_keys:
+            levels = [
+                level_key for current_context, level_key in rows if current_context == context_key
+            ]
+            if item.level_sort_method == "runtime_value_descending":
+                nonmissing = [
+                    level_key
+                    for level_key in levels
+                    if not _missing(json.loads(level_key), item_variable)
+                ]
+                missing = [
+                    level_key
+                    for level_key in levels
+                    if _missing(json.loads(level_key), item_variable)
+                ]
+                levels = sorted(
+                    nonmissing,
+                    key=lambda level_key: self._value_sort_key(
+                        json.loads(level_key), item_variable
+                    ),
+                    reverse=True,
+                ) + missing
+            elif item.level_sort_method == "frequency_descending":
+                nonmissing = [
+                    level_key
+                    for level_key in levels
+                    if not _missing(json.loads(level_key), item_variable)
+                ]
+                missing = [
+                    level_key
+                    for level_key in levels
+                    if _missing(json.loads(level_key), item_variable)
+                ]
+                levels = sorted(
+                    nonmissing,
+                    key=lambda level_key: level_sort_key(level_key, context_key),
+                ) + sorted(
+                    missing,
+                    key=lambda level_key: -level_frequency(level_key, context_key),
+                )
+            else:
+                levels.sort(key=lambda level_key: level_sort_key(level_key, context_key))
             context = json.loads(context_key)
             context_text = ", ".join(
                 f"{name}={_display(context.get(name))}" for name in context_names
@@ -764,13 +830,13 @@ class CategoricalEngine:
                 long_cells: dict[str | None, tuple[int, int]] = {}
                 treatment_json: dict[str | None, str] = {}
                 for treatment_key in all_treatments:
-                    frequency = rows[(context_key, level_key)].get(treatment_key, 0)
+                    cell_frequency = rows[(context_key, level_key)].get(treatment_key, 0)
                     denom = denominator.get((context_key, treatment_key), 0)
                     cells[treatment_key] = (
-                        self._format_cell(frequency, denom, config.percent_digits),
+                        self._format_cell(cell_frequency, denom, config.percent_digits),
                         "",
                     )
-                    long_cells[treatment_key] = (frequency, denom)
+                    long_cells[treatment_key] = (cell_frequency, denom)
                     treatment_json[treatment_key] = treatment_key
                 writer.add_level_row(
                     f"\u00a0\u00a0\u00a0\u00a0{_display_level(level, propcase=item.propcase_levels)}",
@@ -784,3 +850,11 @@ class CategoricalEngine:
                     level_json=level_key,
                     treatment_json=treatment_json,
                 )
+
+    @staticmethod
+    def _custom_level_key(value: object, variable: VariableMetadata) -> str:
+        if _missing(value, variable):
+            return "<missing>"
+        if variable.kind == "character":
+            return str(value).casefold()
+        return _json(_canonical(value, variable))
