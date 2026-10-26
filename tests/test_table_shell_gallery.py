@@ -72,6 +72,7 @@ class TableShellGalleryTests(unittest.TestCase):
         assert gallery._cards[1].preview.pixmap() is not None
         self.assertFalse(gallery._cards[0].preview.pixmap().isNull())
         self.assertFalse(gallery._cards[1].preview.pixmap().isNull())
+        self.assertTrue(gallery._cards[0].shell.preview_path.endswith("proc_means_vertical.png"))
         gallery.close()
         self.application.processEvents()
 

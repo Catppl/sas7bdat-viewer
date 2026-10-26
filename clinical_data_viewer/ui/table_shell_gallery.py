@@ -36,8 +36,9 @@ TABLE_SHELLS = (
     TableShell(
         "proc_means_vertical",
         "Descriptive Statistics",
-        "Continuous variable summary by treatment and visit",
+        "Continuous variable summary by treatment and group",
         "Summary",
+        "clinical_data_viewer/assets/shells/proc_means_vertical.png",
     ),
     TableShell(
         "change_from_baseline",
