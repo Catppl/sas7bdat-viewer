@@ -179,6 +179,7 @@ class CopyTableView(QTableView):
         drilldown = QAction("Drill Down to Source Rows", self)
         drilldown.setEnabled(
             self._context_variable_is_proc_means_statistic()
+            or self._context_variable_is_proc_means_vertical_statistic()
             or self._context_variable_is_change_from_baseline_statistic()
         )
         drilldown.triggered.connect(
@@ -291,6 +292,15 @@ class CopyTableView(QTableView):
             variable_name
             and metadata is not None
             and variable_name in dict(metadata.proc_means_statistic_keys)
+        )
+
+    def _context_variable_is_proc_means_vertical_statistic(self) -> bool:
+        variable_name = self._context_variable()
+        metadata = getattr(self.model(), "metadata", None)
+        return bool(
+            variable_name
+            and metadata is not None
+            and variable_name in metadata.proc_means_vertical_drilldown_columns
         )
 
     def _context_variable_is_change_from_baseline_statistic(self) -> bool:

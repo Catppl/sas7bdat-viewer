@@ -333,6 +333,7 @@ class UiSmokeTests(unittest.TestCase):
         """A Builder result cell reaches the query-result callback without errors."""
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         import sqlite3
+        from contextlib import closing
         from types import SimpleNamespace
 
         from PySide6.QtWidgets import QApplication
@@ -357,7 +358,7 @@ class UiSmokeTests(unittest.TestCase):
             source_dir = root / "source"
             source_dir.mkdir()
             source_db = source_dir / "dataset.sqlite"
-            with sqlite3.connect(source_db) as connection:
+            with closing(sqlite3.connect(source_db)) as connection:
                 connection.execute(
                     "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
                     '"USUBJID" TEXT, "PARAMCD" TEXT, "TRT01AN" REAL, '
@@ -373,6 +374,7 @@ class UiSmokeTests(unittest.TestCase):
                     '"AVAL", "ANL01FL") VALUES (?, ?, ?, ?, ?)',
                     ("S2", "ALB", 1, 2.5, "Y"),
                 )
+                connection.commit()
             source_path = root / "ADLB.sas7bdat"
             source_path.touch()
             source = DatasetHandle(
@@ -481,6 +483,131 @@ class UiSmokeTests(unittest.TestCase):
             # The second entry point gets a unique Query title.
             self.assertEqual(window.tabs.count(), 3)
             self.assertEqual(window.tabs.tabText(2), "Query: Mean: 2.0 (2)")
+            window.close()
+            application.processEvents()
+
+    def test_proc_means_vertical_result_double_click_opens_query_tab(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        import sqlite3
+        from contextlib import closing
+        from types import SimpleNamespace
+
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.controllers.analysis.proc_means_vertical import (
+            ProcMeansVerticalResultContext,
+        )
+        from clinical_data_viewer.data_store import DataStore
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_engine import CompiledFilter, FilterEngine
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.proc_means_vertical import (
+            ProcMeansVerticalConfig,
+            ProcMeansVerticalEngine,
+        )
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "source"
+            source_dir.mkdir()
+            source_db = source_dir / "dataset.sqlite"
+            with closing(sqlite3.connect(source_db)) as connection:
+                connection.execute(
+                    "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+                    '"USUBJID" TEXT, "TRT01A" TEXT, "AVAL" REAL)'
+                )
+                connection.executemany(
+                    'INSERT INTO dataset("USUBJID", "TRT01A", "AVAL") '
+                    "VALUES (?, ?, ?)",
+                    (("S1", "A", 1.0), ("S2", "B", 2.0)),
+                )
+                connection.commit()
+            source_path = root / "ADLB.sas7bdat"
+            source_path.touch()
+            source = DatasetHandle(
+                source_path,
+                source_dir / source_path.name,
+                source_db,
+                DatasetMetadata(
+                    "ADLB",
+                    2,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("TRT01A"),
+                        VariableMetadata("AVAL", kind="numeric"),
+                    ),
+                ),
+                2,
+                True,
+            )
+            manager = TempManager(root / "viewer-temp")
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                population_treatment_variable="TRT01A",
+                statistics=("mean",),
+                compiled_filter=FilterEngine(source.metadata.variables).compile(
+                    "AVAL >= 1"
+                ),
+                filter_text="AVAL >= 1",
+            )
+            result = ProcMeansVerticalEngine(manager).run(source, config)
+            window = MainWindow(
+                AppSettings(),
+                manager,
+                FilterHistory(root / "history.sqlite"),
+            )
+            result_tab = window._make_dataset_tab(result)
+            window.tabs.addTab(result_tab, "PROC MEANS Vertical Result")
+            page = DataStore().query_page(
+                result.database_path,
+                result.metadata,
+                result_tab.visible_columns,
+                CompiledFilter("", ()),
+                None,
+                0,
+                100,
+            )
+            result_tab.model.set_page(
+                0,
+                page.rows,
+                page.filtered_count,
+                source_rows=page.source_rows,
+            )
+            window.analysis_controller.proc_means_vertical._results[result_tab] = (
+                ProcMeansVerticalResultContext(source, None, config)
+            )
+
+            def submit(_owner, function, completed, failed):
+                try:
+                    completed(function(SimpleNamespace(report=lambda _message: None)))
+                except BaseException as error:  # noqa: BLE001  # pragma: no cover
+                    failed(str(error), "")
+
+            window.submit_analysis_task = submit
+            index = result_tab.model.index(
+                0, result_tab.visible_columns.index("COL1")
+            )
+            window._load_page = lambda *_args: None
+            result_tab.table.doubleClicked.emit(index)
+
+            self.assertEqual(window.tabs.count(), 2)
+            self.assertEqual(window.tabs.tabText(1), "Query: Mean: 1")
+            query_tab = window.tabs.widget(1)
+            self.assertEqual(
+                query_tab.current_where_text(),
+                '(AVAL >= 1) and TRT01A = "A" and not missing(AVAL)',
+            )
+            self.assertEqual(query_tab.handle.metadata.row_count, 1)
             window.close()
             application.processEvents()
 

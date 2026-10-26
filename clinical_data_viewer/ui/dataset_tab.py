@@ -189,6 +189,7 @@ class DatasetTab(QWidget):
     comparison_invalidated = Signal()
     source_navigation_requested = Signal(int, str)
     proc_means_drilldown_requested = Signal(int, str, str)
+    proc_means_vertical_drilldown_requested = Signal(int, str, str)
     categorical_drilldown_requested = Signal(int, str, str)
     rule_based_drilldown_requested = Signal(int, str, str)
     ae_table_drilldown_requested = Signal(int, str, str)
@@ -472,6 +473,12 @@ class DatasetTab(QWidget):
             statistic_columns = dict(metadata.proc_means_statistic_keys)
             if column_name in statistic_columns:
                 self.proc_means_drilldown_requested.emit(
+                    index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
+                )
+            return
+        if self.handle.kind == "proc_means_vertical":
+            if column_name in metadata.proc_means_vertical_drilldown_columns:
+                self.proc_means_vertical_drilldown_requested.emit(
                     index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
                 )
             return

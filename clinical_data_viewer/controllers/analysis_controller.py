@@ -43,7 +43,9 @@ from .analysis.ae_table import AeTableResultContext as _AeTableResultContext
 from .analysis.categorical import CategoricalResultContext as _CategoricalResultContext
 from .analysis.listing import ListingResultContext as _ListingResultContext
 from .analysis.proc_means import ProcMeansResultContext as _ProcMeansResultContext
-from .analysis.proc_means_vertical import ProcMeansVerticalResultContext as _ProcMeansVerticalResultContext
+from .analysis.proc_means_vertical import (
+    ProcMeansVerticalResultContext as _ProcMeansVerticalResultContext,
+)
 from .analysis.rule_based import RuleBasedResultContext as _RuleBasedResultContext
 
 # Backwards-compatible imports for callers that used the pre-migration module.
@@ -619,6 +621,11 @@ class AnalysisController(QObject):
 
     def open_proc_means_vertical_long_result(self) -> None:
         self.proc_means_vertical.open_long_result()
+
+    def drilldown_proc_means_vertical(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        self.proc_means_vertical.drilldown(tab, view_row, column_name, display)
 
     def drilldown_proc_means(
         self, tab: DatasetTab, view_row: int, statistic_column: str, display: str

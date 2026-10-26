@@ -128,7 +128,7 @@ clinical_data_viewer/codegen/sas/templates/<module>.sas.j2
 | Sorting | 用户顺序、raw value、alphabetical、frequency 或自定义 |
 | Decimals | base decimals、statistic offsets、最大位数、rounding |
 | Display | wide/long、合并统计行、缩进、label、零分母显示 |
-| Drilldown | numerator records、subjects、denominator subjects |
+| Drilldown | 必须明确“需要”或“不适用”；需要时确认 records、subjects、denominator subjects、Total 和 missing 语义 |
 | Codegen | SAS source 限制、Merge 是否拒绝、是否 runtime 重新排序 |
 
 ### 3.1 Shell 只是布局样例，不是计算 contract
@@ -401,6 +401,32 @@ dataset.sqlite
 - CSV export。
 
 为结果定义唯一 `kind`。如有 long result，使用独立 kind，并保存明确的 `row_order`、`trt_order` 或其他排序字段，不依赖 SQLite 插入顺序。
+
+### 8.4 Drill-down 必查清单
+
+每个新 Builder 在设计阶段都必须明确记录 Drill-down 是“需要”还是“不适用”，不得因为
+Shell 没有画出交互而默认省略。只要结果单元格代表一组可追溯的 source records，原则上
+就应提供 Drill-down；若不提供，必须在设计文档和 README 限制中写明原因。
+
+需要 Drill-down 时，必须检查完整链路，而不是只增加一个 `drilldown.py`：
+
+- `result_store.py` 保存 result cell 到 source universe 的明确映射；
+- cell map 保存 raw typed values，不从显示 label、格式化数字或拼接表头反向解析；
+- `DatasetMetadata` 明确哪些结果列允许 Drill-down；
+- `DatasetTab` 对对应 result `kind` 发出专属 signal；
+- 双击结果单元格和右键 `Drill Down to Source Rows` 使用同一条 signal 路径；
+- `MainWindow` 只连接 signal 到模块 Controller，不构造筛选条件；
+- 模块 Controller 使用当前 result 的 context、config 和 source handle；
+- Query Tab 显示可复制的 SAS-like WHERE，同时使用 compiled filter 查询 raw values；
+- result 经过 WHERE、排序或分页后，必须通过真实 `_source_row` / cell map 定位，不能把
+  当前 view row 当成永久结果行号；
+- Total 单元格重新使用 Total universe，不错误附加 treatment/group 条件；
+- numerator、denominator、subjects、missing statistic 分别复用各自真实计算条件；
+- source/result 已关闭、context 丢失、单元格无值或 mapping 缺失时给出明确提示；
+- Query result 仍走 session temporary lifecycle，并在 stale async callback 时安全清理。
+
+如果 Drill-down 明确不适用，也应增加测试，确认双击不会发出错误请求、右键菜单保持
+disabled，且文档没有宣称该功能可用。
 
 ## 9. Builder UI
 
@@ -682,6 +708,10 @@ Analysis Dock 显示
 - close result 释放 retained paths；
 - close source warning；
 - Builder 配置只由 Clear 清除。
+- cell map 使用 raw typed group/item/treatment values；
+- 普通 cell、missing cell 与 Total cell 的 Drill-down filter；
+- filtered/sorted result view 仍定位到正确 source cell mapping；
+- stale context / closed source / async result cleanup。
 
 ### 14.3 UI
 
@@ -694,6 +724,8 @@ Analysis Dock 显示
 - Merge source codegen disabled；
 - Gallery preview；
 - Gallery 打开 Builder 后 Dock 真正显示。
+- Drill-down 双击和右键入口均可用，且非统计列保持 disabled；
+- Query Tab 打开后 WHERE 框展示实际追溯条件。
 
 ### 14.4 SAS Generator
 
@@ -738,12 +770,12 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q \
 
 严格按以下顺序，避免 UI 和 Generator 先行造成业务语义漂移：
 
-1. 审核 shell，冻结业务问题；
+1. 审核 shell，冻结业务问题，并明确 Drill-down 是需要还是不适用；
 2. 创建 DOCX，渲染并审核 PNG；
 3. 建立 `models.py` 和 validation；
 4. 建立 Python Engine tests；
 5. 实现 Engine；
-6. 实现 result store / long result / drilldown；
+6. 实现 result store / long result；如需 Drill-down，同时实现 cell map、filter 和 Query Tab；
 7. 建立 configuration JSON v1 tests；
 8. 实现 configuration builder/writer；
 9. 实现 Builder UI；
@@ -772,7 +804,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q \
 7. SAS 使用 Jinja2 模板；
 8. 生成代码可读且命名符合人类习惯；
 9. Result 使用 session temporary SQLite；
-10. Long Result / Drilldown（如适用）可用；
+10. 已明确记录 Drill-down 是否适用；适用时 cell map、双击、右键、WHERE Query Tab、Total/missing 边界全部可用；
 11. Gallery 卡片能显示 preview；
 12. Gallery 路由经过 MainWindow；
 13. Analysis Dock 隐藏时仍能从 Gallery 正确打开 Builder；
@@ -799,6 +831,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q \
 11. Gallery 路由必须经过 MainWindow 的 show_<module>_builder()，保证 Analysis Dock 显示和宽度设置。
 12. 补齐文档中要求的 domain、engine、JSON、UI、codegen、Gallery 和 lifecycle tests。
 13. 完成后运行相关 regression tests，并如实报告全量测试状态。
+14. 明确检查 Drill-down 是否适用；适用时实现 cell map、双击/右键、Query Tab 和 Total/missing tests，不适用时记录原因并保持入口 disabled。
 
 遇到会改变 Count、Denominator、Missing、Total、Sorting、Decimals、
 Drilldown 或最终表结构的不明确需求时，停止实现并询问用户。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -37,6 +38,13 @@ class ProcMeansVerticalResultWriter:
             + long_defs
             + ")"
         )
+        self.connection.execute(
+            "CREATE TABLE proc_means_vertical_cell_map ("
+            "result_row INTEGER NOT NULL, column_name TEXT NOT NULL, "
+            "analysis_variable TEXT NOT NULL, statistic_key TEXT NOT NULL, "
+            "statistic_label TEXT NOT NULL, group_values_json TEXT, "
+            "PRIMARY KEY (result_row, column_name))"
+        )
 
     def add_row(self, values: tuple[object, ...]) -> int:
         self.row_count += 1
@@ -55,6 +63,31 @@ class ProcMeansVerticalResultWriter:
         self.connection.execute(
             f"INSERT INTO proc_means_vertical_long (_source_row, {names}) VALUES (?, {placeholders})",
             (self.long_count, *values),
+        )
+
+    def add_cell(
+        self,
+        result_row: int,
+        column_name: str,
+        analysis_variable: str,
+        statistic_key: str,
+        statistic_label: str,
+        group_values: tuple[object, ...] | None,
+    ) -> None:
+        self.connection.execute(
+            "INSERT INTO proc_means_vertical_cell_map "
+            "(result_row, column_name, analysis_variable, statistic_key, "
+            "statistic_label, group_values_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                result_row,
+                column_name,
+                analysis_variable,
+                statistic_key,
+                statistic_label,
+                json.dumps(group_values, ensure_ascii=False)
+                if group_values is not None
+                else None,
+            ),
         )
 
     def finish(
@@ -79,6 +112,11 @@ class ProcMeansVerticalResultWriter:
             self.row_count,
             self.variables,
             display_column_names=display_names,
+            proc_means_vertical_drilldown_columns=tuple(
+                variable.name
+                for variable in self.variables
+                if variable.name not in {"ITEM", "STATISTIC"}
+            ),
         )
         return DatasetHandle(
             source.source_path.parent

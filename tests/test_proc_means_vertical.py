@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 import os
 import sqlite3
 import tempfile
@@ -14,6 +14,11 @@ from clinical_data_viewer.filter_engine import FilterEngine
 from clinical_data_viewer.proc_means_vertical import (
     ProcMeansVerticalConfig,
     ProcMeansVerticalEngine,
+)
+from clinical_data_viewer.proc_means_vertical.drilldown import (
+    build_cell_filter,
+    build_cell_where_text,
+    lookup_cell,
 )
 from clinical_data_viewer.proc_means_vertical.engine import _statistic_rows
 from clinical_data_viewer.temp_manager import TempManager
@@ -53,6 +58,100 @@ def make_vertical_handle(root: Path, name: str, rows) -> DatasetHandle:
 
 
 class ProcMeansVerticalTests(unittest.TestCase):
+    def test_result_cells_map_to_group_and_total_source_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (
+                    ("S1", "A", 1.0, 1.0),
+                    ("S2", "A", 2.0, 2.0),
+                    ("S3", "B", 3.0, 3.0),
+                ),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                population_treatment_variable="TRT01A",
+                statistics=("mean",),
+                compiled_filter=FilterEngine(source.metadata.variables).compile(
+                    "AVAL >= 2"
+                ),
+                filter_text="AVAL >= 2",
+                population_filter=FilterEngine(source.metadata.variables).compile(""),
+                include_total=True,
+            )
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+
+            self.assertEqual(
+                result.metadata.proc_means_vertical_drilldown_columns,
+                ("COL1", "COL2", "TOTAL"),
+            )
+            group_cell = lookup_cell(result, 1, "COL1")
+            self.assertIsNotNone(group_cell)
+            assert group_cell is not None
+            self.assertEqual(group_cell.analysis_variable, "AVAL")
+            self.assertEqual(group_cell.statistic_key, "mean")
+            self.assertEqual(group_cell.group_values, ("A",))
+            compiled = build_cell_filter(source.metadata, config, group_cell)
+            where_text = build_cell_where_text(source.metadata, config, group_cell)
+            with closing(sqlite3.connect(source.database_path)) as connection:
+                subjects = connection.execute(
+                    f'SELECT "USUBJID" FROM dataset WHERE {compiled.sql} '
+                    "ORDER BY _source_row",
+                    compiled.parameters,
+                ).fetchall()
+            self.assertEqual(subjects, [("S2",)])
+            self.assertEqual(
+                where_text,
+                '(AVAL >= 2) and TRT01A = "A" and not missing(AVAL)',
+            )
+
+            total_cell = lookup_cell(result, 1, "TOTAL")
+            self.assertIsNotNone(total_cell)
+            assert total_cell is not None
+            self.assertIsNone(total_cell.group_values)
+            total_where = build_cell_where_text(source.metadata, config, total_cell)
+            self.assertNotIn("TRT01A", total_where)
+            self.assertEqual(total_where, "(AVAL >= 2) and not missing(AVAL)")
+
+    def test_nmiss_cell_drills_to_missing_analysis_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (("S1", "A", None, 1.0), ("S2", "A", 2.0, 2.0)),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                population_treatment_variable="TRT01A",
+                statistics=("nmiss",),
+            )
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            cell = lookup_cell(result, 1, "COL1")
+            self.assertIsNotNone(cell)
+            assert cell is not None
+            compiled = build_cell_filter(source.metadata, config, cell)
+            with closing(sqlite3.connect(source.database_path)) as connection:
+                subjects = connection.execute(
+                    f'SELECT "USUBJID" FROM dataset WHERE {compiled.sql}',
+                    compiled.parameters,
+                ).fetchall()
+            self.assertEqual(subjects, [("S1",)])
+            self.assertIn(
+                "missing(AVAL)",
+                build_cell_where_text(source.metadata, config, cell),
+            )
+
     def test_vertical_result_has_item_statistic_rows_and_population_n_labels(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -228,7 +327,7 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
 
     def test_scroll_area_and_builder_buttons(self) -> None:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QScrollArea, QPushButton
+        from PySide6.QtWidgets import QPushButton, QScrollArea
 
         from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
         from clinical_data_viewer.ui.proc_means_vertical_builder import (
@@ -296,5 +395,65 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         self.assertEqual(builder.base_decimal_table.rowCount(), 0)
         builder.close()
         self.application.processEvents()
+
+    def test_result_tab_emits_drilldown_for_value_columns(self) -> None:
+        from clinical_data_viewer.data_store import DataStore
+        from clinical_data_viewer.filter_engine import CompiledFilter
+        from clinical_data_viewer.ui.dataset_tab import DatasetTab
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (("S1", "A", 1.0, 1.0), ("S2", "B", 2.0, 2.0)),
+            )
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source,
+                ProcMeansVerticalConfig(
+                    ("AVAL",),
+                    ("TRT01A",),
+                    "TRT01A",
+                    "TRT01A",
+                    ("mean",),
+                ),
+            )
+            tab = DatasetTab(result, 500)
+            page = DataStore().query_page(
+                result.database_path,
+                result.metadata,
+                tab.visible_columns,
+                CompiledFilter("", ()),
+                None,
+                0,
+                100,
+            )
+            tab.model.set_page(
+                0,
+                page.rows,
+                page.filtered_count,
+                source_rows=page.source_rows,
+            )
+            requests: list[tuple[int, str, str]] = []
+            tab.proc_means_vertical_drilldown_requested.connect(
+                lambda row, column, display: requests.append(
+                    (row, column, display)
+                )
+            )
+            value_index = tab.model.index(0, tab.visible_columns.index("COL1"))
+            tab.table.doubleClicked.emit(value_index)
+            self.assertEqual(requests, [(0, "COL1", "1")])
+            tab.table._context_index = value_index
+            self.assertTrue(
+                tab.table._context_variable_is_proc_means_vertical_statistic()
+            )
+            tab.table._context_index = tab.model.index(
+                0, tab.visible_columns.index("ITEM")
+            )
+            self.assertFalse(
+                tab.table._context_variable_is_proc_means_vertical_statistic()
+            )
+            tab.close()
+            self.application.processEvents()
 
 

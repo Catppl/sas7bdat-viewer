@@ -1206,6 +1206,13 @@ class MainWindow(QMainWindow):
                 )
             )
         )
+        tab.proc_means_vertical_drilldown_requested.connect(
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_proc_means_vertical(
+                    owner, row, column, display
+                )
+            )
+        )
         tab.categorical_drilldown_requested.connect(
             lambda row, column, display, owner=tab: (
                 self.analysis_controller.drilldown_categorical(

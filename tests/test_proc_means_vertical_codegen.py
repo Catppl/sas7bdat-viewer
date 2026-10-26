@@ -10,8 +10,7 @@ from clinical_data_viewer.proc_means_vertical import ProcMeansVerticalConfig
 from clinical_data_viewer.proc_means_vertical.configuration import (
     build_proc_means_vertical_configuration,
 )
-
-from .test_proc_means_vertical import make_vertical_handle
+from tests.test_proc_means_vertical import make_vertical_handle
 
 
 class ProcMeansVerticalCodegenTests(unittest.TestCase):

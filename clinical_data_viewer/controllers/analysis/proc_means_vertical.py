@@ -6,14 +6,19 @@ from typing import Any
 
 from PySide6.QtWidgets import QMessageBox
 
-from ...dataset_utils import is_analysis_dataset
 from ...codegen import build_proc_means_vertical_configuration
 from ...codegen.sas import SasProcMeansVerticalGenerator
+from ...dataset_utils import is_analysis_dataset
 from ...domain import DatasetHandle
 from ...filter_engine import FilterEngine
+from ...proc_means.drilldown import ProcMeansQueryBuilder
 from ...proc_means_vertical import ProcMeansVerticalConfig, ProcMeansVerticalEngine
+from ...proc_means_vertical.drilldown import (
+    build_cell_filter,
+    build_cell_where_text,
+    lookup_cell,
+)
 from ...proc_means_vertical.result_store import ProcMeansVerticalLongResultBuilder
-from ...settings import DEFAULT_PROC_MEANS_DECIMAL_OFFSETS
 from ...ui.dataset_tab import DatasetTab
 from ...ui.proc_means_vertical_builder import ProcMeansVerticalBuilderSelection
 from ...ui.sas_code_dialog import SasCodeDialog
@@ -35,6 +40,7 @@ class ProcMeansVerticalController(AnalysisModuleController):
         self._host = owner._host
         self._panel = owner._panel
         self._engine = ProcMeansVerticalEngine(temp_manager)
+        self._query_builder = ProcMeansQueryBuilder(temp_manager)
         self._sas_generator = SasProcMeansVerticalGenerator()
         self._long_result_builder = ProcMeansVerticalLongResultBuilder(temp_manager)
         self._settings = settings
@@ -124,6 +130,74 @@ class ProcMeansVerticalController(AnalysisModuleController):
             completed,
             lambda message, details: self._host.show_analysis_error(
                 "PROC MEANS Vertical Long Result Failed", message, details
+            ),
+        )
+
+    def drilldown(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        context = self._results.get(tab)
+        source_row = tab.model.source_row_id(view_row)
+        if context is None or source_row is None:
+            QMessageBox.information(
+                self._parent_widget(),
+                "PROC MEANS Vertical Drill-down",
+                "Drill-down is unavailable for this result tab.\n"
+                "Please re-run PROC MEANS Table Builder (Vertical) and try again.",
+            )
+            return
+        if not any(part.strip() not in {"", "—"} for part in display.split(",")):
+            QMessageBox.information(
+                self._parent_widget(),
+                "PROC MEANS Vertical Drill-down",
+                "This statistic has no calculated value to drill down from.",
+            )
+            return
+        cell = lookup_cell(tab.handle, source_row, column_name)
+        if cell is None:
+            QMessageBox.information(
+                self._parent_widget(),
+                "PROC MEANS Vertical Drill-down",
+                "The selected result cell does not have source-row mapping metadata.",
+            )
+            return
+        try:
+            compiled = build_cell_filter(context.source.metadata, context.config, cell)
+            where_text = build_cell_where_text(
+                context.source.metadata, context.config, cell
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.warning(
+                self._parent_widget(), "PROC MEANS Vertical Drill-down", str(error)
+            )
+            return
+
+        base_title = f"Query: {cell.statistic_label}: {display}"
+        self._host.set_analysis_task_status(f"Building {base_title}…")
+        generation = tab.generation
+
+        def build(worker):
+            handle = self._query_builder.run(
+                context.source, compiled, base_title, worker.report
+            )
+            return handle, where_text, cell.analysis_variable
+
+        def completed(result: tuple[DatasetHandle, str, str]) -> None:
+            handle, query_where, analysis_variable = result
+            if not self._host.is_open_dataset_tab(tab) or generation != tab.generation:
+                self._host.discard_analysis_result(handle)
+                return
+            title = self._host.unique_analysis_tab_title(base_title)
+            self._host.show_proc_means_query_result(
+                handle, title, query_where, analysis_variable
+            )
+
+        self._host.submit_analysis_task(
+            tab,
+            build,
+            completed,
+            lambda message, details: self._host.show_analysis_error(
+                "PROC MEANS Vertical Drill-down Failed", message, details
             ),
         )
 

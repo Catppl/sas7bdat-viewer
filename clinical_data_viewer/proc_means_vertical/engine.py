@@ -3,8 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections import defaultdict
 from contextlib import closing
-from decimal import Decimal, ROUND_HALF_UP
-from pathlib import Path
+from decimal import ROUND_HALF_UP, Decimal
 
 from ..domain import DatasetHandle, VariableMetadata
 from ..filter_engine import quote_identifier
@@ -126,7 +125,6 @@ class ProcMeansVerticalEngine:
         progress=None,
     ) -> DatasetHandle:
         config.validate(source.metadata, population.metadata if population else None)
-        notify = progress or (lambda _message: None)
         fields = {variable.name.casefold(): variable for variable in source.metadata.variables}
         analyses = tuple(fields[name.casefold()] for name in config.analysis_variables)
         groups = tuple(fields[name.casefold()] for name in config.group_variables)
@@ -172,7 +170,7 @@ class ProcMeansVerticalEngine:
                         observed_decimal_places(float(value)),
                     )
         group_keys_ordered = sorted(group_keys, key=_group_sort_key)
-        population_counts, total_population_n, population_treatment = self._population_counts(
+        population_counts, total_population_n, _population_treatment = self._population_counts(
             source, config, population
         )
         treatment_index = next(
@@ -197,11 +195,13 @@ class ProcMeansVerticalEngine:
             group_ns.append(total_population_n)
         column_variables = [VariableMetadata("ITEM", "Item", "character", 200), VariableMetadata("STATISTIC", "Statistic", "character", 32)]
         display_names = [("ITEM", "Item"), ("STATISTIC", "Statistic")]
+        value_columns: list[str] = []
         for index, label in enumerate(group_labels, start=1):
             name = "TOTAL" if config.include_total and index == len(group_labels) else f"COL{index}"
             n_text = "" if group_ns[index - 1] is None else f" (N={group_ns[index - 1]:,})"
             column_variables.append(VariableMetadata(name, f"{label}{n_text}", "character", 200))
             display_names.append((name, f"{label}{n_text}"))
+            value_columns.append(name)
         long_variables = (
             VariableMetadata("ITEM", "Item", "character", 200),
             VariableMetadata("STATISTIC", "Statistic", "character", 32),
@@ -265,7 +265,23 @@ class ProcMeansVerticalEngine:
                         group_label = group_labels[index]
                         first_key = statistic_keys[0]
                         writer.add_long((item_label, statistic_label, group_label, statistics.get(first_key), statistics.get("n"), statistics.get("subjects"), display))
-                    writer.add_row((item_label, statistic_label, *display_values))
+                    result_row = writer.add_row(
+                        (item_label, statistic_label, *display_values)
+                    )
+                    for index, column_name in enumerate(value_columns):
+                        group_values = (
+                            group_keys_ordered[index]
+                            if index < len(group_keys_ordered)
+                            else None
+                        )
+                        writer.add_cell(
+                            result_row,
+                            column_name,
+                            analysis.name,
+                            statistic_keys[0],
+                            statistic_label,
+                            group_values,
+                        )
             configuration_path = directory / "proc_means_vertical_config.json"
             write_proc_means_vertical_configuration(configuration_path, source, config, population)
             return writer.finish(directory, source, configuration_path, tuple(display_names))
