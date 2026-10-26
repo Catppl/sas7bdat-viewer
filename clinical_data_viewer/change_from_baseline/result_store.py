@@ -37,7 +37,9 @@ def build_result_schema(
     include_total: bool,
     statistic_decimals: tuple[tuple[str, int], ...] = (),
 ) -> ChangeResultSchema:
-    source_fields = {variable.name.casefold(): variable for variable in source.metadata.variables}
+    source_fields = {
+        variable.name.casefold(): variable for variable in source.metadata.variables
+    }
     used = {"item"}
     wide = [VariableMetadata("ITEM", "Item", "character", 200)]
     statistic_columns: list[tuple[str, str]] = []
@@ -60,7 +62,9 @@ def build_result_schema(
         prefix = "" if len(treatment_levels) == 0 else f"TRT_{index}_"
         for statistic in statistics:
             name = _unique_name(f"{prefix}{statistic.upper()}", used)
-            wide.append(VariableMetadata(name, f"{label} {statistic.upper()}", "numeric"))
+            wide.append(
+                VariableMetadata(name, f"{label} {statistic.upper()}", "numeric")
+            )
             statistic_columns.append((name, statistic))
         name = _unique_name(f"{prefix}SUBJECT_N", used)
         wide.append(VariableMetadata(name, f"{label} N", "numeric"))
@@ -98,12 +102,9 @@ def build_result_schema(
     decimal_base = _unique_name("_display_decimals", used)
     decimals = dict(statistic_decimals)
     decimal_offsets = tuple(
-        (name, decimals.get(statistic, 0))
-        for name, statistic in statistic_columns
+        (name, decimals.get(statistic, 0)) for name, statistic in statistic_columns
     )
-    return ChangeResultSchema(
-        tuple(wide), tuple(long), decimal_base, decimal_offsets
-    )
+    return ChangeResultSchema(tuple(wide), tuple(long), decimal_base, decimal_offsets)
 
 
 class ChangeFromBaselineResultWriter:
@@ -125,9 +126,7 @@ class ChangeFromBaselineResultWriter:
         )
         wide_defs += f", {quote_identifier(schema.decimal_base)} INTEGER NOT NULL"
         self.connection.execute(
-            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
-            + wide_defs
-            + ")"
+            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + wide_defs + ")"
         )
         self.connection.execute(
             "CREATE TABLE change_from_baseline_long (_source_row INTEGER PRIMARY KEY, "
@@ -184,7 +183,8 @@ class ChangeFromBaselineResultWriter:
             ),
         )
         return DatasetHandle(
-            source.source_path.parent / f"Change from Baseline - {source.metadata.name}",
+            source.source_path.parent
+            / f"Change from Baseline - {source.metadata.name}",
             marker,
             self.database_path,
             metadata,
@@ -213,8 +213,7 @@ class ChangeFromBaselineLongResultBuilder:
         directory = self.temp_manager.create_dataset_directory()
         database = directory / "dataset.sqlite"
         source_fields = {
-            variable.name.casefold(): variable
-            for variable in source.metadata.variables
+            variable.name.casefold(): variable for variable in source.metadata.variables
         }
         with closing(sqlite3.connect(result.database_path)) as schema_connection:
             columns = [
@@ -235,7 +234,9 @@ class ChangeFromBaselineLongResultBuilder:
             elif name.casefold() == "statistic":
                 variables.append(VariableMetadata(name, "Statistic", "character", 32))
             elif name.casefold() in {"value", "small_n", "subject_n"}:
-                variables.append(VariableMetadata(name, name.replace("_", " ").title(), "numeric"))
+                variables.append(
+                    VariableMetadata(name, name.replace("_", " ").title(), "numeric")
+                )
             else:
                 variables.append(VariableMetadata(name))
         target: sqlite3.Connection | None = None
@@ -273,14 +274,17 @@ class ChangeFromBaselineLongResultBuilder:
             target.execute(
                 "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, total_rows INTEGER, complete INTEGER NOT NULL)"
             )
-            target.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows)))
+            target.execute(
+                "INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows))
+            )
             target.commit()
             target.close()
             target = None
             marker = directory / "change-from-baseline-long-result.tmp"
             marker.touch()
             return DatasetHandle(
-                source.source_path.parent / f"Change from Baseline Long - {source.metadata.name}",
+                source.source_path.parent
+                / f"Change from Baseline Long - {source.metadata.name}",
                 marker,
                 database,
                 DatasetMetadata(

@@ -103,8 +103,7 @@ def build_change_from_baseline_configuration(
             "rounding": "half_up",
             "maximum_decimals": 4,
             "statistic_decimals": {
-                key.upper(): decimals
-                for key, decimals in config.statistic_decimals
+                key.upper(): decimals for key, decimals in config.statistic_decimals
             },
         },
         "targets": {"sas": {"output_dataset": "work.change_from_baseline"}},

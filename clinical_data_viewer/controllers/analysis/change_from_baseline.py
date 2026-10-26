@@ -70,7 +70,9 @@ class ChangeFromBaselineController(AnalysisModuleController):
             self._set_dataset(None)
         elif selected is not None:
             self._set_dataset(selected)
-        self._panel.change_from_baseline_builder.set_source_datasets(available, selected)
+        self._panel.change_from_baseline_builder.set_source_datasets(
+            available, selected
+        )
 
     def select_source(self, tab) -> None:
         if not isinstance(tab, DatasetTab):
@@ -99,7 +101,8 @@ class ChangeFromBaselineController(AnalysisModuleController):
     def source_reload_started(self, tab: DatasetTab) -> None:
         if self._source is tab:
             self._panel.change_from_baseline_builder.set_busy(
-                True, "Source is reloading. Change from Baseline is temporarily unavailable."
+                True,
+                "Source is reloading. Change from Baseline is temporarily unavailable.",
             )
 
     def source_reload_completed(self, tab: DatasetTab) -> None:
@@ -182,7 +185,9 @@ class ChangeFromBaselineController(AnalysisModuleController):
             )
             config.validate(tab.handle.metadata)
         except ValueError as error:
-            QMessageBox.warning(self._parent_widget(), "Change from Baseline", str(error))
+            QMessageBox.warning(
+                self._parent_widget(), "Change from Baseline", str(error)
+            )
             return None
         return tab, config
 
@@ -191,12 +196,13 @@ class ChangeFromBaselineController(AnalysisModuleController):
         if context is None:
             return
         tab, config = context
-        warnings = (
-            self._engine.duplicate_warnings(tab.handle, config)
-            + self._engine.item_order_warnings(tab.handle, config)
-        )
+        warnings = self._engine.duplicate_warnings(
+            tab.handle, config
+        ) + self._engine.item_order_warnings(tab.handle, config)
         if warnings:
-            QMessageBox.warning(self._parent_widget(), "Change from Baseline", "\n\n".join(warnings))
+            QMessageBox.warning(
+                self._parent_widget(), "Change from Baseline", "\n\n".join(warnings)
+            )
         source = tab.handle
         builder = self._panel.change_from_baseline_builder
         self._input_tabs = {tab}
@@ -204,16 +210,22 @@ class ChangeFromBaselineController(AnalysisModuleController):
 
         def completed(handle: DatasetHandle) -> None:
             self._input_tabs.clear()
-            builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
+            builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
+            )
             result_tab = self._host.create_analysis_result_tab(handle)
             self._host.retain_analysis_directory(source.temporary_path.parent)
             self._results[result_tab] = ChangeFromBaselineResultContext(source, config)
-            self._host.show_analysis_result_tab(result_tab, "Change from Baseline Result")
+            self._host.show_analysis_result_tab(
+                result_tab, "Change from Baseline Result"
+            )
 
         def failed(message: str, details: str) -> None:
             self._input_tabs.clear()
             builder.set_busy(False, "Change from Baseline failed.")
-            self._host.show_analysis_error("Change from Baseline Failed", message, details)
+            self._host.show_analysis_error(
+                "Change from Baseline Failed", message, details
+            )
 
         self._host.submit_analysis_task(
             builder,
@@ -261,7 +273,9 @@ class ChangeFromBaselineController(AnalysisModuleController):
         def generate(_worker: object) -> str:
             levels = [
                 {"value": value, "label": label}
-                for _key, value, label in self._engine.resolve_treatment_levels(source, config)
+                for _key, value, label in self._engine.resolve_treatment_levels(
+                    source, config
+                )
             ]
             item_order = self._engine.resolve_item_order(source, config)
             configuration = build_change_from_baseline_configuration(
@@ -279,9 +293,7 @@ class ChangeFromBaselineController(AnalysisModuleController):
         context = self._results.get(tab) if tab is not None else None
         if tab is None or tab.handle.kind != "change_from_baseline" or context is None:
             return
-        title = self._host.unique_analysis_tab_title(
-            "Change from Baseline Long Result"
-        )
+        title = self._host.unique_analysis_tab_title("Change from Baseline Long Result")
 
         def completed(handle: DatasetHandle) -> None:
             if not self._host.is_open_dataset_tab(tab):

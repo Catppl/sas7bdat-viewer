@@ -26,14 +26,20 @@ class ChangeFromBaselineShellAssetTests(unittest.TestCase):
         )
 
     def test_packaged_preview_is_a_png(self) -> None:
-        self.assertTrue(load_change_from_baseline_shell_preview().startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertTrue(
+            load_change_from_baseline_shell_preview().startswith(b"\x89PNG\r\n\x1a\n")
+        )
 
     def test_packaged_docx_matches_the_maintained_source(self) -> None:
         root = Path(__file__).parents[1]
-        packaged = files("clinical_data_viewer.assets.shells").joinpath(
-            "change_from_baseline_horizontal.docx"
+        packaged = (
+            files("clinical_data_viewer.assets.shells")
+            .joinpath("change_from_baseline_horizontal.docx")
+            .read_bytes()
+        )
+        source = (
+            root / "docs" / "change-from-baseline-horizontal-shell.docx"
         ).read_bytes()
-        source = (root / "docs" / "change-from-baseline-horizontal-shell.docx").read_bytes()
         self.assertEqual(packaged, source)
 
 

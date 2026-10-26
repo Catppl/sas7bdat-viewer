@@ -7,7 +7,9 @@ from pathlib import Path
 from clinical_data_viewer.codegen.sas import SasChangeFromBaselineGenerator
 
 
-def _comparison(variable: str, value: object, *, character: bool = True) -> dict[str, object]:
+def _comparison(
+    variable: str, value: object, *, character: bool = True
+) -> dict[str, object]:
     return {
         "type": "comparison",
         "variable": variable,
@@ -23,11 +25,26 @@ def _comparison(variable: str, value: object, *, character: bool = True) -> dict
 
 def configuration() -> dict[str, object]:
     metadata = {
-        "USUBJID": {"type": "character", "label": "Subject", "length": 20, "format": ""},
+        "USUBJID": {
+            "type": "character",
+            "label": "Subject",
+            "length": 20,
+            "format": "",
+        },
         "CHG": {"type": "numeric", "label": "Change", "length": 8, "format": "8.2"},
-        "PARAMCD": {"type": "character", "label": "Parameter", "length": 8, "format": ""},
+        "PARAMCD": {
+            "type": "character",
+            "label": "Parameter",
+            "length": 8,
+            "format": "",
+        },
         "AVISITN": {"type": "numeric", "label": "Visit", "length": 8, "format": ""},
-        "TRT01A": {"type": "character", "label": "Treatment", "length": 20, "format": ""},
+        "TRT01A": {
+            "type": "character",
+            "label": "Treatment",
+            "length": 20,
+            "format": "",
+        },
     }
     return {
         "type": "change_from_baseline_horizontal",
@@ -108,7 +125,9 @@ def configuration() -> dict[str, object]:
 class ChangeFromBaselineSasGeneratorTests(unittest.TestCase):
     def test_uses_jinja_template_and_adam_member_without_libname(self) -> None:
         generator = SasChangeFromBaselineGenerator()
-        self.assertIn("change_from_baseline.sas.j2", generator.environment.list_templates())
+        self.assertIn(
+            "change_from_baseline.sas.j2", generator.environment.list_templates()
+        )
         code = generator.generate(configuration())
         self.assertIn("set adam.adlb(where=(ANL01FL = 'Y' and AVISITN > 0));", code)
         self.assertNotIn("libname", code.casefold())
@@ -123,7 +142,9 @@ class ChangeFromBaselineSasGeneratorTests(unittest.TestCase):
         self.assertIn("Total enabled: yes", code)
         self.assertNotIn("select distinct", code.casefold())
 
-    def test_item_labels_are_in_one_source_block_and_decimal_formats_are_rendered(self) -> None:
+    def test_item_labels_are_in_one_source_block_and_decimal_formats_are_rendered(
+        self,
+    ) -> None:
         code = SasChangeFromBaselineGenerator().generate(configuration())
         self.assertIn("if _item_text = 'ALB' then _item_label = 'Albumin';", code)
         self.assertIn("format TRT_1_MEAN 8.1;", code)
@@ -145,7 +166,9 @@ class ChangeFromBaselineSasGeneratorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             template = Path(directory) / "change_from_baseline.sas.j2"
             template.write_text("/* custom change template */\n", encoding="utf-8")
-            code = SasChangeFromBaselineGenerator(Path(directory)).generate(configuration())
+            code = SasChangeFromBaselineGenerator(Path(directory)).generate(
+                configuration()
+            )
         self.assertEqual(code, "/* custom change template */\n")
 
     def test_without_treatment_uses_one_non_treatment_column_set(self) -> None:

@@ -99,11 +99,19 @@ class ChangeFromBaselineTests(unittest.TestCase):
             self.assertEqual(rows[2][2:], (3, 2, 0, 3, 2))
             self.assertEqual(long_count, 81)
             assert result.configuration_path is not None
-            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
             self.assertEqual(configuration["item"]["resolved_order"], ["ALT", "ALB"])
-            self.assertEqual(configuration["variable_metadata"]["CHG"]["type"], "numeric")
-            self.assertEqual(configuration["calculation"]["small_n"], "nonmissing_change_records")
-            self.assertEqual(configuration["calculation"]["large_n"], "distinct_subjects")
+            self.assertEqual(
+                configuration["variable_metadata"]["CHG"]["type"], "numeric"
+            )
+            self.assertEqual(
+                configuration["calculation"]["small_n"], "nonmissing_change_records"
+            )
+            self.assertEqual(
+                configuration["calculation"]["large_n"], "distinct_subjects"
+            )
             self.assertEqual(configuration["display"]["maximum_decimals"], 4)
             self.assertEqual(
                 configuration["display"]["statistic_decimals"],
@@ -144,7 +152,9 @@ class ChangeFromBaselineTests(unittest.TestCase):
                 source, config
             )
             assert result.configuration_path is not None
-            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
             self.assertEqual(configuration["display"]["statistic_decimals"]["MEAN"], 4)
             self.assertEqual(configuration["display"]["statistic_decimals"]["Q3"], 0)
 
@@ -191,9 +201,9 @@ class ChangeFromBaselineTests(unittest.TestCase):
                 data_filter=FilterEngine(variables).compile('PARAMCD LIKE "A%"'),
                 data_filter_text='PARAMCD LIKE "A%"',
             )
-            warning = ChangeFromBaselineEngine(TempManager(root / "temp")).item_order_warnings(
-                source, config
-            )
+            warning = ChangeFromBaselineEngine(
+                TempManager(root / "temp")
+            ).item_order_warnings(source, config)
             self.assertEqual(len(warning), 1)
 
     def test_item_or_equality_order_is_preserved(self) -> None:
@@ -248,8 +258,7 @@ class ChangeFromBaselineTests(unittest.TestCase):
             )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 columns = [
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(dataset)")
+                    row[1] for row in connection.execute("PRAGMA table_info(dataset)")
                 ]
                 rows = connection.execute(
                     'SELECT "TRT01A", "MEAN" FROM dataset ORDER BY _source_row'
@@ -271,7 +280,9 @@ class ChangeFromBaselineTests(unittest.TestCase):
                 source, config
             )
             assert result.configuration_path is not None
-            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
             self.assertEqual(configuration["item"]["labels"], {"ALB": "Albumin"})
 
     def test_row_descending_sort_keeps_missing_values_last(self) -> None:
@@ -317,8 +328,7 @@ class ChangeFromBaselineTests(unittest.TestCase):
             )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 columns = [
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(dataset)")
+                    row[1] for row in connection.execute("PRAGMA table_info(dataset)")
                 ]
             self.assertIn("MEAN", columns)
             self.assertNotIn("TOTAL_MEAN", columns)
@@ -328,7 +338,8 @@ class ChangeFromBaselineTests(unittest.TestCase):
             root = Path(temporary)
             source = make_handle(root, (("S1", "ALB", 1, "A", 1.0),))
             result = ChangeFromBaselineEngine(TempManager(root / "temp")).run(
-                source, ChangeFromBaselineConfig("CHG", "PARAMCD", treatment_variable="TRT01A")
+                source,
+                ChangeFromBaselineConfig("CHG", "PARAMCD", treatment_variable="TRT01A"),
             )
             long_result = ChangeFromBaselineLongResultBuilder(
                 TempManager(root / "long-temp")

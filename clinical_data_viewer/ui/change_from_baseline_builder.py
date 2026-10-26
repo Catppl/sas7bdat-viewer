@@ -120,12 +120,18 @@ class RowVariableEditor(QWidget):
         requested = self.editor.text().strip()
         if not requested:
             return
-        fields = {variable.name.casefold(): variable for variable in self._metadata.variables}
+        fields = {
+            variable.name.casefold(): variable for variable in self._metadata.variables
+        }
         variable = fields.get(requested.casefold())
         if variable is None:
-            self.validation_error.emit(f'Variable "{requested}" does not exist in the current dataset.')
+            self.validation_error.emit(
+                f'Variable "{requested}" does not exist in the current dataset.'
+            )
             return
-        if variable.name.casefold() in {name.casefold() for name, _ascending in self.selected()}:
+        if variable.name.casefold() in {
+            name.casefold() for name, _ascending in self.selected()
+        }:
             return
         self._append(variable.name, True)
         self.editor.clear()
@@ -224,7 +230,7 @@ class ChangeFromBaselineBuilder(QWidget):
         self.data_filter.setPlaceholderText('e.g. ANL01FL = "Y"')
         self.postbaseline_filter = QPlainTextEdit()
         self.postbaseline_filter.setMaximumHeight(64)
-        self.postbaseline_filter.setPlaceholderText('e.g. AVISITN > 0')
+        self.postbaseline_filter.setPlaceholderText("e.g. AVISITN > 0")
         filter_layout.addRow("Dataset WHERE", self.data_filter)
         filter_layout.addRow("Postbaseline WHERE", self.postbaseline_filter)
         layout.addWidget(filters)
@@ -280,8 +286,12 @@ class ChangeFromBaselineBuilder(QWidget):
         preview.clicked.connect(self.shell_preview_requested)
         buttons.addWidget(preview)
         self.sas_code_button = QPushButton("SAS Code Generator…")
-        self.sas_code_button.setToolTip("Generate SAS code for SAS7BDAT source datasets.")
-        self.sas_code_button.clicked.connect(lambda: self.sas_code_requested.emit(self.selection()))
+        self.sas_code_button.setToolTip(
+            "Generate SAS code for SAS7BDAT source datasets."
+        )
+        self.sas_code_button.clicked.connect(
+            lambda: self.sas_code_requested.emit(self.selection())
+        )
         buttons.addWidget(self.sas_code_button)
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
@@ -305,10 +315,14 @@ class ChangeFromBaselineBuilder(QWidget):
         self._metadata = metadata
         self._source_text = source_text if metadata is not None else ""
         self._source_format = (
-            Path(source_text).suffix.casefold().lstrip(".") if metadata is not None else ""
+            Path(source_text).suffix.casefold().lstrip(".")
+            if metadata is not None
+            else ""
         )
         self.source_label.setText(
-            f"Source: {source_text}" if metadata is not None else "Select a fully loaded source dataset."
+            f"Source: {source_text}"
+            if metadata is not None
+            else "Select a fully loaded source dataset."
         )
         if not same_source:
             self._fill_combo(self.change_variable, metadata, numeric_only=True)
@@ -376,7 +390,9 @@ class ChangeFromBaselineBuilder(QWidget):
             tuple(name for name, _ascending in self.row_variables.selected()),
             str(self.treatment_variable.currentData() or ""),
             self.row_variables.selected(),
-            tuple(key for key, checkbox in self.statistics.items() if checkbox.isChecked()),
+            tuple(
+                key for key, checkbox in self.statistics.items() if checkbox.isChecked()
+            ),
             self.data_filter.toPlainText().strip(),
             self.postbaseline_filter.toPlainText().strip(),
             labels,
@@ -396,7 +412,9 @@ class ChangeFromBaselineBuilder(QWidget):
     def clear(self) -> None:
         self.change_variable.setCurrentIndex(-1)
         self.item_variable.setCurrentIndex(-1)
-        self.treatment_variable.setCurrentIndex(0 if self.treatment_variable.count() else -1)
+        self.treatment_variable.setCurrentIndex(
+            0 if self.treatment_variable.count() else -1
+        )
         self.row_variables.set_variables(())
         self.data_filter.clear()
         self.postbaseline_filter.clear()

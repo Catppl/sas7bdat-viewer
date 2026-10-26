@@ -28,9 +28,7 @@ class ChangeFromBaselineConfig:
     treatment_variable: str = ""
     row_sort: tuple[tuple[str, bool], ...] = ()
     statistics: tuple[str, ...] = _STATISTICS
-    data_filter: CompiledFilter = field(
-        default_factory=lambda: CompiledFilter("", ())
-    )
+    data_filter: CompiledFilter = field(default_factory=lambda: CompiledFilter("", ()))
     data_filter_text: str = ""
     postbaseline_filter: CompiledFilter = field(
         default_factory=lambda: CompiledFilter("", ())
@@ -80,14 +78,17 @@ class ChangeFromBaselineConfig:
             seen_sort.add(name.casefold())
         unknown_stats = [key for key in self.statistics if key not in _STATISTICS]
         if unknown_stats:
-            raise ValueError("Unknown Change from Baseline statistics: " + ", ".join(unknown_stats))
+            raise ValueError(
+                "Unknown Change from Baseline statistics: " + ", ".join(unknown_stats)
+            )
         if not self.statistics:
             raise ValueError("Select at least one statistic.")
         decimal_names = [key.casefold() for key, _decimals in self.statistic_decimals]
         if len(decimal_names) != len(set(decimal_names)):
             raise ValueError("Statistic decimal settings contain duplicates.")
         invalid_decimal_statistics = [
-            key for key, _decimals in self.statistic_decimals
+            key
+            for key, _decimals in self.statistic_decimals
             if key.casefold() not in DECIMAL_STATISTICS
         ]
         if invalid_decimal_statistics:
@@ -96,7 +97,8 @@ class ChangeFromBaselineConfig:
                 + ", ".join(invalid_decimal_statistics)
             )
         if any(
-            isinstance(decimals, bool) or not isinstance(decimals, int)
+            isinstance(decimals, bool)
+            or not isinstance(decimals, int)
             or not 0 <= decimals <= 4
             for _key, decimals in self.statistic_decimals
         ):

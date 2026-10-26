@@ -99,7 +99,9 @@ def _ast_mentions_variable(node: object, variable_name: str) -> bool:
     )
 
 
-def _combined_filter(config: ChangeFromBaselineConfig) -> tuple[str, tuple[object, ...]]:
+def _combined_filter(
+    config: ChangeFromBaselineConfig,
+) -> tuple[str, tuple[object, ...]]:
     clauses: list[str] = []
     parameters: list[object] = []
     for compiled in (config.data_filter, config.postbaseline_filter):
@@ -184,7 +186,11 @@ class ChangeFromBaselineEngine:
                     values.append(canonical)
         values.sort(key=lambda value: _value_sort_key(value, treatment))
         return [
-            (json.dumps(value, ensure_ascii=False, separators=(",", ":")), value, str(value))
+            (
+                json.dumps(value, ensure_ascii=False, separators=(",", ":")),
+                value,
+                str(value),
+            )
             for value in values
         ]
 
@@ -218,14 +224,22 @@ class ChangeFromBaselineEngine:
         item = fields[config.item_variable.casefold()]
         subject = fields["usubjid"]
         row_fields = tuple(fields[name.casefold()] for name in config.row_variables)
-        treatment = fields.get(config.treatment_variable.casefold()) if config.treatment_variable else None
+        treatment = (
+            fields.get(config.treatment_variable.casefold())
+            if config.treatment_variable
+            else None
+        )
         selected = [item, *row_fields]
-        if treatment is not None and treatment.name.casefold() not in {v.name.casefold() for v in selected}:
+        if treatment is not None and treatment.name.casefold() not in {
+            v.name.casefold() for v in selected
+        }:
             selected.append(treatment)
         selected.append(subject)
         where, parameters = _combined_filter(config)
         suffix = f" WHERE {where}" if where else ""
-        group_names = ", ".join(quote_identifier(variable.name) for variable in selected)
+        group_names = ", ".join(
+            quote_identifier(variable.name) for variable in selected
+        )
         with closing(connect_read_only(source.database_path)) as connection:
             query = (
                 f"SELECT {group_names}, count(*) FROM dataset{suffix} "
@@ -276,7 +290,11 @@ class ChangeFromBaselineEngine:
         change = fields[config.change_variable.casefold()]
         subject = fields["usubjid"]
         row_fields = tuple(fields[name.casefold()] for name in config.row_variables)
-        treatment = fields.get(config.treatment_variable.casefold()) if config.treatment_variable else None
+        treatment = (
+            fields.get(config.treatment_variable.casefold())
+            if config.treatment_variable
+            else None
+        )
         grouping_treatment = (
             None
             if treatment is not None
@@ -359,14 +377,10 @@ class ChangeFromBaselineEngine:
                 variable = row_fields[index]
                 ascending = row_sort.get(variable.name.casefold(), True)
                 present = [
-                    key
-                    for key in item_keys
-                    if not _missing(key[1][index], variable)
+                    key for key in item_keys if not _missing(key[1][index], variable)
                 ]
                 missing = [
-                    key
-                    for key in item_keys
-                    if _missing(key[1][index], variable)
+                    key for key in item_keys if _missing(key[1][index], variable)
                 ]
                 present.sort(
                     key=lambda key: _value_sort_key(key[1][index], variable),
@@ -431,7 +445,9 @@ class ChangeFromBaselineEngine:
                     )
                 if config.include_total and treatment_levels:
                     total = _Group([], set())
-                    for treatment_value in (value for _key, value, _label in treatment_levels):
+                    for treatment_value in (
+                        value for _key, value, _label in treatment_levels
+                    ):
                         group = groups.get((raw_item, row_values, treatment_value))
                         if group is None:
                             continue
