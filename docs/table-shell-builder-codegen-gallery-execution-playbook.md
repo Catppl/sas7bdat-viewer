@@ -150,10 +150,23 @@ Shell 中的 `Drug A`、`Week 1`、`PARAMCD` 等示例值不得直接写死到 E
 
 ```text
 docs/<module>-shell.docx
+clinical_data_viewer/assets/shells/<module>.docx
 clinical_data_viewer/assets/shells/<module>.png
 ```
 
-DOCX 是可编辑的 shell 来源；PNG 是 Gallery 和 Builder Preview 使用的资源。
+`docs/<module>-shell.docx` 是唯一可手工编辑的 shell 来源。`assets/shells`
+中的 DOCX 是随应用打包的同步副本，PNG 是从该 DOCX 渲染后供 Gallery 和
+Builder Preview 使用的资源。更新源 DOCX 后，必须同时覆盖 packaged DOCX 和 PNG；
+不得分别手工维护三份内容。
+
+`docs` 中可以使用便于阅读的连字符文件名，packaged resource 使用 Python module key
+的下划线命名。例如：
+
+```text
+docs/proc-means-vertical-shell.docx
+  -> clinical_data_viewer/assets/shells/proc_means_vertical.docx
+  -> clinical_data_viewer/assets/shells/proc_means_vertical.png
+```
 
 ### 4.2 DOCX 标准
 
@@ -205,7 +218,8 @@ clinical_data_viewer/
 │   └── templates/
 │       └── <module>.sas.j2
 └── assets/shells/
-    └── <module>.png
+    ├── <module>.docx             # docs 中维护源的打包副本
+    └── <module>.png              # Gallery / Builder Preview
 
 docs/
 ├── <module>-design.md
@@ -220,6 +234,59 @@ tests/
 ```
 
 不要把所有逻辑写入一个文件。
+
+### 5.1 各类文件的固定存放位置
+
+以下位置是新 Table Builder 的默认约定。除非现有模块已有经过测试的不同约定，
+不要把同一类文件散落到其他目录。
+
+| 文件或产物 | 固定位置 | 说明与生命周期 |
+| --- | --- | --- |
+| 可编辑 Shell DOCX | `docs/<module>-shell.docx` | Shell 的唯一维护源；修改后必须重新渲染 PNG。 |
+| 打包 Shell DOCX | `clinical_data_viewer/assets/shells/<module>.docx` | 维护源的逐字节同步副本；由 package data 和 PyInstaller 收入应用。 |
+| Shell PNG | `clinical_data_viewer/assets/shells/<module>.png` | Gallery 和 Builder Preview 实际加载的图片；必须由最终 DOCX 渲染。 |
+| 需求、设计与审查记录 | `docs/<module>-design.md` 或明确命名的 `docs/*.md` | 记录已确认 contract、边界、延期项和实施计划，不放入业务模块目录。 |
+| Domain models / validation | `clinical_data_viewer/<module>/models.py` | 保存 editable config、枚举和业务 validation；不放 UI 状态。 |
+| Python reference engine | `clinical_data_viewer/<module>/engine.py` | 实现已冻结的计算语义；不含 Qt UI 和 SAS 文本拼接。 |
+| Result store / long result | `clinical_data_viewer/<module>/result_store.py` | 创建临时 SQLite 结果、metadata 和 cell map；不写回 source dataset。 |
+| Drill-down | `clinical_data_viewer/<module>/drilldown.py` | 仅在模块需要 drill-down 时创建；复用同一计算条件。 |
+| Configuration JSON builder | `clinical_data_viewer/<module>/configuration.py` | 从 config、DatasetHandle 和 runtime resolved 信息构建稳定 JSON contract。 |
+| Builder UI | `clinical_data_viewer/ui/<module>_builder.py` | 只负责输入、显示和 signals；不放业务计算。 |
+| 模块 Controller | `clinical_data_viewer/controllers/analysis/<module>.py` | 负责 source 绑定、worker、result lifecycle、code dialog 和模块专属路由。 |
+| Analysis 总入口 | `clinical_data_viewer/controllers/analysis_controller.py` | 只注册/协调独立 Controller；不要重新塞入模块业务流程。 |
+| SAS Generator | `clinical_data_viewer/codegen/sas/<module>_generator.py` | 验证 JSON、准备模板 context、调用 Jinja2；不维护大段 SAS 字符串。 |
+| SAS Jinja2 模板 | `clinical_data_viewer/codegen/sas/templates/<module>.sas.j2` | 保存可读 SAS 程序结构；通用片段仅在语义一致时复用。 |
+| R Generator（如有） | `clinical_data_viewer/codegen/r/` 与 `codegen/r/templates/` | 只有需求明确要求时新增；仍消费相同业务 JSON。 |
+| 模块单元测试 | `tests/test_<module>.py` | 覆盖 config validation 与 Python reference semantics。 |
+| JSON / codegen / UI 测试 | `tests/test_<module>_configuration.py`、`test_<module>_sas_codegen.py`、`test_<module>_builder*.py` | 按职责拆分，不把所有断言堆入一个测试文件。 |
+| Shell 同步测试 | `tests/test_<module>_shell.py` | 验证源 DOCX、packaged DOCX、PNG 及资源读取；建议比较两份 DOCX bytes。 |
+| Gallery 注册 | `clinical_data_viewer/ui/table_shell_gallery.py` | 只保存卡片 metadata 与 preview 路径；打开 Builder 仍经 MainWindow 路由。 |
+| 用户文档 | 根目录 `README.md` 与 `README.en.md` | 同步说明入口、能力、限制和项目结构。 |
+| 验收截图 | `docs/screenshots/` | 只保存有长期文档价值的截图；测试临时截图不要提交。 |
+| Windows 打包配置 | `SASDataViewer.spec` | 确认整个 `assets/shells` 被收集；不要逐个硬编码 shell 文件。 |
+| Python package data | `pyproject.toml` | 保持 `clinical_data_viewer.assets.shells = ["*.png", "*.docx"]`。 |
+
+### 5.2 运行时生成文件的位置
+
+运行时产物不进入上述源码目录：
+
+```text
+TempManager 管理的当前会话目录/
+└── <result-id>/
+    ├── dataset.sqlite
+    └── <module>_config.json
+```
+
+- `dataset.sqlite` 保存 wide result、long result、cell map 等模块结果；具体表结构由
+  `result_store.py` 负责；
+- `<module>_config.json` 与该 result 同生命周期，关闭结果并释放临时目录后一起删除；
+- source dataset 的临时只读副本和分析 result 目录都由 `TempManager` 管理，不在模块中
+  硬编码 Windows、macOS 或 Linux 临时路径；
+- 不把 JSON、SQLite、生成的 SAS/R 程序写入 source dataset 所在目录；
+- SAS/R Code Dialog 默认只预览内存中的代码。用户点击 `Save As…` 后，程序保存到用户
+  自行选择的位置；该保存文件不是项目资源，也不参与 result lifecycle；
+- 测试创建的 SQLite、JSON、DOCX 渲染中间文件和截图必须使用测试临时目录，测试结束后
+  清理，不要提交到仓库。
 
 ## 6. Domain Config 与 Validation
 
