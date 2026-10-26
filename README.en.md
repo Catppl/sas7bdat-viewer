@@ -4,6 +4,34 @@
 
 A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Transport `.xpt` datasets. SASDataViewer uses PySide6, pyreadstat, paged `QTableView` rendering, and a SQLite cache so that day-to-day browsing stays responsive without holding the original SAS file open.
 
+## Contents
+
+- [Features](#features)
+- [Mini File Manager workspace integration](#mini-file-manager-workspace-integration)
+- [User guide](#user-guide)
+  - [Start the application](#start-the-application)
+  - [Table Shell Gallery](#table-shell-gallery)
+  - [Common operations](#common-operations)
+  - [Source files and temporary data](#source-files-and-temporary-data)
+- [PROC MEANS module](#proc-means-module)
+  - [Statistics and precision](#statistics-and-precision)
+  - [Configuration JSON and code generators](#configuration-json-and-code-generators)
+- [Categorical Table module](#categorical-table-module)
+- [AE Table Builder module](#ae-table-builder-module)
+- [Listing Generator module](#listing-generator-module)
+- [Rule-based Table module](#rule-based-table-module)
+- [Dataset Compare module](#dataset-compare-module)
+- [Merge Datasets module](#merge-datasets-module)
+- [System testing and packaging](#system-testing-and-packaging)
+  - [Test environment](#test-environment)
+  - [Automated checks](#automated-checks)
+  - [Manual acceptance checklist](#manual-acceptance-checklist)
+  - [Verify the source file is not held open](#verify-the-source-file-is-not-held-open)
+  - [Build a Windows ZIP](#build-a-windows-zip)
+- [Adding a Table Builder](#adding-a-table-builder)
+- [Project structure](#project-structure)
+- [License](#license)
+
 ## Features
 
 | Area | Supported functionality |

@@ -4,6 +4,48 @@
 
 独立的 Windows 临床 SAS 数据集浏览器。它只读打开 `.sas7bdat` 和 SAS Transport `.xpt`，采用 PySide6 原生桌面界面和磁盘 SQLite 查询缓存，目标是在日常查看大数据集时保持界面响应。
 
+## 目录
+
+- [已实现功能](#已实现功能)
+- [Mini File Manager Workspace 集成](#mini-file-manager-workspace-集成)
+- [PROC MEANS 模块](#proc-means-模块)
+  - [Table Shell Gallery](#table-shell-gallery)
+  - [打开方式](#打开方式)
+  - [计算范围](#计算范围)
+  - [统计量](#统计量)
+  - [PROC MEANS Settings](#proc-means-settings)
+  - [Builder 配置 JSON](#builder-配置-json)
+  - [SAS / R Code Generator](#sas--r-code-generator)
+  - [Drill-down Query Tab](#drill-down-query-tab)
+  - [PROC MEANS 限制](#proc-means-限制)
+- [Categorical Table 模块](#categorical-table-模块)
+- [AE Table Builder 模块](#ae-table-builder-模块)
+- [Listing Generator 模块](#listing-generator-模块)
+- [Rule-based Table 模块](#rule-based-table-模块)
+- [Dataset Compare 模块](#dataset-compare-模块)
+  - [打开和选择数据集](#打开和选择数据集)
+  - [Compare Variables](#compare-variables)
+  - [Observation 匹配规则](#observation-匹配规则)
+  - [Key Variables 规则](#key-variables-规则)
+  - [Compare Result](#compare-result)
+  - [Compare Result 浏览和导出](#compare-result-浏览和导出)
+  - [临时文件和安全限制](#临时文件和安全限制)
+- [用户使用说明](#用户使用说明)
+  - [启动程序](#启动程序)
+  - [常用操作](#常用操作)
+  - [数据与临时文件](#数据与临时文件)
+- [Merge Datasets 模块](#merge-datasets-模块)
+- [系统测试与打包](#系统测试与打包)
+  - [1. 测试环境](#1-测试环境)
+  - [2. 自动化检查](#2-自动化检查)
+  - [3. 启动检查](#3-启动检查)
+  - [4. 真实数据验收](#4-真实数据验收)
+  - [5. 源文件锁定检查](#5-源文件锁定检查)
+  - [6. Reload、CSV 和临时清理](#6-reloadcsv-和临时清理)
+  - [Windows ZIP 打包](#windows-zip-打包)
+- [新增 Table Builder 的施工手册](#新增-table-builder-的施工手册)
+- [项目结构](#项目结构)
+
 ## 已实现功能
 
 - 同时打开多个 `.sas7bdat` / `.xpt`，使用可关闭、可移动的 Tab 切换。
@@ -57,15 +99,6 @@ SASDataViewer.exe --workspace "C:\clinical\project\adam"
 - 路径传递必须覆盖空格、中文、引号、`#` 和 UNC 路径等情况。
 
 当前版本已提供 `--workspace` 参数；该调用会打开一个新的 SASDataViewer 窗口并显示 Folder Panel，但不会自动打开或收藏目录中的数据集。详细设计见 [`docs/workspace-folder-view-design.md`](docs/workspace-folder-view-design.md)。
-
-## 文档导航
-
-| 目的 | 章节 |
-| --- | --- |
-| 日常打开、浏览、筛选和导出数据 | [用户使用说明](#用户使用说明) |
-| 运行自动化测试、真实数据验收和检查文件锁定 | [系统测试与打包](#系统测试与打包) |
-| 构建 Windows EXE 和 ZIP | [Windows ZIP 打包](#windows-zip-打包) |
-| 查看模块设计和项目文件 | [项目结构](#项目结构) |
 
 ## PROC MEANS 模块
 
