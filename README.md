@@ -449,7 +449,7 @@ Compare Result 复用普通 Dataset Tab 的以下能力：
 cd C:\path\to\sas7bdat-viewer
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements.txt
 python -m clinical_data_viewer
 ```
 
@@ -550,8 +550,8 @@ Windows 默认目录：
 cd C:\path\to\sas7bdat-viewer
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-build.txt
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade pip
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
 ```
 
 确认运行环境：
@@ -694,8 +694,8 @@ dist\SASDataViewer-Windows-x64.zip
 cd C:\path\to\sas7bdat-viewer
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-build.txt
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade pip
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
 ruff check clinical_data_viewer tests run.py
 ruff format --check clinical_data_viewer tests run.py
 python -m compileall -q clinical_data_viewer tests run.py

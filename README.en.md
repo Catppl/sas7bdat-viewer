@@ -52,7 +52,7 @@ Most users should run the packaged `SASDataViewer.exe`; Python and SAS are not r
 cd C:\path\to\sas7bdat-viewer
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements.txt
 python -m clinical_data_viewer
 ```
 
@@ -258,8 +258,8 @@ Run the following on Windows 10/11 64-bit before release:
 cd C:\path\to\sas7bdat-viewer
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-build.txt
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org --upgrade pip
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
 python --version
 python -c "import PySide6, pyreadstat, jinja2; print('PySide6 OK'); print('pyreadstat', pyreadstat.__version__); print('Jinja2', jinja2.__version__)"
 ```
@@ -329,7 +329,7 @@ Manual equivalent:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-build.txt
+python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
 ruff check clinical_data_viewer tests run.py
 ruff format --check clinical_data_viewer tests run.py
 python -m compileall -q clinical_data_viewer tests run.py
