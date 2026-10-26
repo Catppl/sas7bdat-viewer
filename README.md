@@ -791,27 +791,44 @@ Gallery 接入及手册规定的回归测试。
 
 ```text
 clinical_data_viewer/
-  compare_engine/     分组流式读取、加权成本、Hungarian 匹配、逐变量比较和临时结果
-  categorical/        Categorical 配置、Python reference engine、SQLite wide/long 与 JSON v1
-  listing/            Listing 配置、表达式 AST、Python reference engine、SQLite result 与 JSON
-  proc_means/         Builder 配置、分组统计、long-format SQLite 和配置 JSON
-  codegen/sas/        SAS Jinja2 生成器与 SAS 专用模板
-  codegen/r/          R Jinja2 生成器与 R 专用模板
-  filter_ast.py       Python WHERE parser AST 的跨语言 JSON 序列化
-  ui/                 PySide6 主窗口、数据 Tab、Variables、历史与复制表格
-  sas_reader.py       SAS7BDAT/XPT 首批读取、后台缓存与 SQLite 写入
-  xpt_reader.py       XPORT V5/V8 顺序读取 adapter
-  temp_manager.py     源文件临时复制、会话清理、遗留清理
-  table_model.py      QAbstractTableModel lazy loading
-  where_parser.py     SAS-like WHERE lexer/parser
-  filter_engine.py    metadata 校验与参数化 SQL
-  column_filters.py   列头互动筛选及与手写 WHERE 的组合
+  controllers/
+    analysis_controller.py 分析模块入口、共享生命周期与跨模块协调
+    workspace_controller.py Folder Panel、收藏、扫描和批量 metadata 导出协调
+    analysis/          Listing、PROC MEANS、Categorical、Rule-based、AE 等独立 Controller
+  ae_table/            AE SOC/PT 配置、Python engine、drill-down、结果存储与 JSON
+  categorical/         Categorical 配置、Python engine、drill-down、wide/long 结果与 JSON
+  change_from_baseline/ 横版 Change from Baseline 配置、engine、drill-down 与结果存储
+  listing/             Listing 配置、表达式 AST、Python engine 与记录级结果
+  proc_means/          PROC MEANS Builder 配置、分组统计、drill-down、long result 与 JSON
+  proc_means_vertical/ 纵向 PROC MEANS Table Builder、Population N、结果与 JSON
+  rule_based/          Rule-based 配置、Python engine、drill-down、wide/long 结果与 JSON
+  compare_engine/      分组流式读取、加权成本、Hungarian 匹配与逐变量比较
+  merge_datasets/      Merge 配置、join engine、来源追踪与临时结果
+  workspace/           Folder Panel、非递归扫描、Workspace 收藏及 SQLite 增量保存
+  codegen/
+    sas/               各表模块的 SAS Generator、共享 filter renderer 与 Jinja2 模板
+    r/                 PROC MEANS R Generator 与 Jinja2 模板
+  ui/                  主窗口、数据 Tab、各 Builder、Gallery、Shell Preview 与左右面板
+  assets/shells/       Gallery 使用的 shell DOCX/PNG 资源
+  sas_reader.py        SAS7BDAT/XPT 首批读取、后台缓存与 SQLite 写入
+  xpt_reader.py        XPORT V5/V8 顺序读取 adapter
+  data_store.py        Viewer 与分析模块共用的分页 SQLite 数据访问
+  sqlite_access.py     跨平台 SQLite URI/只读连接处理
+  table_model.py       QAbstractTableModel lazy loading、排序与显示格式化
+  where_parser.py      SAS-like WHERE lexer/parser
+  filter_engine.py     metadata 校验、AST 编译与参数化 SQL
+  filter_ast.py        WHERE AST 的跨语言 JSON 序列化
+  sas_value_formatter.py metadata 驱动的 SAS DATE/DATETIME/TIME 显示
+  column_filters.py    列头互动筛选及与手写 WHERE 的组合
   statistics.py       PROC MEANS 风格统计、QNTLDEF=5 和 Student-t CI
-  filter_history.py   持久化历史
-  csv_exporter.py     当前视图后台 CSV 输出
+  csv_exporter.py      当前视图的后台 CSV 输出
+  excel_exporter.py    数据集数据及 metadata 的 Excel 输出
+  workspace_metadata_exporter.py Workspace 全数据集 metadata 的多 Sheet Excel 输出
+  temp_manager.py     源文件副本、结果目录、会话及异常遗留清理
   settings.py         用户设置与 Windows 路径
-  resources.py        源码与 PyInstaller bundle 的图标资源定位
-  workers.py          QThreadPool/QRunnable worker
+  workers.py          QThreadPool/QRunnable 后台任务
 assets/               应用原始 PNG 与多尺寸 Windows ICO 图标
-tests/                无需真实 SAS 文件的核心回归测试
+docs/                 设计文档、施工手册、验收说明、shell DOCX 与界面截图
+tests/                Engine、JSON、codegen、Controller、Workspace、UI 与打包回归测试
+SASDataViewer.spec    Windows PyInstaller 打包配置
 ```

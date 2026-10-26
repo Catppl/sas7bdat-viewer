@@ -415,23 +415,46 @@ Jinja2 SAS Generator, Gallery integration, and required regression tests.
 
 ```text
 clinical_data_viewer/
-  compare_engine/     streaming grouping, weighted matching, comparison, temp results
-  categorical/        Categorical config, Python reference engine, SQLite wide/long, JSON v1
-  listing/            Listing config, expression AST, Python reference engine, SQLite result, JSON
-  proc_means/         Builder configuration, grouped statistics, SQLite results, JSON
-  codegen/sas/        SAS Jinja2 generator and templates
-  codegen/r/          R Jinja2 generator and templates
-  filter_ast.py       language-neutral serialization of the Python WHERE AST
-  ui/                 PySide6 main window, tabs, Variables, history, copy actions
-  sas_reader.py       pyreadstat metadata/chunk loading and SQLite cache
-  temp_manager.py     source copies, session cleanup, stale-directory cleanup
-  table_model.py      QAbstractTableModel lazy paging
-  where_parser.py     SAS-like WHERE lexer/parser
-  filter_engine.py    metadata validation and parameterized SQL
+  controllers/
+    analysis_controller.py analysis entry points, shared lifecycle, and cross-module coordination
+    workspace_controller.py Folder Panel, favorites, scanning, and bulk metadata export coordination
+    analysis/          independent Listing, PROC MEANS, Categorical, Rule-based, and AE controllers
+  ae_table/            AE SOC/PT configuration, Python engine, drill-down, result store, and JSON
+  categorical/         Categorical configuration, engine, drill-down, wide/long results, and JSON
+  change_from_baseline/ horizontal Change from Baseline configuration, engine, drill-down, and results
+  listing/             Listing configuration, expression AST, Python engine, and record-level results
+  proc_means/          PROC MEANS Builder configuration, grouped statistics, drill-down, long result, and JSON
+  proc_means_vertical/ vertical PROC MEANS table, Population N, results, and JSON
+  rule_based/          Rule-based configuration, engine, drill-down, wide/long results, and JSON
+  compare_engine/      streaming groups, weighted Hungarian matching, and variable comparison
+  merge_datasets/      Merge configuration, join engine, source tracing, and temporary results
+  workspace/           Folder Panel scanning, workspace favorites, and incremental SQLite persistence
+  codegen/
+    sas/               SAS generators, shared filter renderer, and Jinja2 templates for table modules
+    r/                 PROC MEANS R generator and Jinja2 template
+  ui/                  main window, dataset tabs, builders, Gallery, Shell Preview, and side panels
+  assets/shells/       DOCX/PNG shell resources used by the Gallery
+  sas_reader.py        SAS7BDAT/XPT initial reads, background cache, and SQLite writes
+  xpt_reader.py        sequential XPORT V5/V8 reader adapter
+  data_store.py        paged SQLite data access shared by the Viewer and analysis modules
+  sqlite_access.py     cross-platform SQLite URI and read-only connection handling
+  table_model.py       QAbstractTableModel lazy paging, sorting, and display formatting
+  where_parser.py      SAS-like WHERE lexer/parser
+  filter_engine.py     metadata validation, AST compilation, and parameterized SQL
+  filter_ast.py        language-neutral WHERE AST serialization
+  sas_value_formatter.py metadata-driven SAS DATE/DATETIME/TIME display
+  column_filters.py    header filters and composition with hand-written WHERE conditions
   statistics.py       PROC MEANS statistics, QNTLDEF=5, and Student-t CI
-  workers.py          QThreadPool/QRunnable workers
+  csv_exporter.py      background CSV export for the current view
+  excel_exporter.py    dataset data and metadata Excel export
+  workspace_metadata_exporter.py multi-sheet metadata export for an entire workspace
+  temp_manager.py     source copies, result directories, session cleanup, and stale cleanup
+  settings.py         user preferences and Windows paths
+  workers.py          QThreadPool/QRunnable background tasks
 assets/               source PNG and multi-size Windows ICO icon
-tests/                core regression and UI smoke tests
+docs/                 designs, implementation playbooks, acceptance notes, shell DOCX files, and screenshots
+tests/                engine, JSON, codegen, controller, workspace, UI, and packaging regression tests
+SASDataViewer.spec    Windows PyInstaller build configuration
 ```
 
 ## License
