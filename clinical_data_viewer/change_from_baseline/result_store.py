@@ -21,6 +21,11 @@ def _unique_name(base: str, used: set[str]) -> str:
     return candidate
 
 
+def _statistic_label(statistic: str) -> str:
+    """Keep record count n visually distinct from subject count N."""
+    return "n" if statistic.casefold() == "n" else statistic.upper()
+
+
 @dataclass(frozen=True, slots=True)
 class ChangeResultSchema:
     wide_variables: tuple[VariableMetadata, ...]
@@ -58,20 +63,30 @@ def build_result_schema(
     groups = list(treatment_levels)
     if not groups:
         groups = [("__all__", None, "All")]
+    has_treatment_columns = bool(treatment_levels)
     for index, (_key, _value, label) in enumerate(groups, start=1):
         prefix = "" if len(treatment_levels) == 0 else f"TRT_{index}_"
         for statistic in statistics:
             name = _unique_name(f"{prefix}{statistic.upper()}", used)
-            wide.append(
-                VariableMetadata(name, f"{label} {statistic.upper()}", "numeric")
-            )
+            display_label = _statistic_label(statistic)
+            if has_treatment_columns:
+                display_label = f"{label} {display_label}"
+            wide.append(VariableMetadata(name, display_label, "numeric"))
             statistic_columns.append((name, statistic))
         name = _unique_name(f"{prefix}SUBJECT_N", used)
-        wide.append(VariableMetadata(name, f"{label} N", "numeric"))
+        wide.append(
+            VariableMetadata(
+                name, f"{label} N" if has_treatment_columns else "N", "numeric"
+            )
+        )
     if include_total and treatment_levels:
         for statistic in statistics:
             name = _unique_name(f"TOTAL_{statistic.upper()}", used)
-            wide.append(VariableMetadata(name, f"Total {statistic.upper()}", "numeric"))
+            wide.append(
+                VariableMetadata(
+                    name, f"Total {_statistic_label(statistic)}", "numeric"
+                )
+            )
             statistic_columns.append((name, statistic))
         name = _unique_name("TOTAL_SUBJECT_N", used)
         wide.append(VariableMetadata(name, "Total N", "numeric"))

@@ -139,6 +139,10 @@ class ChangeFromBaselineSasGeneratorTests(unittest.TestCase):
         self.assertIn("TRT_1_MEAN", code)
         self.assertIn("TRT_2_MEAN", code)
         self.assertIn("TOTAL_MEAN", code)
+        self.assertIn("TRT_1_N = 'Drug A n'", code)
+        self.assertIn("TRT_1_SUBJECT_N = 'Drug A N'", code)
+        self.assertIn("TOTAL_N = 'Total n'", code)
+        self.assertIn("TOTAL_SUBJECT_N = 'Total N'", code)
         self.assertIn("Total enabled: yes", code)
         self.assertNotIn("select distinct", code.casefold())
 

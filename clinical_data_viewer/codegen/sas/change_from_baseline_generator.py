@@ -124,6 +124,11 @@ def _stat_output(statistics: list[str]) -> list[dict[str, str]]:
     return [{"keyword": aliases[stat], "name": stat} for stat in statistics]
 
 
+def _statistic_label(statistic: str) -> str:
+    """Keep the small record count n distinct from the large subject N."""
+    return "n" if statistic == "N" else statistic
+
+
 class SasChangeFromBaselineGenerator:
     """Render a readable SAS program from Change from Baseline JSON v1."""
 
@@ -346,7 +351,7 @@ class SasChangeFromBaselineGenerator:
                     output_columns.append(
                         {
                             "name": prefix + statistic,
-                            "label": f"{level['label']} {statistic}",
+                            "label": f"{level['label']} {_statistic_label(statistic)}",
                             "format": f"8.{statistic_decimals[statistic]}"
                             if statistic in _NUMERIC_STATISTICS
                             else "",
@@ -364,7 +369,7 @@ class SasChangeFromBaselineGenerator:
                     output_columns.append(
                         {
                             "name": "TOTAL_" + statistic,
-                            "label": f"Total {statistic}",
+                            "label": f"Total {_statistic_label(statistic)}",
                             "format": f"8.{statistic_decimals[statistic]}"
                             if statistic in _NUMERIC_STATISTICS
                             else "",
@@ -378,7 +383,7 @@ class SasChangeFromBaselineGenerator:
                 output_columns.append(
                     {
                         "name": statistic,
-                        "label": statistic,
+                        "label": _statistic_label(statistic),
                         "format": f"8.{statistic_decimals[statistic]}"
                         if statistic in _NUMERIC_STATISTICS
                         else "",

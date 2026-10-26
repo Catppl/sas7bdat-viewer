@@ -130,6 +130,13 @@ class ChangeFromBaselineTests(unittest.TestCase):
             self.assertEqual(decimal_offsets["TRT_1_MEAN"], 1)
             self.assertEqual(decimal_offsets["TRT_1_STD"], 2)
             self.assertEqual(decimal_offsets["TOTAL_MEAN"], 1)
+            labels = {
+                variable.name: variable.label for variable in result.metadata.variables
+            }
+            self.assertEqual(labels["TRT_1_N"], "A n")
+            self.assertEqual(labels["TRT_1_SUBJECT_N"], "A N")
+            self.assertEqual(labels["TOTAL_N"], "Total n")
+            self.assertEqual(labels["TOTAL_SUBJECT_N"], "Total N")
 
     def test_statistic_decimal_places_are_serialized_and_capped_at_four(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -332,6 +339,12 @@ class ChangeFromBaselineTests(unittest.TestCase):
                 ]
             self.assertIn("MEAN", columns)
             self.assertNotIn("TOTAL_MEAN", columns)
+            labels = {
+                variable.name: variable.label for variable in result.metadata.variables
+            }
+            self.assertEqual(labels["N"], "n")
+            self.assertEqual(labels["MEAN"], "MEAN")
+            self.assertEqual(labels["SUBJECT_N"], "N")
 
     def test_long_result_is_materialized_in_row_order(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
