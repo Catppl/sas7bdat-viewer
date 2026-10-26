@@ -239,6 +239,8 @@ class MainWindow(QMainWindow):
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
+        self.table_shell_gallery_action = QAction("Table Shell Gallery", self)
+        self.table_shell_gallery_action.triggered.connect(self.show_table_shell_gallery)
         self.proc_means_builder_action = QAction("PROC MEANS Builder", self)
         self.proc_means_builder_action.triggered.connect(self.show_proc_means_builder)
         self.proc_means_vertical_builder_action = QAction(
@@ -295,6 +297,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.open_change_from_baseline_long_action)
         view_menu.addAction(self.open_proc_means_vertical_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu.addAction(self.table_shell_gallery_action)
+        tools_menu.addSeparator()
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
         tools_menu.addAction(self.proc_means_vertical_builder_action)
@@ -1673,6 +1677,9 @@ class MainWindow(QMainWindow):
         self.analysis_controller.show_proc_means_builder()
         self.analysis_dock.setMinimumWidth(310)
         self.analysis_dock.show()
+
+    def show_table_shell_gallery(self) -> None:
+        self.analysis_controller.show_table_shell_gallery()
 
     def show_proc_means_vertical_builder(self) -> None:
         self.analysis_controller.show_proc_means_vertical_builder()

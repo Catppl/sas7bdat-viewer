@@ -46,6 +46,7 @@ class ProcMeansVerticalBuilder(QWidget):
     population_selected = Signal(object)
     settings_requested = Signal()
     run_requested = Signal(object)
+    sas_code_requested = Signal(object)
     validation_error = Signal(str)
     cleared = Signal()
 
@@ -55,6 +56,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self._metadata: DatasetMetadata | None = None
         self._population_metadata: DatasetMetadata | None = None
         self._source_text = ""
+        self._source_kind = "sas"
         self._population_source_text = ""
         self._busy = False
         outer = QVBoxLayout(self)
@@ -167,12 +169,15 @@ class ProcMeansVerticalBuilder(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         action_row = QHBoxLayout()
+        self.sas_code_button = QPushButton("SAS Code Generator…")
         self.settings_button = QPushButton("Settings…")
         self.clear_button = QPushButton("Clear")
         self.run_button = QPushButton("Run")
+        self.sas_code_button.clicked.connect(self._generate_sas_code)
         self.settings_button.clicked.connect(self.settings_requested)
         self.clear_button.clicked.connect(self.clear)
         self.run_button.clicked.connect(self._run)
+        action_row.addWidget(self.sas_code_button)
         action_row.addWidget(self.settings_button)
         action_row.addWidget(self.clear_button)
         action_row.addWidget(self.run_button)
@@ -185,10 +190,17 @@ class ProcMeansVerticalBuilder(QWidget):
     def set_population_datasets(self, datasets, selected=None) -> None:
         self.population_selector.set_sources(datasets, selected)
 
-    def set_dataset(self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = "") -> None:
+    def set_dataset(
+        self,
+        metadata: DatasetMetadata | None,
+        source_text: str,
+        filter_text: str = "",
+        source_kind: str = "sas",
+    ) -> None:
         previous = bool(self._source_text)
         self._metadata = metadata
         self._source_text = source_text
+        self._source_kind = source_kind
         self.source_label.setText(f"Source: {source_text}" if metadata else "Select a fully loaded source dataset.")
         for editor in (self.analysis_variables, self.group_variables, self.treatment_variable):
             editor.set_metadata(metadata, preserve=previous)
@@ -290,6 +302,11 @@ class ProcMeansVerticalBuilder(QWidget):
         if selection is not None:
             self.run_requested.emit(selection)
 
+    def _generate_sas_code(self) -> None:
+        selection = self.selection()
+        if selection is not None:
+            self.sas_code_requested.emit(selection)
+
     def clear(self) -> None:
         self.analysis_variables.clear()
         self.base_decimal_table.setRowCount(0)
@@ -300,6 +317,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self.population_filter_editor.clear()
         self.item_labels.clear()
         self._source_text = ""
+        self._source_kind = "sas"
         self._population_source_text = ""
         self.status.clear()
         self.cleared.emit()
@@ -313,6 +331,13 @@ class ProcMeansVerticalBuilder(QWidget):
     def _update_enabled(self) -> None:
         enabled = self._metadata is not None and not self._busy
         self.run_button.setEnabled(enabled)
+        codegen_available = enabled and self._source_kind != "merge"
+        self.sas_code_button.setEnabled(codegen_available)
+        self.sas_code_button.setToolTip(
+            "SAS code generation for merged sources is not available yet."
+            if self._source_kind == "merge"
+            else ""
+        )
         self.settings_button.setEnabled(not self._busy)
         for editor in (self.analysis_variables, self.group_variables, self.treatment_variable, self.population_treatment_variable):
             editor.setEnabled(enabled)

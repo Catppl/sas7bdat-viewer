@@ -58,6 +58,10 @@ python -m clinical_data_viewer
 
 The project declares `requires-python >=3.11`; it does not pin a specific patch or upper Python version.
 
+### Table Shell Gallery
+
+`Tools > Table Shell Gallery` opens a large standalone browser for the available table shells. Cards show shell thumbnails (or one shared placeholder when an image is not available); click a card to preview it, then confirm before opening its Builder. The current Gallery includes vertical PROC MEANS, Change from Baseline, Categorical, Rule-based, and AE Table, but not Listing or the regular PROC MEANS Builder.
+
 ### Common operations
 
 #### Open, browse, and manage columns
@@ -118,7 +122,7 @@ Closing a dataset tab removes its temporary directory. Normal exit removes the s
 
 PROC MEANS is read-only and never writes back to SAS7BDAT. Simple analyzes one numeric variable. Builder supports multiple Analysis, BY, and CLASS variables and writes a temporary long-format SQLite result tab.
 
-`Tools > PROC MEANS Table Builder (Vertical)` is an independent clinical-table builder and does not change Simple or the existing Builder. Select multiple Analysis Variables, Group Variables such as Treatment/Visit, and statistics; use Up/Down to set statistic order. Each analysis variable becomes an Item, with centralized `variable = label` maintenance. Q1/Q3 and Min/Max are displayed as combined rows. A separate Population Dataset and Population Treatment Variable are supported; without one, Run asks whether to calculate header N from the current analysis dataset. Missing population treatment values block the run and explain how to add a non-missing Population WHERE condition. The result is a temporary SQLite tab with `proc_means_vertical_config.json`; use `View > Open PROC MEANS Vertical Long Result` for the long result.
+`Tools > PROC MEANS Table Builder (Vertical)` is an independent clinical-table builder and does not change Simple or the existing Builder. Select multiple Analysis Variables, Group Variables such as Treatment/Visit, and statistics; use Up/Down to set statistic order. Each analysis variable becomes an Item, with centralized `variable = label` maintenance and per-variable Base Decimal Places. Q1/Q3 and Min/Max are displayed as combined rows. A separate Population Dataset and Population Treatment Variable are supported; without one, Run asks whether to calculate header N from the current analysis dataset. Missing population treatment values block the run and explain how to add a non-missing Population WHERE condition. The result is a temporary SQLite tab with `proc_means_vertical_config.json`; use `View > Open PROC MEANS Vertical Long Result` for the long result, or `SAS Code Generator…` for a readable runtime PROC MEANS program. Merged sources are not supported by this generator yet.
 
 ### Statistics and precision
 

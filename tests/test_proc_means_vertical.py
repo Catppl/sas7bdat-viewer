@@ -259,8 +259,10 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
 
         settings_requests: list[bool] = []
         run_requests: list[object] = []
+        sas_requests: list[object] = []
         builder.settings_requested.connect(lambda: settings_requests.append(True))
         builder.run_requested.connect(run_requests.append)
+        builder.sas_code_requested.connect(sas_requests.append)
         builder.analysis_variables.set_variables(("AVAL",))
         self.assertEqual(builder.base_decimal_table.rowCount(), 1)
         decimal_combo = builder.base_decimal_table.cellWidget(0, 1)
@@ -279,8 +281,16 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         self.assertEqual(builder.statistics.currentRow(), 1)
         buttons["Settings…"].click()
         buttons["Run"].click()
+        buttons["SAS Code Generator…"].click()
         self.assertEqual(len(settings_requests), 1)
         self.assertEqual(len(run_requests), 1)
+        self.assertEqual(len(sas_requests), 1)
+        builder.set_dataset(
+            DatasetMetadata("MERGE", 2, (VariableMetadata("USUBJID"), VariableMetadata("AVAL", kind="numeric"))),
+            "merge result",
+            source_kind="merge",
+        )
+        self.assertFalse(builder.sas_code_button.isEnabled())
         buttons["Clear"].click()
         self.assertEqual(builder.analysis_variables.selected_variables(), ())
         self.assertEqual(builder.base_decimal_table.rowCount(), 0)

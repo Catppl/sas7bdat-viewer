@@ -49,6 +49,8 @@ def build_proc_means_vertical_configuration(
 ) -> dict[str, object]:
     config.validate(source.metadata, population.metadata if population else None)
     labels = {value.casefold(): label for value, label in config.item_labels}
+    source_member = source.metadata.name.casefold()
+    population_member = population.metadata.name.casefold() if population else source_member
     return {
         "type": "proc_means_vertical",
         "version": 1,
@@ -80,8 +82,20 @@ def build_proc_means_vertical_configuration(
         },
         "calculation": {
             "reference_engine": "python_proc_means_vertical_v1",
+            "confidence": config.confidence,
+            "alpha": round(1.0 - config.confidence, 12),
             "n": "nonmissing_analysis_records",
             "N": "distinct_subjects_from_population",
+            "total_method": "recompute_distinct_subjects",
+        },
+        "targets": {
+            "sas": {
+                "source_library": "analysis",
+                "source_member": source_member,
+                "population_library": "analysis",
+                "population_member": population_member,
+                "output_dataset": "work.pm_vertical",
+            }
         },
     }
 

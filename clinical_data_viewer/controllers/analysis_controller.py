@@ -28,6 +28,7 @@ from ..ui.listing_builder import ListingBuilderSelection
 from ..ui.proc_means_builder import ProcMeansBuilderSelection
 from ..ui.proc_means_vertical_builder import ProcMeansVerticalBuilderSelection
 from ..ui.rule_based_builder import RuleBasedBuilderSelection
+from ..ui.table_shell_gallery import TableShellGalleryDialog
 from ..workers import Worker
 from .analysis import (
     AeTableController,
@@ -145,6 +146,7 @@ class AnalysisController(QObject):
         self.change_from_baseline = ChangeFromBaselineController(
             self, temp_manager, settings
         )
+        self._table_shell_gallery: TableShellGalleryDialog | None = None
 
         builder = self._panel.listing_builder
         builder.run_requested.connect(self.listing.run_listing)
@@ -197,6 +199,9 @@ class AnalysisController(QObject):
 
         vertical_builder = self._panel.proc_means_vertical_builder
         vertical_builder.run_requested.connect(self.proc_means_vertical.run)
+        vertical_builder.sas_code_requested.connect(
+            self.proc_means_vertical.generate_sas_code
+        )
         vertical_builder.source_selected.connect(self.proc_means_vertical.select_source)
         vertical_builder.population_selected.connect(self.proc_means_vertical.select_population)
         vertical_builder.validation_error.connect(
@@ -523,6 +528,41 @@ class AnalysisController(QObject):
 
     def show_proc_means_builder(self) -> None:
         self.proc_means.show_proc_means_builder()
+
+    def show_table_shell_gallery(self) -> None:
+        if self._table_shell_gallery is not None:
+            self._table_shell_gallery.show()
+            self._table_shell_gallery.raise_()
+            self._table_shell_gallery.activateWindow()
+            return
+        dialog = TableShellGalleryDialog(self._parent_widget())
+        dialog.builder_requested.connect(self._open_table_shell_builder)
+        dialog.finished.connect(lambda _result: self._clear_table_shell_gallery(dialog))
+        self._table_shell_gallery = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _clear_table_shell_gallery(self, dialog: TableShellGalleryDialog) -> None:
+        if self._table_shell_gallery is dialog:
+            # Keep the standalone gallery alive and reusable.  It is parented
+            # to the main window, and reusing it avoids creating/destroying a
+            # tree of Qt child widgets every time the Tools action is opened.
+            dialog.hide()
+
+    def _open_table_shell_builder(self, key: str) -> None:
+        if self._table_shell_gallery is not None:
+            self._table_shell_gallery.close()
+        routes = {
+            "proc_means_vertical": self.proc_means_vertical.show_builder,
+            "change_from_baseline": self.change_from_baseline.show_builder,
+            "categorical": self.categorical.show_categorical_builder,
+            "rule_based": self.rule_based.show_rule_based_builder,
+            "ae_table": self.ae_table.show_ae_table_builder,
+        }
+        route = routes.get(key)
+        if route is not None:
+            route()
 
     def refresh_proc_means_sources(self, datasets=None) -> None:
         self.proc_means.refresh_proc_means_sources(datasets)

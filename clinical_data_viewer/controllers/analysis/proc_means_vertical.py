@@ -7,6 +7,8 @@ from typing import Any
 from PySide6.QtWidgets import QMessageBox
 
 from ...dataset_utils import is_analysis_dataset
+from ...codegen import build_proc_means_vertical_configuration
+from ...codegen.sas import SasProcMeansVerticalGenerator
 from ...domain import DatasetHandle
 from ...filter_engine import FilterEngine
 from ...proc_means_vertical import ProcMeansVerticalConfig, ProcMeansVerticalEngine
@@ -14,6 +16,7 @@ from ...proc_means_vertical.result_store import ProcMeansVerticalLongResultBuild
 from ...settings import DEFAULT_PROC_MEANS_DECIMAL_OFFSETS
 from ...ui.dataset_tab import DatasetTab
 from ...ui.proc_means_vertical_builder import ProcMeansVerticalBuilderSelection
+from ...ui.sas_code_dialog import SasCodeDialog
 from ._base import AnalysisModuleController
 
 
@@ -32,6 +35,7 @@ class ProcMeansVerticalController(AnalysisModuleController):
         self._host = owner._host
         self._panel = owner._panel
         self._engine = ProcMeansVerticalEngine(temp_manager)
+        self._sas_generator = SasProcMeansVerticalGenerator()
         self._long_result_builder = ProcMeansVerticalLongResultBuilder(temp_manager)
         self._settings = settings
         self._source: DatasetTab | None = None
@@ -129,6 +133,7 @@ class ProcMeansVerticalController(AnalysisModuleController):
             tab.handle.metadata if tab else None,
             str(tab.handle.source_path) if tab else "",
             tab.current_where_text() if tab else "",
+            tab.handle.kind if tab else "sas",
         )
 
     def _set_population_dataset(self, tab: DatasetTab | None) -> None:
@@ -239,6 +244,32 @@ class ProcMeansVerticalController(AnalysisModuleController):
             completed,
             failed,
         )
+
+    def generate_sas_code(self, selection: ProcMeansVerticalBuilderSelection) -> None:
+        context = self._context(selection)
+        if context is None:
+            return
+        source_tab, population_tab, config = context
+        if source_tab.handle.kind == "merge":
+            return
+        try:
+            configuration = build_proc_means_vertical_configuration(
+                source_tab.handle,
+                config,
+                population_tab.handle if population_tab else None,
+            )
+            code = self._sas_generator.generate(configuration)
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.critical(
+                self._parent_widget(), "SAS Code Generator Failed", str(error)
+            )
+            return
+        SasCodeDialog(
+            code,
+            str(source_tab.handle.source_path),
+            f"{self._safe_source_name(source_tab.handle)}_proc_means_vertical.sas",
+            self._parent_widget(),
+        ).exec()
 
 
 __all__ = ["ProcMeansVerticalController", "ProcMeansVerticalResultContext"]
