@@ -188,6 +188,28 @@ class ChangeFromBaselineEngine:
             for value in values
         ]
 
+    def resolve_item_order(
+        self,
+        source: DatasetHandle,
+        config: ChangeFromBaselineConfig,
+    ) -> tuple[object, ...]:
+        """Resolve the current source's item order without running the table."""
+        config.validate(source.metadata)
+        fields = self._fields(source.metadata)
+        item = fields[config.item_variable.casefold()]
+        where, parameters = _combined_filter(config)
+        suffix = f" WHERE {where}" if where else ""
+        values: list[object] = []
+        with closing(connect_read_only(source.database_path)) as connection:
+            for (value,) in connection.execute(
+                f"SELECT DISTINCT {quote_identifier(item.name)} FROM dataset{suffix}",
+                parameters,
+            ):
+                canonical = _canonical(value, item)
+                if canonical not in values:
+                    values.append(canonical)
+        return tuple(self._resolved_item_order(source, config, values, item))
+
     def duplicate_warnings(
         self, source: DatasetHandle, config: ChangeFromBaselineConfig
     ) -> tuple[str, ...]:
@@ -359,6 +381,7 @@ class ChangeFromBaselineEngine:
             config.statistics,
             treatment_levels,
             config.include_total,
+            config.statistic_decimals,
         )
         directory = self.temp_manager.create_dataset_directory()
         writer = ChangeFromBaselineResultWriter(directory / "dataset.sqlite", schema)

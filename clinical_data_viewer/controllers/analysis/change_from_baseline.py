@@ -7,12 +7,17 @@ from typing import Any
 from PySide6.QtWidgets import QMessageBox
 
 from ...change_from_baseline import ChangeFromBaselineConfig, ChangeFromBaselineEngine
+from ...change_from_baseline.configuration import (
+    build_change_from_baseline_configuration,
+)
 from ...change_from_baseline.result_store import ChangeFromBaselineLongResultBuilder
+from ...codegen.sas import SasChangeFromBaselineGenerator
 from ...dataset_utils import is_analysis_dataset
 from ...domain import DatasetHandle
 from ...filter_engine import FilterEngine
 from ...ui.change_from_baseline_builder import ChangeFromBaselineBuilderSelection
 from ...ui.dataset_tab import DatasetTab
+from ...ui.sas_code_dialog import SasCodeDialog
 from ...ui.shell_preview_dialog import ShellPreviewDialog
 from ._base import AnalysisModuleController
 
@@ -32,6 +37,7 @@ class ChangeFromBaselineController(AnalysisModuleController):
         self._panel = owner._panel
         self._settings = settings
         self._engine = ChangeFromBaselineEngine(temp_manager)
+        self._sas_generator = SasChangeFromBaselineGenerator()
         self._long_result_builder = ChangeFromBaselineLongResultBuilder(temp_manager)
         self._source: DatasetTab | None = None
         self._input_tabs: set[DatasetTab] = set()
@@ -172,6 +178,7 @@ class ChangeFromBaselineController(AnalysisModuleController):
                 selection.postbaseline_filter_text,
                 self._item_labels(selection.item_labels_text),
                 selection.include_total,
+                selection.statistic_decimals,
             )
             config.validate(tab.handle.metadata)
         except ValueError as error:
@@ -214,6 +221,58 @@ class ChangeFromBaselineController(AnalysisModuleController):
             completed,
             failed,
         )
+
+    def generate_sas_code(self, selection: ChangeFromBaselineBuilderSelection) -> None:
+        """Generate reusable SAS from the current Builder configuration."""
+        context = self._context(selection)
+        if context is None:
+            return
+        tab, config = context
+        if tab.handle.kind != "sas":
+            QMessageBox.warning(
+                self._parent_widget(),
+                "Change from Baseline",
+                "SAS Code Generator supports SAS7BDAT source datasets only.",
+            )
+            return
+        builder = self._panel.change_from_baseline_builder
+        source = tab.handle
+        self._input_tabs = {tab}
+        builder.set_busy(True, "Generating Change from Baseline SAS code…")
+
+        def completed(code: str) -> None:
+            self._input_tabs.clear()
+            builder.set_busy(False, "SAS code generated.")
+            safe_name = source.metadata.name.casefold()
+            SasCodeDialog(
+                code,
+                f"adam.{source.metadata.name.casefold()}",
+                f"{safe_name}_change_from_baseline.sas",
+                self._parent_widget(),
+            ).exec()
+
+        def failed(message: str, details: str) -> None:
+            self._input_tabs.clear()
+            builder.set_busy(False, "SAS Code Generator failed.")
+            self._host.show_analysis_error(
+                "Change from Baseline SAS Code Generator Failed", message, details
+            )
+
+        def generate(_worker: object) -> str:
+            levels = [
+                {"value": value, "label": label}
+                for _key, value, label in self._engine.resolve_treatment_levels(source, config)
+            ]
+            item_order = self._engine.resolve_item_order(source, config)
+            configuration = build_change_from_baseline_configuration(
+                source,
+                config,
+                resolved_treatment_levels=levels,
+                item_order=item_order,
+            )
+            return self._sas_generator.generate(configuration)
+
+        self._host.submit_analysis_task(builder, generate, completed, failed)
 
     def open_long_result(self) -> None:
         tab = self._host.current_dataset_tab()

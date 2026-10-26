@@ -66,6 +66,9 @@ def build_change_from_baseline_configuration(
             "row": list(config.row_variables),
             "treatment": config.treatment_variable or None,
         },
+        # Keep the editable role mapping compact while also preserving the
+        # source metadata needed by standalone code generators.
+        "variable_metadata": _variables(source),
         "dataset_filter": _filter(config.data_filter_text, source),
         "postbaseline_filter": _filter(config.postbaseline_filter_text, source),
         "item": {
@@ -96,7 +99,14 @@ def build_change_from_baseline_configuration(
             "treatment_missing": "error",
             "duplicate_change_records": "warning_continue",
         },
-        "display": {"rounding": "half_up"},
+        "display": {
+            "rounding": "half_up",
+            "maximum_decimals": 4,
+            "statistic_decimals": {
+                key.upper(): decimals
+                for key, decimals in config.statistic_decimals
+            },
+        },
         "targets": {"sas": {"output_dataset": "work.change_from_baseline"}},
     }
 

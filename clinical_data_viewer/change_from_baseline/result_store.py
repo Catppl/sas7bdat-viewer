@@ -25,6 +25,8 @@ def _unique_name(base: str, used: set[str]) -> str:
 class ChangeResultSchema:
     wide_variables: tuple[VariableMetadata, ...]
     long_variables: tuple[VariableMetadata, ...]
+    decimal_base: str
+    statistic_decimal_offsets: tuple[tuple[str, int], ...]
 
 
 def build_result_schema(
@@ -33,10 +35,12 @@ def build_result_schema(
     statistics: tuple[str, ...],
     treatment_levels: tuple[tuple[str, object, str], ...],
     include_total: bool,
+    statistic_decimals: tuple[tuple[str, int], ...] = (),
 ) -> ChangeResultSchema:
     source_fields = {variable.name.casefold(): variable for variable in source.metadata.variables}
     used = {"item"}
     wide = [VariableMetadata("ITEM", "Item", "character", 200)]
+    statistic_columns: list[tuple[str, str]] = []
     for name in row_variables:
         source_variable = source_fields[name.casefold()]
         output_name = _unique_name(source_variable.name, used)
@@ -57,12 +61,14 @@ def build_result_schema(
         for statistic in statistics:
             name = _unique_name(f"{prefix}{statistic.upper()}", used)
             wide.append(VariableMetadata(name, f"{label} {statistic.upper()}", "numeric"))
+            statistic_columns.append((name, statistic))
         name = _unique_name(f"{prefix}SUBJECT_N", used)
         wide.append(VariableMetadata(name, f"{label} N", "numeric"))
     if include_total and treatment_levels:
         for statistic in statistics:
             name = _unique_name(f"TOTAL_{statistic.upper()}", used)
             wide.append(VariableMetadata(name, f"Total {statistic.upper()}", "numeric"))
+            statistic_columns.append((name, statistic))
         name = _unique_name("TOTAL_SUBJECT_N", used)
         wide.append(VariableMetadata(name, "Total N", "numeric"))
 
@@ -89,7 +95,15 @@ def build_result_schema(
         VariableMetadata("SMALL_N", "Non-missing change records", "numeric"),
         VariableMetadata("SUBJECT_N", "Distinct subjects", "numeric"),
     ]
-    return ChangeResultSchema(tuple(wide), tuple(long))
+    decimal_base = _unique_name("_display_decimals", used)
+    decimals = dict(statistic_decimals)
+    decimal_offsets = tuple(
+        (name, decimals.get(statistic, 0))
+        for name, statistic in statistic_columns
+    )
+    return ChangeResultSchema(
+        tuple(wide), tuple(long), decimal_base, decimal_offsets
+    )
 
 
 class ChangeFromBaselineResultWriter:
@@ -109,6 +123,7 @@ class ChangeFromBaselineResultWriter:
             f"{'REAL' if variable.kind == 'numeric' else 'TEXT'}"
             for variable in schema.long_variables
         )
+        wide_defs += f", {quote_identifier(schema.decimal_base)} INTEGER NOT NULL"
         self.connection.execute(
             "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
             + wide_defs
@@ -120,13 +135,15 @@ class ChangeFromBaselineResultWriter:
             + ")"
         )
 
-    def add_wide(self, values: tuple[object, ...]) -> int:
+    def add_wide(self, values: tuple[object, ...], base_decimals: int = 0) -> int:
         names = ", ".join(quote_identifier(v.name) for v in self.schema.wide_variables)
         placeholders = ", ".join("?" for _ in self.schema.wide_variables)
+        names += ", " + quote_identifier(self.schema.decimal_base)
+        placeholders += ", ?"
         self.row_count += 1
         self.connection.execute(
             f"INSERT INTO dataset (_source_row, {names}) VALUES (?, {placeholders})",
-            (self.row_count, *values),
+            (self.row_count, *values, base_decimals),
         )
         return self.row_count
 
@@ -159,6 +176,8 @@ class ChangeFromBaselineResultWriter:
             f"Change from Baseline - {source.metadata.name}",
             self.row_count,
             self.schema.wide_variables,
+            decimal_base_column=self.schema.decimal_base,
+            statistic_decimal_offsets=self.schema.statistic_decimal_offsets,
             display_column_names=tuple(
                 (variable.name, variable.label or variable.name)
                 for variable in self.schema.wide_variables

@@ -210,6 +210,9 @@ class AnalysisController(QObject):
 
         change_builder = self._panel.change_from_baseline_builder
         change_builder.run_requested.connect(self.change_from_baseline.run)
+        change_builder.sas_code_requested.connect(
+            self.change_from_baseline.generate_sas_code
+        )
         change_builder.shell_preview_requested.connect(
             self.change_from_baseline.show_shell_preview
         )
@@ -433,6 +436,11 @@ class AnalysisController(QObject):
         self, selection: ChangeFromBaselineBuilderSelection
     ) -> None:
         self.change_from_baseline.run(selection)
+
+    def generate_change_from_baseline_sas_code(
+        self, selection: ChangeFromBaselineBuilderSelection
+    ) -> None:
+        self.change_from_baseline.generate_sas_code(selection)
 
     def open_change_from_baseline_long_result(self) -> None:
         self.change_from_baseline.open_long_result()

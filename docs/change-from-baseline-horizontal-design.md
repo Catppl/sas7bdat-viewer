@@ -268,6 +268,7 @@ change_from_baseline_config.json
     "row": [],
     "treatment": null
   },
+  "variable_metadata": {},
   "statistics": [
     "N",
     "MEAN",
@@ -301,24 +302,44 @@ change_from_baseline_config.json
     "duplicate_change_records": "warning_continue"
   },
   "display": {
-    "rounding": "half_up"
+    "rounding": "half_up",
+    "maximum_decimals": 4,
+    "statistic_decimals": {
+      "MEAN": 1,
+      "SD": 2,
+      "MEDIAN": 1,
+      "Q1": 1,
+      "Q3": 1,
+      "MIN": 0,
+      "MAX": 0
+    }
   },
   "targets": {}
 }
 ```
 
-## 8. SAS Generator 边界
+`statistic_decimals` 是全表统一的统计量显示精度，不按 PARAMCD 单独配置；`n` 和 `SUBJECT_N` 不使用小数位，所有设置最多 4 位。
 
-本阶段暂不实现 SAS Code Generator。
+## 8. SAS Generator
 
-但当前已确认的 SAS 设计要求必须记录并保留：
+第一版 SAS Code Generator 已实现。入口位于 Change from Baseline Builder
+底部的 `SAS Code Generator…` 按钮，当前只对真实的 SAS7BDAT source enabled。
+
+生成程序不输出 `LIBNAME`，默认引用运行环境已经分配的 `adam` libref，例如
+`adam.adlb`。XPT、Merge Result source 暂不支持 SAS code generation。
+
+生成器消费 Change from Baseline JSON v1，并保持以下边界：
 
 - 生成代码应参考 SAS 标准程序风格；
 - Item label 统一集中在一个可编辑 block；
 - 不使用复杂 macro framework；
 - 使用短且有意义的 dataset / variable 名；
 - 不把 label 逻辑散落在各个统计分支；
-- 后续 SAS 程序必须使用同一份 JSON 业务配置。
+- SAS 程序使用同一份 JSON 业务配置；Treatment levels 使用当前 Builder
+  snapshot 中已经解析的顺序，不在 SAS 中重新发现 treatment；
+- SAS 内部使用 `PROC MEANS`、`PROC SQL` 和短而有意义的临时表名；
+- Total 独立重新计算，不通过 treatment 列相加得到；
+- Item label 在 source preparation 阶段集中处理，方便按 shell 修改。
 
 ## 9. 测试计划
 

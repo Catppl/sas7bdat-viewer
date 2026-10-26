@@ -6,6 +6,16 @@ from ..domain import DatasetMetadata
 from ..filter_engine import CompiledFilter
 
 _STATISTICS = ("n", "mean", "std", "median", "q1", "q3", "min", "max")
+DECIMAL_STATISTICS = ("mean", "std", "median", "q1", "q3", "min", "max")
+DEFAULT_STATISTIC_DECIMALS = (
+    ("mean", 1),
+    ("std", 2),
+    ("median", 1),
+    ("q1", 1),
+    ("q3", 1),
+    ("min", 0),
+    ("max", 0),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +38,7 @@ class ChangeFromBaselineConfig:
     postbaseline_filter_text: str = ""
     item_labels: tuple[tuple[str, str], ...] = ()
     include_total: bool = True
+    statistic_decimals: tuple[tuple[str, int], ...] = DEFAULT_STATISTIC_DECIMALS
 
     def validate(self, metadata: DatasetMetadata) -> None:
         if not self.change_variable:
@@ -72,9 +83,31 @@ class ChangeFromBaselineConfig:
             raise ValueError("Unknown Change from Baseline statistics: " + ", ".join(unknown_stats))
         if not self.statistics:
             raise ValueError("Select at least one statistic.")
+        decimal_names = [key.casefold() for key, _decimals in self.statistic_decimals]
+        if len(decimal_names) != len(set(decimal_names)):
+            raise ValueError("Statistic decimal settings contain duplicates.")
+        invalid_decimal_statistics = [
+            key for key, _decimals in self.statistic_decimals
+            if key.casefold() not in DECIMAL_STATISTICS
+        ]
+        if invalid_decimal_statistics:
+            raise ValueError(
+                "Unknown statistic decimal settings: "
+                + ", ".join(invalid_decimal_statistics)
+            )
+        if any(
+            isinstance(decimals, bool) or not isinstance(decimals, int)
+            or not 0 <= decimals <= 4
+            for _key, decimals in self.statistic_decimals
+        ):
+            raise ValueError("Statistic decimal places must be between 0 and 4.")
         label_keys = [key.casefold() for key, _label in self.item_labels]
         if len(label_keys) != len(set(label_keys)):
             raise ValueError("Item labels contain duplicate level values.")
 
 
-__all__ = ["ChangeFromBaselineConfig"]
+__all__ = [
+    "DECIMAL_STATISTICS",
+    "DEFAULT_STATISTIC_DECIMALS",
+    "ChangeFromBaselineConfig",
+]

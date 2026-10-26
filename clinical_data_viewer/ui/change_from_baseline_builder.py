@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..change_from_baseline.models import DEFAULT_STATISTIC_DECIMALS
 from ..domain import DatasetMetadata
 from .analysis_source_selector import AnalysisSourceSelector
 from .widgets import ClickOnlyComboBox
@@ -48,6 +51,7 @@ class ChangeFromBaselineBuilderSelection:
     postbaseline_filter_text: str
     item_labels_text: str
     include_total: bool
+    statistic_decimals: tuple[tuple[str, int], ...]
 
 
 class RowVariableEditor(QWidget):
@@ -168,6 +172,7 @@ class RowVariableEditor(QWidget):
 class ChangeFromBaselineBuilder(QWidget):
     source_selected = Signal(object)
     run_requested = Signal(object)
+    sas_code_requested = Signal(object)
     shell_preview_requested = Signal()
     validation_error = Signal(str)
     cleared = Signal()
@@ -177,12 +182,15 @@ class ChangeFromBaselineBuilder(QWidget):
         self.setObjectName("changeFromBaselineBuilder")
         self._metadata: DatasetMetadata | None = None
         self._source_text = ""
+        self._source_format = ""
         self._busy = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -231,6 +239,25 @@ class ChangeFromBaselineBuilder(QWidget):
             statistics_layout.addWidget(checkbox)
         layout.addWidget(statistics)
 
+        decimal_box = QGroupBox("Statistic Decimal Places")
+        decimal_layout = QGridLayout(decimal_box)
+        decimal_layout.setContentsMargins(4, 6, 4, 6)
+        decimal_layout.setHorizontalSpacing(8)
+        decimal_layout.addWidget(QLabel("Statistic"), 0, 0)
+        decimal_layout.addWidget(QLabel("Places (0–4)"), 0, 1)
+        self.statistic_decimals: dict[str, ClickOnlyComboBox] = {}
+        default_decimals = dict(DEFAULT_STATISTIC_DECIMALS)
+        for row, (key, _default) in enumerate(DEFAULT_STATISTIC_DECIMALS, start=1):
+            label = next(label for statistic, label in STATISTICS if statistic == key)
+            decimal_layout.addWidget(QLabel(label), row, 0)
+            combo = ClickOnlyComboBox()
+            for decimals in range(5):
+                combo.addItem(str(decimals), decimals)
+            combo.setCurrentIndex(default_decimals[key])
+            self.statistic_decimals[key] = combo
+            decimal_layout.addWidget(combo, row, 1)
+        layout.addWidget(decimal_box)
+
         options = QGroupBox("Display")
         options_layout = QVBoxLayout(options)
         self.include_total = QCheckBox("Include Total")
@@ -252,6 +279,10 @@ class ChangeFromBaselineBuilder(QWidget):
         preview = QPushButton("Shell Preview…")
         preview.clicked.connect(self.shell_preview_requested)
         buttons.addWidget(preview)
+        self.sas_code_button = QPushButton("SAS Code Generator…")
+        self.sas_code_button.setToolTip("Generate SAS code for SAS7BDAT source datasets.")
+        self.sas_code_button.clicked.connect(lambda: self.sas_code_requested.emit(self.selection()))
+        buttons.addWidget(self.sas_code_button)
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear)
         buttons.addWidget(clear)
@@ -273,6 +304,9 @@ class ChangeFromBaselineBuilder(QWidget):
         same_source = metadata is not None and source_text == self._source_text
         self._metadata = metadata
         self._source_text = source_text if metadata is not None else ""
+        self._source_format = (
+            Path(source_text).suffix.casefold().lstrip(".") if metadata is not None else ""
+        )
         self.source_label.setText(
             f"Source: {source_text}" if metadata is not None else "Select a fully loaded source dataset."
         )
@@ -285,10 +319,12 @@ class ChangeFromBaselineBuilder(QWidget):
             self.data_filter.clear()
             self.postbaseline_filter.clear()
             self.item_labels.clear()
+            self._reset_statistic_decimals()
         elif not same_source:
             self.data_filter.setPlainText(current_filter)
             self.postbaseline_filter.clear()
             self.item_labels.clear()
+            self._reset_statistic_decimals()
             for checkbox in self.statistics.values():
                 checkbox.setChecked(True)
             self.include_total.setChecked(True)
@@ -299,6 +335,7 @@ class ChangeFromBaselineBuilder(QWidget):
         """Disable calculation after source closure without clearing inputs."""
         self._metadata = None
         self._source_text = ""
+        self._source_format = ""
         self.source_label.setText(
             "The selected source dataset is closed. Reopen it or choose another dataset."
         )
@@ -313,6 +350,7 @@ class ChangeFromBaselineBuilder(QWidget):
             self.item_labels,
             self.include_total,
             *self.statistics.values(),
+            *self.statistic_decimals.values(),
         ):
             widget.setEnabled(False)
         self._sync_busy()
@@ -343,6 +381,10 @@ class ChangeFromBaselineBuilder(QWidget):
             self.postbaseline_filter.toPlainText().strip(),
             labels,
             self.include_total.isChecked(),
+            tuple(
+                (key, int(combo.currentData()))
+                for key, combo in self.statistic_decimals.items()
+            ),
         )
 
     def _run(self) -> None:
@@ -359,10 +401,16 @@ class ChangeFromBaselineBuilder(QWidget):
         self.data_filter.clear()
         self.postbaseline_filter.clear()
         self.item_labels.clear()
+        self._reset_statistic_decimals()
         for checkbox in self.statistics.values():
             checkbox.setChecked(True)
         self.include_total.setChecked(True)
         self.cleared.emit()
+
+    def _reset_statistic_decimals(self) -> None:
+        defaults = dict(DEFAULT_STATISTIC_DECIMALS)
+        for key, combo in self.statistic_decimals.items():
+            combo.setCurrentIndex(defaults[key])
 
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
@@ -372,6 +420,7 @@ class ChangeFromBaselineBuilder(QWidget):
     def _sync_busy(self) -> None:
         enabled = self._metadata is not None and not self._busy
         self.run_button.setEnabled(enabled)
+        self.sas_code_button.setEnabled(enabled and self._source_format == "sas7bdat")
 
 
 __all__ = [

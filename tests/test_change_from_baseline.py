@@ -101,8 +101,70 @@ class ChangeFromBaselineTests(unittest.TestCase):
             assert result.configuration_path is not None
             configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
             self.assertEqual(configuration["item"]["resolved_order"], ["ALT", "ALB"])
+            self.assertEqual(configuration["variable_metadata"]["CHG"]["type"], "numeric")
             self.assertEqual(configuration["calculation"]["small_n"], "nonmissing_change_records")
             self.assertEqual(configuration["calculation"]["large_n"], "distinct_subjects")
+            self.assertEqual(configuration["display"]["maximum_decimals"], 4)
+            self.assertEqual(
+                configuration["display"]["statistic_decimals"],
+                {
+                    "MEAN": 1,
+                    "STD": 2,
+                    "MEDIAN": 1,
+                    "Q1": 1,
+                    "Q3": 1,
+                    "MIN": 0,
+                    "MAX": 0,
+                },
+            )
+            self.assertIsNotNone(result.metadata.decimal_base_column)
+            decimal_offsets = dict(result.metadata.statistic_decimal_offsets)
+            self.assertEqual(decimal_offsets["TRT_1_MEAN"], 1)
+            self.assertEqual(decimal_offsets["TRT_1_STD"], 2)
+            self.assertEqual(decimal_offsets["TOTAL_MEAN"], 1)
+
+    def test_statistic_decimal_places_are_serialized_and_capped_at_four(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(root, (("S1", "ALB", 1, "A", 1.0),))
+            config = ChangeFromBaselineConfig(
+                "CHG",
+                "PARAMCD",
+                statistic_decimals=(
+                    ("mean", 4),
+                    ("std", 3),
+                    ("median", 2),
+                    ("q1", 1),
+                    ("q3", 0),
+                    ("min", 4),
+                    ("max", 4),
+                ),
+            )
+            result = ChangeFromBaselineEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            assert result.configuration_path is not None
+            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            self.assertEqual(configuration["display"]["statistic_decimals"]["MEAN"], 4)
+            self.assertEqual(configuration["display"]["statistic_decimals"]["Q3"], 0)
+
+    def test_statistic_decimal_places_above_four_are_rejected(self) -> None:
+        source = DatasetMetadata(
+            "ADLB",
+            1,
+            (
+                VariableMetadata("USUBJID"),
+                VariableMetadata("PARAMCD"),
+                VariableMetadata("CHG", kind="numeric"),
+            ),
+        )
+        config = ChangeFromBaselineConfig(
+            "CHG",
+            "PARAMCD",
+            statistic_decimals=(("mean", 5),),
+        )
+        with self.assertRaisesRegex(ValueError, "between 0 and 4"):
+            config.validate(source)
 
     def test_missing_treatment_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
