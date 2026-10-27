@@ -19,6 +19,7 @@ from ..domain import DatasetMetadata, RowComparisonResult
 from ..settings import PROC_MEANS_STATISTICS
 from ..statistics import StatisticsResult
 from .ae_table_builder import AeTableBuilder
+from .baseline_characteristics_builder import BaselineCharacteristicsBuilder
 from .categorical_builder import CategoricalBuilder
 from .change_from_baseline_builder import ChangeFromBaselineBuilder
 from .listing_builder import ListingBuilder
@@ -45,6 +46,7 @@ class AnalysisPanel(QWidget):
         self._create_statistics_tab()
         self._create_builder_tab()
         self._create_proc_means_vertical_tab()
+        self._create_baseline_characteristics_tab()
         self._create_categorical_tab()
         self._create_rule_based_tab()
         self._create_ae_table_tab()
@@ -82,6 +84,9 @@ class AnalysisPanel(QWidget):
 
     def _create_proc_means_vertical_tab(self) -> None:
         self.proc_means_vertical_builder = ProcMeansVerticalBuilder()
+
+    def _create_baseline_characteristics_tab(self) -> None:
+        self.baseline_characteristics_builder = BaselineCharacteristicsBuilder()
 
     def _create_comparison_tab(self) -> None:
         self.comparison_page = QWidget()
@@ -134,6 +139,12 @@ class AnalysisPanel(QWidget):
         self._activate(
             self.proc_means_vertical_builder,
             "PROC MEANS Table Builder (Vertical)",
+        )
+
+    def show_baseline_characteristics_tab(self) -> None:
+        self._activate(
+            self.baseline_characteristics_builder,
+            "Baseline Characteristics",
         )
 
     def show_categorical_tab(self) -> None:

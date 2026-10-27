@@ -190,6 +190,7 @@ class DatasetTab(QWidget):
     source_navigation_requested = Signal(int, str)
     proc_means_drilldown_requested = Signal(int, str, str)
     proc_means_vertical_drilldown_requested = Signal(int, str, str)
+    baseline_characteristics_drilldown_requested = Signal(int, str, str)
     categorical_drilldown_requested = Signal(int, str, str)
     rule_based_drilldown_requested = Signal(int, str, str)
     ae_table_drilldown_requested = Signal(int, str, str)
@@ -479,6 +480,12 @@ class DatasetTab(QWidget):
         if self.handle.kind == "proc_means_vertical":
             if column_name in metadata.proc_means_vertical_drilldown_columns:
                 self.proc_means_vertical_drilldown_requested.emit(
+                    index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
+                )
+            return
+        if self.handle.kind == "baseline_characteristics":
+            if column_name in metadata.baseline_characteristics_drilldown_columns:
+                self.baseline_characteristics_drilldown_requested.emit(
                     index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
                 )
             return

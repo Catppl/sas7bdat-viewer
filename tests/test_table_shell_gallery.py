@@ -24,6 +24,7 @@ class TableShellGalleryTests(unittest.TestCase):
             gallery.visible_shell_keys(),
             (
                 "proc_means_vertical",
+                "baseline_characteristics",
                 "change_from_baseline",
                 "categorical",
                 "rule_based",
@@ -31,19 +32,26 @@ class TableShellGalleryTests(unittest.TestCase):
             ),
         )
         gallery.search.setText("baseline")
-        self.assertEqual(gallery.visible_shell_keys(), ("change_from_baseline",))
+        self.assertEqual(
+            gallery.visible_shell_keys(),
+            ("baseline_characteristics", "change_from_baseline"),
+        )
         gallery.search.clear()
         gallery.category_buttons["Safety"].click()
         self.assertEqual(gallery.visible_shell_keys(), ("ae_table",))
         gallery.category_buttons["Categorical"].click()
         self.assertEqual(
             gallery.visible_shell_keys(),
-            ("categorical", "rule_based", "ae_table"),
+            ("baseline_characteristics", "categorical", "rule_based", "ae_table"),
         )
         gallery.category_buttons["Continuous"].click()
         self.assertEqual(
             gallery.visible_shell_keys(),
-            ("proc_means_vertical", "change_from_baseline"),
+            (
+                "proc_means_vertical",
+                "baseline_characteristics",
+                "change_from_baseline",
+            ),
         )
         gallery.close()
         self.application.processEvents()
@@ -65,7 +73,9 @@ class TableShellGalleryTests(unittest.TestCase):
         self.assertIsNotNone(gallery._preview_dialog)
         assert gallery._preview_dialog is not None
         buttons = gallery._preview_dialog.findChildren(QPushButton)
-        open_button = next(button for button in buttons if button.text() == "Open Builder")
+        open_button = next(
+            button for button in buttons if button.text() == "Open Builder"
+        )
         open_button.click()
         self.assertEqual(requests, ["proc_means_vertical"])
         gallery.close()
@@ -88,9 +98,7 @@ class TableShellGalleryTests(unittest.TestCase):
         small_display = preview._image.pixmap()
         self.assertIsNotNone(small_display)
         assert small_display is not None
-        self.assertLessEqual(
-            small_display.width(), preview._scroll.viewport().width()
-        )
+        self.assertLessEqual(small_display.width(), preview._scroll.viewport().width())
         self.assertLessEqual(
             small_display.height(), preview._scroll.viewport().height()
         )
@@ -144,7 +152,9 @@ class TableShellGalleryTests(unittest.TestCase):
         assert gallery._cards[1].preview.pixmap() is not None
         self.assertFalse(gallery._cards[0].preview.pixmap().isNull())
         self.assertFalse(gallery._cards[1].preview.pixmap().isNull())
-        self.assertTrue(gallery._cards[0].shell.preview_path.endswith("proc_means_vertical.png"))
+        self.assertTrue(
+            gallery._cards[0].shell.preview_path.endswith("proc_means_vertical.png")
+        )
         gallery.close()
         gallery.deleteLater()
         self.application.processEvents()

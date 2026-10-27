@@ -57,6 +57,14 @@ TABLE_SHELLS = (
         ),
     ),
     TableShell(
+        "baseline_characteristics",
+        "Baseline Characteristics",
+        "Mixed categorical and continuous participant summary",
+        "Summary",
+        "clinical_data_viewer/assets/shells/baseline_characteristics.png",
+        ("Categorical", "Continuous"),
+    ),
+    TableShell(
         "change_from_baseline",
         "Change from Baseline",
         "Change scores across visits and treatment groups",
@@ -69,7 +77,8 @@ TABLE_SHELLS = (
         "Categorical Summary",
         "Frequency and percentage by category",
         "Summary",
-        tags=("Categorical",),
+        "clinical_data_viewer/assets/shells/categorical_adsl.png",
+        ("Categorical",),
     ),
     TableShell(
         "rule_based",
@@ -83,7 +92,8 @@ TABLE_SHELLS = (
         "Adverse Events",
         "AE summary by SOC and preferred term",
         "Safety",
-        tags=("Categorical",),
+        "clinical_data_viewer/assets/shells/ae_soc_pt.png",
+        ("Categorical",),
     ),
 )
 
@@ -239,7 +249,9 @@ class _ShellPreviewDialog(QDialog):
 
         navigation = QHBoxLayout()
         self._previous_button = QPushButton("Previous")
-        self._previous_button.clicked.connect(lambda: self._set_page(self._page_index - 1))
+        self._previous_button.clicked.connect(
+            lambda: self._set_page(self._page_index - 1)
+        )
         navigation.addWidget(self._previous_button)
         navigation.addStretch(1)
         self._page_label = QLabel()
@@ -339,7 +351,9 @@ class TableShellGalleryDialog(QDialog):
         for category in ("All", "Summary", "Safety", "Categorical", "Continuous"):
             button = QPushButton(category)
             button.setCheckable(True)
-            button.clicked.connect(lambda _checked, value=category: self._select_category(value))
+            button.clicked.connect(
+                lambda _checked, value=category: self._select_category(value)
+            )
             categories.addWidget(button)
             self.category_buttons[category] = button
         categories.addStretch(1)
@@ -395,7 +409,9 @@ class TableShellGalleryDialog(QDialog):
     def _show_preview(self, shell: TableShell) -> None:
         preview = _ShellPreviewDialog(shell, self)
         preview.builder_requested.connect(self.builder_requested)
-        preview.finished.connect(lambda _result, dialog=preview: self._preview_finished(dialog))
+        preview.finished.connect(
+            lambda _result, dialog=preview: self._preview_finished(dialog)
+        )
         self._preview_dialog = preview
         preview.setModal(True)
         preview.open()

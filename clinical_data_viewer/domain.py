@@ -33,6 +33,7 @@ class DatasetMetadata:
     proc_means_analysis_column: str | None = None
     proc_means_statistic_keys: tuple[tuple[str, str], ...] = ()
     proc_means_vertical_drilldown_columns: tuple[str, ...] = ()
+    baseline_characteristics_drilldown_columns: tuple[str, ...] = ()
     change_from_baseline_statistic_keys: tuple[tuple[str, str], ...] = ()
     display_column_names: tuple[tuple[str, str], ...] = ()
     categorical_item_level_column: str | None = None

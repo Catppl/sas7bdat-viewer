@@ -20,6 +20,21 @@ SHELL_ASSETS = (
         "proc_means_rows.docx",
         "proc_means_rows.png",
     ),
+    (
+        "baseline-characteristics-shell.docx",
+        "baseline_characteristics.docx",
+        "baseline_characteristics.png",
+    ),
+    (
+        "ae-soc-pt-shell.docx",
+        "ae_soc_pt.docx",
+        "ae_soc_pt.png",
+    ),
+    (
+        "categorical-adsl-shell.docx",
+        "categorical_adsl.docx",
+        "categorical_adsl.png",
+    ),
 )
 
 

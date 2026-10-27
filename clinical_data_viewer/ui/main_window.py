@@ -236,6 +236,12 @@ class MainWindow(QMainWindow):
         self.open_proc_means_vertical_long_action.triggered.connect(
             lambda: self.analysis_controller.open_proc_means_vertical_long_result()
         )
+        self.open_baseline_characteristics_long_action = QAction(
+            "Open Baseline Characteristics Long Result", self
+        )
+        self.open_baseline_characteristics_long_action.triggered.connect(
+            lambda: self.analysis_controller.open_baseline_characteristics_long_result()
+        )
         self.analysis_action = QAction("Analysis", self)
         self.analysis_action.setCheckable(True)
         self.analysis_action.setChecked(False)
@@ -248,6 +254,12 @@ class MainWindow(QMainWindow):
         )
         self.proc_means_vertical_builder_action.triggered.connect(
             self.show_proc_means_vertical_builder
+        )
+        self.baseline_characteristics_builder_action = QAction(
+            "Baseline Characteristics Builder", self
+        )
+        self.baseline_characteristics_builder_action.triggered.connect(
+            self.show_baseline_characteristics_builder
         )
         self.categorical_builder_action = QAction("Categorical Table Builder", self)
         self.categorical_builder_action.triggered.connect(self.show_categorical_builder)
@@ -296,12 +308,14 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.open_ae_table_long_action)
         view_menu.addAction(self.open_change_from_baseline_long_action)
         view_menu.addAction(self.open_proc_means_vertical_long_action)
+        view_menu.addAction(self.open_baseline_characteristics_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.table_shell_gallery_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
         tools_menu.addAction(self.proc_means_vertical_builder_action)
+        tools_menu.addAction(self.baseline_characteristics_builder_action)
         tools_menu.addAction(self.categorical_builder_action)
         tools_menu.addAction(self.rule_based_builder_action)
         tools_menu.addAction(self.ae_table_builder_action)
@@ -850,7 +864,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "analysis_controller"):
             analysis_datasets = self.available_analysis_dataset_tabs()
             self.analysis_controller.refresh_proc_means_sources(analysis_datasets)
-            self.analysis_controller.refresh_proc_means_vertical_sources(analysis_datasets)
+            self.analysis_controller.refresh_proc_means_vertical_sources(
+                analysis_datasets
+            )
+            self.analysis_controller.refresh_baseline_characteristics_sources(
+                analysis_datasets
+            )
             self.analysis_controller.refresh_categorical_sources(analysis_datasets)
             self.analysis_controller.refresh_listing_sources(analysis_datasets)
             self.analysis_controller.refresh_rule_based_sources(analysis_datasets)
@@ -1209,6 +1228,13 @@ class MainWindow(QMainWindow):
         tab.proc_means_vertical_drilldown_requested.connect(
             lambda row, column, display, owner=tab: (
                 self.analysis_controller.drilldown_proc_means_vertical(
+                    owner, row, column, display
+                )
+            )
+        )
+        tab.baseline_characteristics_drilldown_requested.connect(
+            lambda row, column, display, owner=tab: (
+                self.analysis_controller.drilldown_baseline_characteristics(
                     owner, row, column, display
                 )
             )
@@ -1695,6 +1721,12 @@ class MainWindow(QMainWindow):
         compact_width = 180
         self.analysis_dock.setMinimumWidth(compact_width)
         self.analysis_dock.resize(compact_width, self.analysis_dock.height())
+        self.analysis_dock.show()
+
+    def show_baseline_characteristics_builder(self) -> None:
+        self.analysis_controller.show_baseline_characteristics_builder()
+        self.analysis_dock.setMinimumWidth(360)
+        self.analysis_dock.resize(360, self.analysis_dock.height())
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:
@@ -2253,6 +2285,9 @@ class MainWindow(QMainWindow):
         )
         self.open_proc_means_vertical_long_action.setEnabled(
             tab is not None and tab.handle.kind == "proc_means_vertical"
+        )
+        self.open_baseline_characteristics_long_action.setEnabled(
+            tab is not None and tab.handle.kind == "baseline_characteristics"
         )
 
     @staticmethod

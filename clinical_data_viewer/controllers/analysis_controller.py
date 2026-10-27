@@ -21,6 +21,9 @@ from ..settings import AppSettings
 from ..temp_manager import TempManager
 from ..ui.ae_table_builder import AeTableBuilderSelection
 from ..ui.analysis_panel import AnalysisPanel
+from ..ui.baseline_characteristics_builder import (
+    BaselineCharacteristicsBuilderSelection,
+)
 from ..ui.categorical_builder import CategoricalBuilderSelection
 from ..ui.change_from_baseline_builder import ChangeFromBaselineBuilderSelection
 from ..ui.dataset_tab import DatasetTab
@@ -32,6 +35,7 @@ from ..ui.table_shell_gallery import TableShellGalleryDialog
 from ..workers import Worker
 from .analysis import (
     AeTableController,
+    BaselineCharacteristicsController,
     CategoricalController,
     ChangeFromBaselineController,
     ListingController,
@@ -40,6 +44,9 @@ from .analysis import (
     RuleBasedController,
 )
 from .analysis.ae_table import AeTableResultContext as _AeTableResultContext
+from .analysis.baseline_characteristics import (
+    BaselineCharacteristicsResultContext as _BaselineCharacteristicsResultContext,
+)
 from .analysis.categorical import CategoricalResultContext as _CategoricalResultContext
 from .analysis.listing import ListingResultContext as _ListingResultContext
 from .analysis.proc_means import ProcMeansResultContext as _ProcMeansResultContext
@@ -52,6 +59,7 @@ from .analysis.rule_based import RuleBasedResultContext as _RuleBasedResultConte
 ListingResultContext = _ListingResultContext
 RuleBasedResultContext = _RuleBasedResultContext
 AeTableResultContext = _AeTableResultContext
+BaselineCharacteristicsResultContext = _BaselineCharacteristicsResultContext
 ProcMeansResultContext = _ProcMeansResultContext
 ProcMeansVerticalResultContext = _ProcMeansVerticalResultContext
 CategoricalResultContext = _CategoricalResultContext
@@ -119,6 +127,8 @@ class AnalysisControllerHost(Protocol):
     # that layout responsibility through the module controllers.
     def show_proc_means_vertical_builder(self) -> None: ...
 
+    def show_baseline_characteristics_builder(self) -> None: ...
+
     def show_change_from_baseline_builder(self) -> None: ...
 
     def show_categorical_builder(self) -> None: ...
@@ -156,7 +166,12 @@ class AnalysisController(QObject):
         self.rule_based = RuleBasedController(self, temp_manager, settings)
         self.ae_table = AeTableController(self, temp_manager, settings)
         self.proc_means = ProcMeansController(self, temp_manager, settings)
-        self.proc_means_vertical = ProcMeansVerticalController(self, temp_manager, settings)
+        self.proc_means_vertical = ProcMeansVerticalController(
+            self, temp_manager, settings
+        )
+        self.baseline_characteristics = BaselineCharacteristicsController(
+            self, temp_manager, settings
+        )
         self.categorical = CategoricalController(self, temp_manager, settings)
         self.change_from_baseline = ChangeFromBaselineController(
             self, temp_manager, settings
@@ -218,13 +233,33 @@ class AnalysisController(QObject):
             self.proc_means_vertical.generate_sas_code
         )
         vertical_builder.source_selected.connect(self.proc_means_vertical.select_source)
-        vertical_builder.population_selected.connect(self.proc_means_vertical.select_population)
+        vertical_builder.population_selected.connect(
+            self.proc_means_vertical.select_population
+        )
         vertical_builder.validation_error.connect(
             lambda message: QMessageBox.warning(
                 self._parent_widget(), "PROC MEANS Table Builder (Vertical)", message
             )
         )
         vertical_builder.cleared.connect(self.proc_means_vertical.clear_source)
+
+        baseline_builder = self._panel.baseline_characteristics_builder
+        baseline_builder.run_requested.connect(self.baseline_characteristics.run)
+        baseline_builder.sas_code_requested.connect(
+            self.baseline_characteristics.generate_sas_code
+        )
+        baseline_builder.shell_preview_requested.connect(
+            self.baseline_characteristics.show_shell_preview
+        )
+        baseline_builder.source_selected.connect(
+            self.baseline_characteristics.select_source
+        )
+        baseline_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(
+                self._parent_widget(), "Baseline Characteristics", message
+            )
+        )
+        baseline_builder.cleared.connect(self.baseline_characteristics.clear_source)
 
         categorical_builder = self._panel.categorical_builder
         categorical_builder.run_requested.connect(self.categorical.run_categorical)
@@ -330,6 +365,8 @@ class AnalysisController(QObject):
             titles.append("Proc Means")
         if self.proc_means_vertical.source is tab:
             titles.append("Proc Means Vertical")
+        if self.baseline_characteristics.source is tab:
+            titles.append("Baseline Characteristics")
         if self.categorical_source is tab:
             titles.append("Categorical")
         if self.change_from_baseline_source is tab:
@@ -362,6 +399,11 @@ class AnalysisController(QObject):
                 "PROC MEANS Vertical Running",
                 f"This dataset is currently used by a vertical PROC MEANS table. Wait for the calculation to finish before {action} it.",
             )
+        if self.baseline_characteristics.is_input_tab(tab):
+            return TabCloseBlocker(
+                "Baseline Characteristics Running",
+                f"Wait for Baseline Characteristics to finish before {action} this dataset.",
+            )
         if self.categorical.is_input_tab(tab):
             return TabCloseBlocker(
                 "Categorical Table Running",
@@ -389,6 +431,9 @@ class AnalysisController(QObject):
         change_from_baseline = getattr(self, "change_from_baseline", None)
         if change_from_baseline is not None:
             change_from_baseline.source_reload_started(tab)
+        baseline = getattr(self, "baseline_characteristics", None)
+        if baseline is not None:
+            baseline.source_reload_started(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_started(tab)
@@ -399,6 +444,9 @@ class AnalysisController(QObject):
         change_from_baseline = getattr(self, "change_from_baseline", None)
         if change_from_baseline is not None:
             change_from_baseline.source_reload_completed(tab)
+        baseline = getattr(self, "baseline_characteristics", None)
+        if baseline is not None:
+            baseline.source_reload_completed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_completed(tab)
@@ -409,6 +457,9 @@ class AnalysisController(QObject):
         change_from_baseline = getattr(self, "change_from_baseline", None)
         if change_from_baseline is not None:
             change_from_baseline.source_reload_failed(tab)
+        baseline = getattr(self, "baseline_characteristics", None)
+        if baseline is not None:
+            baseline.source_reload_failed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_failed(tab)
@@ -428,6 +479,9 @@ class AnalysisController(QObject):
         if paths is not None:
             return paths
         paths = self.proc_means_vertical.take_result_release_paths(tab)
+        if paths is not None:
+            return paths
+        paths = self.baseline_characteristics.take_result_release_paths(tab)
         if paths is not None:
             return paths
         paths = self.categorical.take_result_release_paths(tab)
@@ -571,6 +625,7 @@ class AnalysisController(QObject):
         host = self._parent_widget()
         host_routes = {
             "proc_means_vertical": "show_proc_means_vertical_builder",
+            "baseline_characteristics": "show_baseline_characteristics_builder",
             "change_from_baseline": "show_change_from_baseline_builder",
             "categorical": "show_categorical_builder",
             "rule_based": "show_rule_based_builder",
@@ -583,6 +638,9 @@ class AnalysisController(QObject):
             "rule_based": self.rule_based.show_rule_based_builder,
             "ae_table": self.ae_table.show_ae_table_builder,
         }
+        baseline = getattr(self, "baseline_characteristics", None)
+        if baseline is not None:
+            fallback_routes["baseline_characteristics"] = baseline.show_builder
         host_route = getattr(host, host_routes.get(key, ""), None)
         route = host_route if callable(host_route) else fallback_routes.get(key)
         if route is not None:
@@ -607,6 +665,28 @@ class AnalysisController(QObject):
 
     def show_proc_means_vertical_builder(self) -> None:
         self.proc_means_vertical.show_builder()
+
+    def show_baseline_characteristics_builder(self) -> None:
+        self.baseline_characteristics.show_builder()
+
+    def refresh_baseline_characteristics_sources(self, datasets=None) -> None:
+        self.baseline_characteristics.refresh_sources(datasets)
+
+    def run_baseline_characteristics(
+        self, selection: BaselineCharacteristicsBuilderSelection
+    ) -> None:
+        self.baseline_characteristics.run(selection)
+
+    def clear_baseline_characteristics_source(self) -> None:
+        self.baseline_characteristics.clear_source()
+
+    def open_baseline_characteristics_long_result(self) -> None:
+        self.baseline_characteristics.open_long_result()
+
+    def drilldown_baseline_characteristics(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        self.baseline_characteristics.drilldown(tab, view_row, column_name, display)
 
     def refresh_proc_means_vertical_sources(self, datasets=None) -> None:
         self.proc_means_vertical.refresh_sources(datasets)
