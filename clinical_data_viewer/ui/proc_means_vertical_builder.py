@@ -68,6 +68,7 @@ class ProcMeansVerticalBuilder(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
         content = QWidget()
+        content.setObjectName("procMeansVerticalBuilderContent")
         layout = QVBoxLayout(content)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(5)
@@ -102,7 +103,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self.base_decimal_table.setMinimumWidth(0)
         layout.addWidget(self.base_decimal_table)
 
-        layout.addWidget(QLabel("Column Group Variables (Treatment / other optional groups)"))
+        layout.addWidget(QLabel("Column Group Variables"))
         self.group_variables = VariableTokenEditor("Type a variable and press Enter")
         self.group_variables.validation_error.connect(self.validation_error)
         layout.addWidget(self.group_variables)
@@ -124,7 +125,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self.row_group_variables.validation_error.connect(self.validation_error)
         layout.addWidget(self.row_group_variables)
 
-        layout.addWidget(QLabel("Analysis Treatment Variable (optional)"))
+        layout.addWidget(QLabel("Analysis Treatment Variable"))
         self.treatment_variable = VariableTokenEditor("Select the treatment group variable")
         self.treatment_variable.validation_error.connect(self.validation_error)
         layout.addWidget(self.treatment_variable)
@@ -188,7 +189,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self.status = QLabel("")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        action_row = QHBoxLayout()
+        top_action_row = QHBoxLayout()
         self.sas_code_button = QPushButton("SAS Code Generator…")
         self.settings_button = QPushButton("Settings…")
         self.clear_button = QPushButton("Clear")
@@ -197,11 +198,13 @@ class ProcMeansVerticalBuilder(QWidget):
         self.settings_button.clicked.connect(self.settings_requested)
         self.clear_button.clicked.connect(self.clear)
         self.run_button.clicked.connect(self._run)
-        action_row.addWidget(self.sas_code_button)
-        action_row.addWidget(self.settings_button)
-        action_row.addWidget(self.clear_button)
-        action_row.addWidget(self.run_button)
-        layout.addLayout(action_row)
+        top_action_row.addWidget(self.settings_button)
+        top_action_row.addWidget(self.clear_button)
+        layout.addLayout(top_action_row)
+        bottom_action_row = QHBoxLayout()
+        bottom_action_row.addWidget(self.sas_code_button)
+        bottom_action_row.addWidget(self.run_button)
+        layout.addLayout(bottom_action_row)
         self.set_dataset(None, "")
 
     def set_source_datasets(self, datasets, selected=None) -> None:
@@ -332,14 +335,9 @@ class ProcMeansVerticalBuilder(QWidget):
             self._metadata is not None
             and not self._busy
             and self._source_kind != "merge"
-            and not rows
         )
         self.sas_code_button.setEnabled(codegen_available)
-        if rows:
-            self.sas_code_button.setToolTip(
-                "SAS code generation for the Groups as Rows layout is not available yet."
-            )
-        elif self._source_kind == "merge":
+        if self._source_kind == "merge":
             self.sas_code_button.setToolTip(
                 "SAS code generation for merged sources is not available yet."
             )

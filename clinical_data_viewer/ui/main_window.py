@@ -1690,7 +1690,11 @@ class MainWindow(QMainWindow):
 
     def show_proc_means_vertical_builder(self) -> None:
         self.analysis_controller.show_proc_means_vertical_builder()
-        self.analysis_dock.setMinimumWidth(310)
+        # The vertical Builder is intentionally compact; its actions are
+        # arranged in two rows so the dock does not need the standard width.
+        compact_width = 180
+        self.analysis_dock.setMinimumWidth(compact_width)
+        self.analysis_dock.resize(compact_width, self.analysis_dock.height())
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:

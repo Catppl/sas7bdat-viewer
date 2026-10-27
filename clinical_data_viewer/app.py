@@ -223,6 +223,9 @@ QWidget#categoricalBuilder, QWidget#categoricalBuilderContent,
 QWidget#ruleBasedBuilder, QWidget#ruleBasedBuilderContent {
     background: #f7fbff;
 }
+QWidget#procMeansVerticalBuilder, QWidget#procMeansVerticalBuilderContent {
+    background: #f7fbff;
+}
 QTreeWidget#historyTable::item {
     min-height: 28px;
     padding: 3px 5px;

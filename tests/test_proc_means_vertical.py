@@ -472,7 +472,7 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
 
     def test_scroll_area_and_builder_buttons(self) -> None:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QPushButton, QScrollArea
+        from PySide6.QtWidgets import QPushButton, QScrollArea, QWidget
 
         from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
         from clinical_data_viewer.ui.proc_means_vertical_builder import (
@@ -500,6 +500,21 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         assert scroll is not None
         self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
         self.assertEqual(scroll.horizontalScrollBarPolicy(), Qt.ScrollBarAsNeeded)
+        self.assertEqual(
+            builder.settings_button.geometry().y(),
+            builder.clear_button.geometry().y(),
+        )
+        self.assertEqual(
+            builder.sas_code_button.geometry().y(),
+            builder.run_button.geometry().y(),
+        )
+        self.assertGreater(
+            builder.sas_code_button.geometry().y(),
+            builder.settings_button.geometry().y(),
+        )
+        self.assertEqual(builder.objectName(), "procMeansVerticalBuilder")
+        content = builder.findChild(QWidget, "procMeansVerticalBuilderContent")
+        self.assertIsNotNone(content)
 
         settings_requests: list[bool] = []
         run_requests: list[object] = []
@@ -515,7 +530,7 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         assert row_selection is not None
         self.assertEqual(row_selection.output_layout, "rows")
         self.assertEqual(row_selection.row_group_variables, ("TRT01A",))
-        self.assertFalse(builder.sas_code_button.isEnabled())
+        self.assertTrue(builder.sas_code_button.isEnabled())
         builder.groups_as_columns.click()
         self.assertTrue(builder.sas_code_button.isEnabled())
         self.assertEqual(builder.base_decimal_table.rowCount(), 1)
