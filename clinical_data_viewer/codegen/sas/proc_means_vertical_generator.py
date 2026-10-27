@@ -98,9 +98,14 @@ class SasProcMeansVerticalGenerator:
             raise ValueError("variables is required in the vertical PROC MEANS configuration.")
         analysis_names = [str(name) for name in variable_block.get("analysis", [])]
         group_names = [str(name) for name in variable_block.get("group", [])]
+        row_group_names = [str(name) for name in variable_block.get("row_group", [])]
         if not analysis_names:
             raise ValueError("Select at least one Analysis Variable.")
-        missing = [name for name in (*analysis_names, *group_names) if name.casefold() not in variable_lookup]
+        missing = [
+            name
+            for name in (*analysis_names, *group_names, *row_group_names)
+            if name.casefold() not in variable_lookup
+        ]
         if missing:
             raise ValueError("Unknown variables: " + ", ".join(missing))
 
@@ -112,10 +117,15 @@ class SasProcMeansVerticalGenerator:
         display = configuration.get("display")
         if not isinstance(display, dict):
             raise ValueError("display is required in the vertical PROC MEANS configuration.")
-        if display.get("layout", "columns") == "rows":
-            raise ValueError(
-                "SAS generation for the Groups as Rows layout is not available yet."
-            )
+        layout = str(display.get("layout", "vertical")).casefold()
+        if layout == "columns":
+            layout = "vertical"
+        if layout not in {"vertical", "rows"}:
+            raise ValueError(f"Unsupported vertical PROC MEANS layout: {layout}")
+        if layout == "rows" and not row_group_names:
+            raise ValueError("Groups as Rows requires at least one row group variable.")
+        if layout != "rows" and row_group_names:
+            raise ValueError("Row group variables require the Groups as Rows layout.")
         if display.get("rounding") != "half_up":
             raise ValueError("Only half_up rounding is supported by the vertical SAS generator.")
         maximum_decimals = int(display.get("maximum_decimals", 4))
@@ -163,6 +173,13 @@ class SasProcMeansVerticalGenerator:
             metadata = variable_lookup[name.casefold()]
             kind = str(metadata.get("type", "character")).casefold()
             groups.append({"name": name, "sas_name": sas_name(name), "kind": kind, "index": index})
+        row_groups = []
+        for index, name in enumerate(row_group_names, start=1):
+            metadata = variable_lookup[name.casefold()]
+            kind = str(metadata.get("type", "character")).casefold()
+            row_groups.append(
+                {"name": name, "sas_name": sas_name(name), "kind": kind, "index": index}
+            )
 
         population = configuration.get("population")
         population = population if isinstance(population, dict) else {}
@@ -201,6 +218,12 @@ class SasProcMeansVerticalGenerator:
                 for index, name in enumerate(group_names, start=1)
                 if name.casefold() == treatment_name.casefold()
             ),
+            None,
+        )
+        treatment_group = (
+            groups[treatment_group_index - 1]
+            if treatment_group_index is not None
+            else None
         )
         source_treatment_meta = variable_lookup.get(treatment_name.casefold(), {})
         population_treatment_meta = {
@@ -230,8 +253,12 @@ class SasProcMeansVerticalGenerator:
             "source_filter": _sas_filter(configuration.get("dataset_filter", {}).get("ast")),
             "population_filter": _sas_filter(population.get("filter", {}).get("ast")),
             "analysis": rows,
+            "analysis_count": len(rows),
             "group_variables": groups,
+            "row_group_variables": row_groups,
             "group_names": group_names,
+            "row_group_names": row_group_names,
+            "layout": layout,
             "statistics": statistic_rows,
             "statistic_keys": statistics,
             "proc_statistics": [key for key in statistics if key != "subjects"],
@@ -240,6 +267,7 @@ class SasProcMeansVerticalGenerator:
             "treatment": treatment_name,
             "population_treatment": population_treatment_name if variable_block.get("population_treatment") else "",
             "treatment_group_index": treatment_group_index,
+            "treatment_group": treatment_group,
             "source_treatment_kind": str(source_treatment_meta.get("type", "character")).casefold(),
             "population_treatment_kind": str(population_treatment_meta.get("type", "character")).casefold(),
             "subject": "USUBJID",
@@ -252,7 +280,12 @@ class SasProcMeansVerticalGenerator:
     def generate(self, configuration: dict[str, object]) -> str:
         context = self._prepare(configuration)
         try:
-            return self.environment.get_template("proc_means_vertical.sas.j2").render(**context)
+            template_name = (
+                "proc_means_vertical_rows.sas.j2"
+                if context["layout"] == "rows"
+                else "proc_means_vertical.sas.j2"
+            )
+            return self.environment.get_template(template_name).render(**context)
         except (OSError, TemplateError) as error:
             raise ValueError(f"Unable to render the vertical PROC MEANS template: {error}") from error
 

@@ -73,12 +73,26 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "merged vertical"):
             SasProcMeansVerticalGenerator().generate(configuration)
 
-    def test_generator_rejects_groups_as_rows_until_supported(self) -> None:
+    def test_generator_renders_groups_as_rows_at_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             configuration = self._configuration(Path(temporary))
         configuration["display"]["layout"] = "rows"
-        with self.assertRaisesRegex(ValueError, "Groups as Rows"):
-            SasProcMeansVerticalGenerator().generate(configuration)
+        configuration["variable_metadata"]["AVISIT"] = {
+            "type": "character",
+            "label": "Analysis Visit",
+            "length": 40,
+            "format": "",
+        }
+        configuration["variables"]["row_group"] = ["AVISIT"]
+        code = SasProcMeansVerticalGenerator().generate(configuration)
+        self.assertIn("PROC MEANS Table Builder (Vertical - Groups as Rows)", code)
+        self.assertIn("class AVISIT TRT01A;", code)
+        self.assertIn("create table row0", code)
+        self.assertIn("create table out_total_aval", code)
+        self.assertIn("coalesce(s.n, 0) as n", code)
+        self.assertIn("by output_row group item statistic", code)
+        self.assertIn("prefix=col", code)
+        self.assertNotIn("resolved_hierarchy", code)
 
     def test_generator_renders_filter_ast(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
