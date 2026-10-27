@@ -2,24 +2,12 @@
 
 ## Status and approval boundary
 
-This document freezes the business and display contract derived from the supplied
-table-shell photograph for the shell-asset phase.
+This document freezes the approved business and display contract derived from
+the supplied table-shell photograph. The shell assets and the independent
+Builder implementation are now in scope.
 
-Approved in the current phase:
-
-- this design document;
-- the editable source shell at `docs/baseline-characteristics-shell.docx`;
-- its byte-identical packaged DOCX copy;
-- the PNG rendered from the final source DOCX.
-
-Not approved in the current phase:
-
-- domain models, Python engine, result store, configuration JSON, drill-down,
-  Builder UI, controller, SAS generator, Gallery registration, menus, tests, or
-  documentation changes outside these shell assets.
-
-The future implementation must follow
-`docs/table-shell-builder-codegen-gallery-execution-playbook.md` and remain an
+The implementation follows
+`docs/table-shell-builder-codegen-gallery-execution-playbook.md` and remains an
 independent module. Existing Categorical and PROC MEANS business semantics must
 not change.
 
@@ -220,7 +208,7 @@ original TFL shell is supplied:
 - no footnote is displayed;
 - shell note: `Only categorical levels represented in the analysis are displayed.`
 
-## Acceptance criteria for this phase
+## Acceptance criteria
 
 1. The design file records Count, Denominator, Missing, Total, Sorting,
    Decimals, Drill-down, and final table structure.
@@ -231,6 +219,11 @@ original TFL shell is supplied:
 5. Item hierarchy, indentation, statistic labels, and placeholders match the
    supplied shell's visible structure.
 6. The rendered page has no clipping, overlap, missing glyphs, or broken rules.
-7. Existing shell assets, including untracked `proc_means_rows` files, remain
-   untouched.
+7. Existing unrelated shell assets and analysis modules remain untouched by
+   Baseline Characteristics business logic.
+8. Character variables are accepted only as Categorical Items; numeric
+   variables can be explicitly added as either Categorical or Continuous.
+9. Python wide/long results, JSON v1, drill-down, Jinja2 SAS generation, Builder
+   UI, Gallery routing, menus, and packaged preview are covered by regression
+   tests.
 

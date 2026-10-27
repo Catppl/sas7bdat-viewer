@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self.excel_exporter = ExcelExporter()
         self.pool = QThreadPool.globalInstance()
         self._workers: dict[QWidget, set[Worker]] = {}
+        self._closing = False
         self._pending_removals: dict[QWidget, list[Path]] = {}
         self._last_statistics_request: tuple[DatasetTab, str] | None = None
         self._statistics_owner: DatasetTab | None = None
@@ -1394,8 +1395,13 @@ class MainWindow(QMainWindow):
             self._refresh_status(tab)
 
         def failed(message: str, details: str) -> None:
-            if generation == tab.generation:
-                tab.model.load_failed(offset)
+            if (
+                self._closing
+                or self.tabs.indexOf(tab) < 0
+                or generation != tab.generation
+            ):
+                return
+            tab.model.load_failed(offset)
             self._show_error("Dataset Query Failed", message, details)
 
         self._submit(tab, query, completed, failed)
@@ -2386,6 +2392,7 @@ class MainWindow(QMainWindow):
         box.exec()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._closing = True
         self._remember_navigation_panel_widths()
         for workers in self._workers.values():
             for worker in workers:

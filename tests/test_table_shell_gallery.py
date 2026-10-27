@@ -81,6 +81,40 @@ class TableShellGalleryTests(unittest.TestCase):
         gallery.close()
         self.application.processEvents()
 
+    def test_baseline_characteristics_shell_preview_opens_its_builder(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QPushButton
+
+        from clinical_data_viewer.ui.table_shell_gallery import (
+            TableShellGalleryDialog,
+        )
+
+        gallery = TableShellGalleryDialog()
+        requests: list[str] = []
+        gallery.builder_requested.connect(requests.append)
+        card = next(
+            card
+            for card in gallery._cards
+            if card.shell.key == "baseline_characteristics"
+        )
+        self.assertTrue(
+            card.shell.preview_path.endswith("baseline_characteristics.png")
+        )
+        QTest.mouseClick(card, Qt.LeftButton)
+        self.assertIsNotNone(gallery._preview_dialog)
+        assert gallery._preview_dialog is not None
+        self.assertFalse(gallery._preview_dialog._source_pixmap.isNull())
+        open_button = next(
+            button
+            for button in gallery._preview_dialog.findChildren(QPushButton)
+            if button.text() == "Open Builder"
+        )
+        open_button.click()
+        self.assertEqual(requests, ["baseline_characteristics"])
+        gallery.close()
+        self.application.processEvents()
+
     def test_preview_fits_image_to_window_without_replacing_source(self) -> None:
         from clinical_data_viewer.ui.table_shell_gallery import (
             TABLE_SHELLS,

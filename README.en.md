@@ -42,7 +42,7 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
 | Variables | Collapsible Variables panel, search, metadata, column visibility, Select All, and variable-to-column navigation. |
 | Filtering | Hand-written SAS-like WHERE expressions, Excel-style column filters, filter history, column-to-column comparisons, missing-value conditions, SAS temporal literals, and common character functions. |
 | Navigation | Sortable columns, `Ctrl+F`/`F3` search, `Ctrl+G` row navigation, copy cells/rows/ranges, and horizontal/vertical scrolling. |
-| Analysis | PROC MEANS Simple, PROC MEANS Builder, PROC MEANS Table Builder (Vertical), Categorical Table, Rule-based Table, AE Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
+| Analysis | PROC MEANS Simple, PROC MEANS Builder, PROC MEANS Table Builder (Vertical), Baseline Characteristics, Categorical Table, Rule-based Table, AE Table, row comparison, Dataset Compare, Merge Datasets, and temporary result tabs. |
 | Listing | `Tools > Listing Generator` builds record-level QC listings with an optional ADSL LEFT merge, filter, derived columns, stable sort, normal Viewer result tab, and Jinja2 SAS/PROC REPORT code generation. |
 | Export | Background CSV export of the current filtered result, current visible columns, and current sort order. UTF-8 BOM is used; manual row highlights are recorded in an additional `HIGHLIGHT` column because CSV cannot store cell background colors. |
 | Code generation | SAS/R PROC MEANS generators and a SAS Listing generator, each based on a language-neutral JSON configuration. |
@@ -88,7 +88,13 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 
 ### Table Shell Gallery
 
-`Tools > Table Shell Gallery` opens a large standalone browser for the available table shells. Cards show shell thumbnails (or one shared placeholder when an image is not available); click a card to preview it, then confirm before opening its Builder. The current Gallery includes vertical PROC MEANS, Change from Baseline, Categorical, Rule-based, and AE Table, but not Listing or the regular PROC MEANS Builder.
+`Tools > Table Shell Gallery` opens a large standalone browser for the available table shells. Cards show shell thumbnails (or one shared placeholder when an image is not available); click a card to preview it, then confirm before opening its Builder. The current Gallery includes vertical PROC MEANS, Baseline Characteristics, Change from Baseline, Categorical, Rule-based, and AE Table, but not Listing or the regular PROC MEANS Builder.
+
+### Baseline Characteristics Builder
+
+`Tools > Baseline Characteristics Builder` is an independent mixed-item table-shell module with one editable `Overall (N=xx)` summary column. The user explicitly chooses Categorical or Continuous when adding an item, while physical character/numeric storage type always comes from dataset metadata. Character variables are categorical-only; numeric variables may use either role. The filtered source must contain exactly one row per nonmissing `USUBJID`.
+
+Categorical items count distinct participants, exclude missing levels, and support runtime raw-value or custom raw-value ordering. Continuous items have the fixed n, Mean, SD, Median, Q1/Q3, and Min/Max shell order with sample SD and QNTLDEF=5, plus per-statistic Auto/0–4 decimals. A run produces the clinical wide result, an authoritative long result, JSON v1, and raw cell mapping. Categorical drill-down offers numerator and denominator participants; continuous drill-down opens nonmissing source rows. Physical SAS sources support Jinja2 SAS generation; Merge sources do not. The packaged shell preview has no footnote.
 
 ### Common operations
 
@@ -421,6 +427,7 @@ clinical_data_viewer/
     analysis/          independent Listing, PROC MEANS, Categorical, Rule-based, and AE controllers
   ae_table/            AE SOC/PT configuration, Python engine, drill-down, result store, and JSON
   categorical/         Categorical configuration, engine, drill-down, wide/long results, and JSON
+  baseline_characteristics/ mixed Baseline Characteristics items, engine, drill-down, wide/long results, and JSON
   change_from_baseline/ horizontal Change from Baseline configuration, engine, drill-down, and results
   listing/             Listing configuration, expression AST, Python engine, and record-level results
   proc_means/          PROC MEANS Builder configuration, grouped statistics, drill-down, long result, and JSON

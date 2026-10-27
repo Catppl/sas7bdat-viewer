@@ -56,6 +56,7 @@ class BaselineCharacteristicsBuilder(QWidget):
         self._source_kind = "sas"
         self._items: list[BaselineItem] = []
         self._busy = False
+        self._filter_initialized = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -251,7 +252,6 @@ class BaselineCharacteristicsBuilder(QWidget):
         filter_text: str = "",
         source_kind: str = "sas",
     ) -> None:
-        had_source = bool(self._source_text)
         self._metadata = metadata
         self._source_text = source_text
         self._source_kind = source_kind
@@ -260,9 +260,10 @@ class BaselineCharacteristicsBuilder(QWidget):
             if metadata
             else "Select a fully loaded source dataset."
         )
-        if metadata is not None and not had_source:
+        if metadata is not None and not self._filter_initialized:
             self.filter_editor.setText(filter_text)
-        self._remove_invalid_items()
+            self._filter_initialized = True
+        self._refresh_items()
         self._update_enabled()
 
     def inherit_current_filter(self, filter_text: str) -> None:
@@ -283,22 +284,6 @@ class BaselineCharacteristicsBuilder(QWidget):
             ),
             None,
         )
-
-    def _remove_invalid_items(self) -> None:
-        if self._metadata is None:
-            self._items.clear()
-        else:
-            known = {item.name.casefold(): item for item in self._metadata.variables}
-            self._items = [
-                item
-                for item in self._items
-                if item.variable.casefold() in known
-                and (
-                    isinstance(item, BaselineCategoricalItem)
-                    or known[item.variable.casefold()].kind == "numeric"
-                )
-            ]
-        self._refresh_items()
 
     def _choose_item(self, role: str) -> None:
         if self._metadata is None:
@@ -439,7 +424,7 @@ class BaselineCharacteristicsBuilder(QWidget):
                         try:
                             values.append(float(text))
                         except ValueError:
-                            continue
+                            values.append(text)
                     else:
                         values.append(text)
             self._items[row] = BaselineCategoricalItem(
@@ -511,6 +496,7 @@ class BaselineCharacteristicsBuilder(QWidget):
     def clear(self) -> None:
         self._items.clear()
         self.filter_editor.clear()
+        self._filter_initialized = False
         self.header_label.setText("Overall")
         self._refresh_items()
         self.cleared.emit()

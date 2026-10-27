@@ -57,6 +57,8 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("count(distinct", folded)
         self.assertIn("proc means", folded)
         self.assertIn("vardef=df qntldef=5", folded)
+        self.assertIn("if sex='f' then sort_rank=1", folded)
+        self.assertIn("maximum observed source precision", folded)
         self.assertIn("work.baseline_characteristics_long", folded)
         self.assertIn("work.baseline_characteristics", folded)
         self.assertNotIn("delete baseline_characteristics", folded)

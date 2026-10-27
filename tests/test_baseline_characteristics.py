@@ -11,6 +11,7 @@ from clinical_data_viewer.baseline_characteristics import (
     BaselineCategoricalItem,
     BaselineCharacteristicsConfig,
     BaselineCharacteristicsEngine,
+    BaselineCharacteristicsLongResultBuilder,
     BaselineContinuousItem,
     build_baseline_characteristics_configuration,
 )
@@ -261,6 +262,25 @@ class BaselineCharacteristicsTests(unittest.TestCase):
                 build_cell_where_text(source.metadata, config, mean),
                 '(SAFFL = "Y") and not missing(AGE)',
             )
+
+    def test_long_result_is_materialized_as_an_independent_dataset(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(root, (("S1", "Y", "F", 1, 34, 60),))
+            manager = TempManager(root / "temp")
+            result = BaselineCharacteristicsEngine(manager).run(
+                source, make_config(source)
+            )
+            long_result = BaselineCharacteristicsLongResultBuilder(manager).run(
+                result, source
+            )
+            self.assertEqual(long_result.kind, "baseline_characteristics_long")
+            self.assertEqual(long_result.metadata.row_count, result.metadata.row_count)
+            with closing(sqlite3.connect(long_result.database_path)) as connection:
+                first = connection.execute(
+                    'SELECT "ITEM_KIND", "VARIABLE" FROM dataset ORDER BY _source_row LIMIT 1'
+                ).fetchone()
+            self.assertEqual(first, ("categorical", "SEX"))
 
 
 if __name__ == "__main__":

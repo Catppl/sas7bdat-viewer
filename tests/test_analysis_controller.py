@@ -42,13 +42,18 @@ class AnalysisControllerTests(unittest.TestCase):
             )
         )
 
-    def test_table_shell_gallery_routes_through_main_window_builder_entries(self) -> None:
-        from clinical_data_viewer.controllers.analysis_controller import AnalysisController
+    def test_table_shell_gallery_routes_through_main_window_builder_entries(
+        self,
+    ) -> None:
+        from clinical_data_viewer.controllers.analysis_controller import (
+            AnalysisController,
+        )
 
         host_routes = {
             name: Mock()
             for name in (
                 "show_proc_means_vertical_builder",
+                "show_baseline_characteristics_builder",
                 "show_change_from_baseline_builder",
                 "show_categorical_builder",
                 "show_rule_based_builder",
@@ -59,6 +64,7 @@ class AnalysisControllerTests(unittest.TestCase):
         controller._parent_widget = Mock(return_value=SimpleNamespace(**host_routes))
         controller._table_shell_gallery = Mock()
         controller.proc_means_vertical = Mock()
+        controller.baseline_characteristics = Mock()
         controller.change_from_baseline = Mock()
         controller.categorical = Mock()
         controller.rule_based = Mock()
@@ -66,6 +72,7 @@ class AnalysisControllerTests(unittest.TestCase):
 
         routes = {
             "proc_means_vertical": "show_proc_means_vertical_builder",
+            "baseline_characteristics": "show_baseline_characteristics_builder",
             "change_from_baseline": "show_change_from_baseline_builder",
             "categorical": "show_categorical_builder",
             "rule_based": "show_rule_based_builder",

@@ -323,6 +323,7 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             else "Nonmissing Source Rows"
         )
         title = self._host.unique_analysis_tab_title(f"Query: {mode}")
+        self._host.set_analysis_task_status(f"Building {title}… WHERE {where_text}")
         generation = tab.generation
 
         def completed(handle: DatasetHandle) -> None:
@@ -331,7 +332,6 @@ class BaselineCharacteristicsController(AnalysisModuleController):
                 return
             query_tab = self._host.create_analysis_result_tab(handle)
             self._host.show_analysis_result_tab(query_tab, title)
-            query_tab.setWindowTitle(where_text)
 
         self._host.submit_analysis_task(
             tab,

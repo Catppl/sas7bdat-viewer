@@ -52,6 +52,17 @@ class ShellAssetInventoryTests(unittest.TestCase):
                 self.assertEqual(packaged_docx, source)
                 self.assertTrue(preview.startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_baseline_characteristics_preview_loader_reads_packaged_png(self) -> None:
+        from clinical_data_viewer.shell_assets import (
+            load_baseline_characteristics_shell_preview,
+        )
+
+        self.assertTrue(
+            load_baseline_characteristics_shell_preview().startswith(
+                b"\x89PNG\r\n\x1a\n"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

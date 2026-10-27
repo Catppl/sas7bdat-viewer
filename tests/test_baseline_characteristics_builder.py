@@ -66,6 +66,25 @@ class BaselineCharacteristicsBuilderTests(unittest.TestCase):
         self.assertEqual(builder.current_filter_text(), "")
         self.assertEqual(builder.header_label.text(), "Overall")
 
+    def test_source_unavailability_does_not_clear_saved_builder_configuration(
+        self,
+    ) -> None:
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.baseline_characteristics_builder import (
+            BaselineCharacteristicsBuilder,
+        )
+
+        metadata = DatasetMetadata(
+            "ADSL", 1, (VariableMetadata("USUBJID"), VariableMetadata("SEX"))
+        )
+        builder = BaselineCharacteristicsBuilder()
+        builder.set_dataset(metadata, "adsl.sas7bdat", 'SEX = "F"')
+        builder.add_item("categorical", "SEX")
+        builder.set_dataset(None, "")
+        builder.set_dataset(metadata, "adsl-reloaded.sas7bdat", 'SEX = "M"')
+        self.assertEqual(builder.items.rowCount(), 1)
+        self.assertEqual(builder.current_filter_text(), 'SEX = "F"')
+
 
 if __name__ == "__main__":
     unittest.main()

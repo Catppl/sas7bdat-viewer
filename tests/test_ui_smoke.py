@@ -192,6 +192,58 @@ class UiSmokeTests(unittest.TestCase):
             window.close()
             application.processEvents()
 
+    def test_closed_tab_discards_late_page_query_failure(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from unittest.mock import patch
+
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.domain import (
+            DatasetHandle,
+            DatasetMetadata,
+            VariableMetadata,
+        )
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+            )
+            handle = DatasetHandle(
+                root / "adsl.sas7bdat",
+                root / "adsl.tmp",
+                root / "missing.sqlite",
+                DatasetMetadata("ADSL", 1, (VariableMetadata("USUBJID"),)),
+                1,
+                True,
+            )
+            tab = window._make_dataset_tab(handle)
+            window.tabs.addTab(tab, "ADSL")
+            captured: dict[str, object] = {}
+
+            def fake_submit(owner, function, completed, failed, **kwargs):
+                captured["failed"] = failed
+
+            window._submit = fake_submit
+            window._load_page(tab, tab.generation, 0, 500)
+            window.tabs.removeTab(window.tabs.indexOf(tab))
+            with patch.object(window, "_show_error") as show_error:
+                captured["failed"]("unable to open database file", "details")
+            show_error.assert_not_called()
+            window.close()
+            application.processEvents()
+
     def test_sas_temporal_display_setting_updates_open_new_and_reloaded_tabs(
         self,
     ) -> None:
