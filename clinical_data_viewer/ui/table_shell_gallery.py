@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -30,6 +29,11 @@ class TableShell:
     description: str
     category: str
     preview_path: str | None = None
+    tags: tuple[str, ...] = ()
+
+    @property
+    def all_tags(self) -> tuple[str, ...]:
+        return (self.category, *self.tags)
 
 
 TABLE_SHELLS = (
@@ -39,6 +43,7 @@ TABLE_SHELLS = (
         "Continuous variable summary by treatment and group",
         "Summary",
         "clinical_data_viewer/assets/shells/proc_means_vertical.png",
+        ("Continuous",),
     ),
     TableShell(
         "change_from_baseline",
@@ -46,24 +51,28 @@ TABLE_SHELLS = (
         "Change scores across visits and treatment groups",
         "Summary",
         "clinical_data_viewer/assets/shells/change_from_baseline_horizontal.png",
+        ("Continuous",),
     ),
     TableShell(
         "categorical",
         "Categorical Summary",
         "Frequency and percentage by category",
         "Summary",
+        tags=("Categorical",),
     ),
     TableShell(
         "rule_based",
         "Rule-based Table",
         "Configurable clinical summary from row-level rules",
         "Summary",
+        tags=("Categorical",),
     ),
     TableShell(
         "ae_table",
         "Adverse Events",
         "AE summary by SOC and preferred term",
         "Safety",
+        tags=("Categorical",),
     ),
 )
 
@@ -92,8 +101,36 @@ def _shell_pixmap(shell: TableShell) -> QPixmap:
     if shell.preview_path:
         path = resource_path(shell.preview_path)
         if path.exists():
-            return QPixmap(str(path))
+            return _trim_whitespace(QPixmap(str(path)))
     return _placeholder_pixmap()
+
+
+def _trim_whitespace(pixmap: QPixmap, margin: int = 16) -> QPixmap:
+    """Remove blank white margins without resampling the shell image."""
+    if pixmap.isNull():
+        return pixmap
+    image = pixmap.toImage().convertToFormat(QImage.Format_RGB32)
+    mask = image.createMaskFromColor(QColor("white").rgba(), Qt.MaskOutColor)
+    min_x, min_y = image.width(), image.height()
+    max_x = max_y = -1
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if mask.pixel(x, y) & 0x00FFFFFF:
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+                min_y = min(min_y, y)
+                max_y = max(max_y, y)
+    if max_x < min_x or max_y < min_y:
+        return pixmap
+    content = image.rect().intersected(
+        image.rect().adjusted(
+            min_x - margin,
+            min_y - margin,
+            -(image.width() - max_x - 1 - margin),
+            -(image.height() - max_y - 1 - margin),
+        )
+    )
+    return pixmap.copy(content)
 
 
 class _ShellCard(QFrame):
@@ -167,19 +204,47 @@ class _ShellPreviewDialog(QDialog):
         description.setStyleSheet("color: #667085;")
         layout.addWidget(description)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        image = QLabel()
-        image.setAlignment(Qt.AlignCenter)
-        image.setPixmap(_shell_pixmap(shell))
-        scroll.setWidget(image)
-        layout.addWidget(scroll, 1)
+        self._source_pixmap = _shell_pixmap(shell)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(False)
+        self._scroll.setAlignment(Qt.AlignCenter)
+        self._image = QLabel()
+        self._image.setAlignment(Qt.AlignCenter)
+        self._scroll.setWidget(self._image)
+        layout.addWidget(self._scroll, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
         open_button = buttons.addButton("Open Builder", QDialogButtonBox.AcceptRole)
         open_button.clicked.connect(self._open_builder)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._fit_image_to_viewport()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit_image_to_viewport()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_image_to_viewport()
+
+    def _fit_image_to_viewport(self) -> None:
+        """Fit only the display copy; keep the original Pixmap untouched."""
+        if self._source_pixmap.isNull():
+            self._image.clear()
+            return
+        viewport = self._scroll.viewport().size()
+        if viewport.width() <= 0 or viewport.height() <= 0:
+            return
+        display = self._source_pixmap
+        if display.width() > viewport.width() or display.height() > viewport.height():
+            display = display.scaled(
+                viewport,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        self._image.setPixmap(display)
+        self._image.setFixedSize(display.size())
 
     def _open_builder(self) -> None:
         self.builder_requested.emit(self.shell.key)
@@ -218,7 +283,7 @@ class TableShellGalleryDialog(QDialog):
         categories = QHBoxLayout()
         categories.setSpacing(6)
         self.category_buttons: dict[str, QPushButton] = {}
-        for category in ("All", "Summary", "Safety"):
+        for category in ("All", "Summary", "Safety", "Categorical", "Continuous"):
             button = QPushButton(category)
             button.setCheckable(True)
             button.clicked.connect(lambda _checked, value=category: self._select_category(value))
@@ -260,8 +325,8 @@ class TableShellGalleryDialog(QDialog):
         query = self.search.text().strip().casefold()
         visible = []
         for shell in TABLE_SHELLS:
-            text = " ".join((shell.title, shell.description, shell.category)).casefold()
-            if self._category != "All" and shell.category != self._category:
+            text = f"{shell.title} {shell.description} {' '.join(shell.all_tags)}".casefold()
+            if self._category != "All" and self._category not in shell.all_tags:
                 continue
             if query and query not in text:
                 continue

@@ -4,7 +4,6 @@ import importlib.util
 import os
 import unittest
 
-
 PYSIDE_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 
 
@@ -36,6 +35,16 @@ class TableShellGalleryTests(unittest.TestCase):
         gallery.search.clear()
         gallery.category_buttons["Safety"].click()
         self.assertEqual(gallery.visible_shell_keys(), ("ae_table",))
+        gallery.category_buttons["Categorical"].click()
+        self.assertEqual(
+            gallery.visible_shell_keys(),
+            ("categorical", "rule_based", "ae_table"),
+        )
+        gallery.category_buttons["Continuous"].click()
+        self.assertEqual(
+            gallery.visible_shell_keys(),
+            ("proc_means_vertical", "change_from_baseline"),
+        )
         gallery.close()
         self.application.processEvents()
 
@@ -60,6 +69,43 @@ class TableShellGalleryTests(unittest.TestCase):
         open_button.click()
         self.assertEqual(requests, ["proc_means_vertical"])
         gallery.close()
+        self.application.processEvents()
+
+    def test_preview_fits_image_to_window_without_replacing_source(self) -> None:
+        from clinical_data_viewer.ui.table_shell_gallery import (
+            TABLE_SHELLS,
+            _shell_pixmap,
+            _ShellPreviewDialog,
+        )
+
+        preview = _ShellPreviewDialog(TABLE_SHELLS[0])
+        source_size = _shell_pixmap(TABLE_SHELLS[0]).size()
+        self.assertLess(source_size.height(), 1233)
+        preview.resize(420, 320)
+        preview.show()
+        self.application.processEvents()
+
+        small_display = preview._image.pixmap()
+        self.assertIsNotNone(small_display)
+        assert small_display is not None
+        self.assertLessEqual(
+            small_display.width(), preview._scroll.viewport().width()
+        )
+        self.assertLessEqual(
+            small_display.height(), preview._scroll.viewport().height()
+        )
+        self.assertEqual(preview._source_pixmap.size(), source_size)
+
+        small_size = small_display.size()
+        preview.resize(1200, 900)
+        self.application.processEvents()
+        large_display = preview._image.pixmap()
+        self.assertIsNotNone(large_display)
+        assert large_display is not None
+        self.assertGreater(large_display.width(), small_size.width())
+        self.assertGreater(large_display.height(), small_size.height())
+        self.assertEqual(preview._source_pixmap.size(), source_size)
+        preview.close()
         self.application.processEvents()
 
     def test_missing_preview_uses_placeholder_and_existing_preview_loads(self) -> None:
