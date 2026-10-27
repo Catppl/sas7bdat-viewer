@@ -4,7 +4,6 @@ import unittest
 from importlib.resources import files
 from pathlib import Path
 
-
 SHELL_ASSETS = (
     (
         "change-from-baseline-horizontal-shell.docx",
@@ -15,6 +14,11 @@ SHELL_ASSETS = (
         "proc-means-vertical-shell.docx",
         "proc_means_vertical.docx",
         "proc_means_vertical.png",
+    ),
+    (
+        "proc-means-rows-shell.docx",
+        "proc_means_rows.docx",
+        "proc_means_rows.png",
     ),
 )
 

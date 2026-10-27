@@ -108,6 +108,32 @@ class TableShellGalleryTests(unittest.TestCase):
         preview.close()
         self.application.processEvents()
 
+    def test_vertical_preview_navigates_between_shell_pages(self) -> None:
+        from clinical_data_viewer.ui.table_shell_gallery import (
+            TABLE_SHELLS,
+            _ShellPreviewDialog,
+        )
+
+        preview = _ShellPreviewDialog(TABLE_SHELLS[0])
+        self.assertEqual(len(preview._source_pixmaps), 2)
+        self.assertEqual(preview._page_label.text(), "Page 1 of 2")
+        self.assertFalse(preview._previous_button.isEnabled())
+        self.assertTrue(preview._next_button.isEnabled())
+
+        first_size = preview._source_pixmap.size()
+        preview._next_button.click()
+        self.assertEqual(preview._page_label.text(), "Page 2 of 2")
+        self.assertTrue(preview._previous_button.isEnabled())
+        self.assertFalse(preview._next_button.isEnabled())
+        self.assertNotEqual(preview._source_pixmap.size(), first_size)
+
+        preview._previous_button.click()
+        self.assertEqual(preview._page_label.text(), "Page 1 of 2")
+        self.assertFalse(preview._previous_button.isEnabled())
+        preview.close()
+        preview.deleteLater()
+        self.application.processEvents()
+
     def test_missing_preview_uses_placeholder_and_existing_preview_loads(self) -> None:
         from clinical_data_viewer.ui.table_shell_gallery import TableShellGalleryDialog
 
@@ -120,6 +146,7 @@ class TableShellGalleryTests(unittest.TestCase):
         self.assertFalse(gallery._cards[1].preview.pixmap().isNull())
         self.assertTrue(gallery._cards[0].shell.preview_path.endswith("proc_means_vertical.png"))
         gallery.close()
+        gallery.deleteLater()
         self.application.processEvents()
 
 

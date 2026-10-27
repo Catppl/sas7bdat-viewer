@@ -30,10 +30,17 @@ class TableShell:
     category: str
     preview_path: str | None = None
     tags: tuple[str, ...] = ()
+    preview_paths: tuple[str, ...] = ()
 
     @property
     def all_tags(self) -> tuple[str, ...]:
         return (self.category, *self.tags)
+
+    @property
+    def all_preview_paths(self) -> tuple[str, ...]:
+        if self.preview_paths:
+            return self.preview_paths
+        return (self.preview_path,) if self.preview_path else ()
 
 
 TABLE_SHELLS = (
@@ -44,6 +51,10 @@ TABLE_SHELLS = (
         "Summary",
         "clinical_data_viewer/assets/shells/proc_means_vertical.png",
         ("Continuous",),
+        (
+            "clinical_data_viewer/assets/shells/proc_means_vertical.png",
+            "clinical_data_viewer/assets/shells/proc_means_rows.png",
+        ),
     ),
     TableShell(
         "change_from_baseline",
@@ -103,6 +114,17 @@ def _shell_pixmap(shell: TableShell) -> QPixmap:
         if path.exists():
             return _trim_whitespace(QPixmap(str(path)))
     return _placeholder_pixmap()
+
+
+def _shell_pixmaps(shell: TableShell) -> tuple[QPixmap, ...]:
+    pixmaps = []
+    for preview_path in shell.all_preview_paths:
+        path = resource_path(preview_path)
+        if path.exists():
+            pixmap = _trim_whitespace(QPixmap(str(path)))
+            if not pixmap.isNull():
+                pixmaps.append(pixmap)
+    return tuple(pixmaps) or (_placeholder_pixmap(),)
 
 
 def _trim_whitespace(pixmap: QPixmap, margin: int = 16) -> QPixmap:
@@ -204,7 +226,9 @@ class _ShellPreviewDialog(QDialog):
         description.setStyleSheet("color: #667085;")
         layout.addWidget(description)
 
-        self._source_pixmap = _shell_pixmap(shell)
+        self._source_pixmaps = _shell_pixmaps(shell)
+        self._page_index = 0
+        self._source_pixmap = self._source_pixmaps[0]
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(False)
         self._scroll.setAlignment(Qt.AlignCenter)
@@ -213,11 +237,26 @@ class _ShellPreviewDialog(QDialog):
         self._scroll.setWidget(self._image)
         layout.addWidget(self._scroll, 1)
 
+        navigation = QHBoxLayout()
+        self._previous_button = QPushButton("Previous")
+        self._previous_button.clicked.connect(lambda: self._set_page(self._page_index - 1))
+        navigation.addWidget(self._previous_button)
+        navigation.addStretch(1)
+        self._page_label = QLabel()
+        self._page_label.setAlignment(Qt.AlignCenter)
+        navigation.addWidget(self._page_label)
+        navigation.addStretch(1)
+        self._next_button = QPushButton("Next")
+        self._next_button.clicked.connect(lambda: self._set_page(self._page_index + 1))
+        navigation.addWidget(self._next_button)
+        layout.addLayout(navigation)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
         open_button = buttons.addButton("Open Builder", QDialogButtonBox.AcceptRole)
         open_button.clicked.connect(self._open_builder)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._update_page_controls()
         self._fit_image_to_viewport()
 
     def showEvent(self, event) -> None:
@@ -245,6 +284,20 @@ class _ShellPreviewDialog(QDialog):
             )
         self._image.setPixmap(display)
         self._image.setFixedSize(display.size())
+
+    def _set_page(self, index: int) -> None:
+        if not 0 <= index < len(self._source_pixmaps):
+            return
+        self._page_index = index
+        self._source_pixmap = self._source_pixmaps[index]
+        self._update_page_controls()
+        self._fit_image_to_viewport()
+
+    def _update_page_controls(self) -> None:
+        page_count = len(self._source_pixmaps)
+        self._page_label.setText(f"Page {self._page_index + 1} of {page_count}")
+        self._previous_button.setEnabled(self._page_index > 0)
+        self._next_button.setEnabled(self._page_index < page_count - 1)
 
     def _open_builder(self) -> None:
         self.builder_requested.emit(self.shell.key)
