@@ -115,7 +115,7 @@ class ProcMeansVerticalResultWriter:
             proc_means_vertical_drilldown_columns=tuple(
                 variable.name
                 for variable in self.variables
-                if variable.name not in {"ITEM", "STATISTIC"}
+                if variable.name not in {"GROUP", "ITEM", "STATISTIC"}
             ),
         )
         return DatasetHandle(

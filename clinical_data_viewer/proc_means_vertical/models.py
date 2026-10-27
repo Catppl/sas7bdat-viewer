@@ -23,24 +23,36 @@ class ProcMeansVerticalConfig:
     statistic_decimals: tuple[tuple[str, int], ...] = ()
     confidence: float = 0.95
     base_decimals: tuple[tuple[str, int | None], ...] = ()
+    output_layout: str = "columns"
+    row_group_variables: tuple[str, ...] = ()
 
     def validate(self, metadata: DatasetMetadata, population: DatasetMetadata | None = None) -> None:
         if not self.analysis_variables:
             raise ValueError("Select at least one Analysis Variable.")
         if not self.statistics:
             raise ValueError("Select at least one statistic.")
+        if self.output_layout not in {"columns", "rows"}:
+            raise ValueError("Output layout must be Groups as Columns or Groups as Rows.")
         if not 0 < self.confidence < 1:
             raise ValueError("Confidence level must be between 0 and 1.")
         known = {variable.name.casefold(): variable for variable in metadata.variables}
         if "usubjid" not in known:
             raise ValueError("USUBJID is required for PROC MEANS Table Builder (Vertical).")
-        requested = (*self.analysis_variables, *self.group_variables)
+        requested = (
+            *self.analysis_variables,
+            *self.group_variables,
+            *self.row_group_variables,
+        )
         unknown = [name for name in requested if name.casefold() not in known]
         if unknown:
             raise ValueError("Unknown variables: " + ", ".join(unknown))
         duplicate_names = [name.casefold() for name in requested]
         if len(duplicate_names) != len(set(duplicate_names)):
-            raise ValueError("Analysis and Group Variables contain duplicates.")
+            raise ValueError("Analysis, column-group, and row-group variables contain duplicates.")
+        if self.output_layout == "rows" and not self.row_group_variables:
+            raise ValueError("Select at least one Row Group Variable for Groups as Rows.")
+        if self.output_layout == "columns" and self.row_group_variables:
+            raise ValueError("Row Group Variables require the Groups as Rows layout.")
         analysis_names = {name.casefold() for name in self.analysis_variables}
         unknown_labels = [
             name for name, label in self.item_labels

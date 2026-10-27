@@ -6,13 +6,14 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
-    QHeaderView,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
@@ -39,6 +40,8 @@ class ProcMeansVerticalBuilderSelection:
     population_filter_text: str
     item_labels_text: str
     include_total: bool
+    output_layout: str = "columns"
+    row_group_variables: tuple[str, ...] = ()
 
 
 class ProcMeansVerticalBuilder(QWidget):
@@ -99,10 +102,27 @@ class ProcMeansVerticalBuilder(QWidget):
         self.base_decimal_table.setMinimumWidth(0)
         layout.addWidget(self.base_decimal_table)
 
-        layout.addWidget(QLabel("Group Variables (Treatment / Visit)"))
+        layout.addWidget(QLabel("Column Group Variables (Treatment / other optional groups)"))
         self.group_variables = VariableTokenEditor("Type a variable and press Enter")
         self.group_variables.validation_error.connect(self.validation_error)
         layout.addWidget(self.group_variables)
+
+        self.layout_box = QGroupBox("Output Layout")
+        layout_options = QVBoxLayout(self.layout_box)
+        self.groups_as_columns = QRadioButton("Groups as Columns")
+        self.groups_as_rows = QRadioButton("Groups as Rows")
+        self.groups_as_columns.setChecked(True)
+        self.groups_as_columns.toggled.connect(self._update_layout_controls)
+        layout_options.addWidget(self.groups_as_columns)
+        layout_options.addWidget(self.groups_as_rows)
+        layout.addWidget(self.layout_box)
+
+        layout.addWidget(QLabel("Row Group Variables (e.g. PARAMCD / AVISIT)"))
+        self.row_group_variables = VariableTokenEditor(
+            "Type a row-group variable and press Enter"
+        )
+        self.row_group_variables.validation_error.connect(self.validation_error)
+        layout.addWidget(self.row_group_variables)
 
         layout.addWidget(QLabel("Analysis Treatment Variable (optional)"))
         self.treatment_variable = VariableTokenEditor("Select the treatment group variable")
@@ -202,7 +222,12 @@ class ProcMeansVerticalBuilder(QWidget):
         self._source_text = source_text
         self._source_kind = source_kind
         self.source_label.setText(f"Source: {source_text}" if metadata else "Select a fully loaded source dataset.")
-        for editor in (self.analysis_variables, self.group_variables, self.treatment_variable):
+        for editor in (
+            self.analysis_variables,
+            self.group_variables,
+            self.row_group_variables,
+            self.treatment_variable,
+        ):
             editor.set_metadata(metadata, preserve=previous)
         if metadata is not None and not previous:
             self.filter_editor.setText(filter_text)
@@ -268,6 +293,7 @@ class ProcMeansVerticalBuilder(QWidget):
     def selection(self) -> ProcMeansVerticalBuilderSelection | None:
         analysis = self.analysis_variables.selected_variables()
         groups = self.group_variables.selected_variables()
+        row_groups = self.row_group_variables.selected_variables()
         treatment = self.treatment_variable.selected_variables()
         population_treatment = self.population_treatment_variable.selected_variables()
         statistics = self._selected_statistics()
@@ -295,7 +321,30 @@ class ProcMeansVerticalBuilder(QWidget):
             self.population_filter_editor.text().strip(),
             self.item_labels.toPlainText().strip(),
             self.include_total.isChecked(),
+            "rows" if self.groups_as_rows.isChecked() else "columns",
+            row_groups,
         )
+
+    def _update_layout_controls(self) -> None:
+        rows = self.groups_as_rows.isChecked()
+        self.row_group_variables.setEnabled(rows and self._metadata is not None and not self._busy)
+        codegen_available = (
+            self._metadata is not None
+            and not self._busy
+            and self._source_kind != "merge"
+            and not rows
+        )
+        self.sas_code_button.setEnabled(codegen_available)
+        if rows:
+            self.sas_code_button.setToolTip(
+                "SAS code generation for the Groups as Rows layout is not available yet."
+            )
+        elif self._source_kind == "merge":
+            self.sas_code_button.setToolTip(
+                "SAS code generation for merged sources is not available yet."
+            )
+        else:
+            self.sas_code_button.setToolTip("")
 
     def _run(self) -> None:
         selection = self.selection()
@@ -311,6 +360,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self.analysis_variables.clear()
         self.base_decimal_table.setRowCount(0)
         self.group_variables.clear()
+        self.row_group_variables.clear()
         self.treatment_variable.clear()
         self.population_treatment_variable.clear()
         self.filter_editor.clear()
@@ -319,6 +369,7 @@ class ProcMeansVerticalBuilder(QWidget):
         self._source_text = ""
         self._source_kind = "sas"
         self._population_source_text = ""
+        self.groups_as_columns.setChecked(True)
         self.status.clear()
         self.cleared.emit()
 
@@ -339,7 +390,13 @@ class ProcMeansVerticalBuilder(QWidget):
             else ""
         )
         self.settings_button.setEnabled(not self._busy)
-        for editor in (self.analysis_variables, self.group_variables, self.treatment_variable, self.population_treatment_variable):
+        for editor in (
+            self.analysis_variables,
+            self.group_variables,
+            self.row_group_variables,
+            self.treatment_variable,
+            self.population_treatment_variable,
+        ):
             editor.setEnabled(enabled)
         self.statistics.setEnabled(enabled)
         self.stat_up.setEnabled(enabled)
@@ -348,4 +405,5 @@ class ProcMeansVerticalBuilder(QWidget):
         self.population_filter_editor.setEnabled(enabled)
         self.item_labels.setEnabled(enabled)
         self.include_total.setEnabled(enabled)
+        self._update_layout_controls()
 

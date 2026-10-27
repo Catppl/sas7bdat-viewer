@@ -8,7 +8,6 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 from ...resources import resource_path
 from .filter_renderer import sas_filter_expression, sas_name, sas_string
 
-
 _STATISTICS = {
     "subjects": "subjects",
     "n": "n",
@@ -113,6 +112,10 @@ class SasProcMeansVerticalGenerator:
         display = configuration.get("display")
         if not isinstance(display, dict):
             raise ValueError("display is required in the vertical PROC MEANS configuration.")
+        if display.get("layout", "columns") == "rows":
+            raise ValueError(
+                "SAS generation for the Groups as Rows layout is not available yet."
+            )
         if display.get("rounding") != "half_up":
             raise ValueError("Only half_up rounding is supported by the vertical SAS generator.")
         maximum_decimals = int(display.get("maximum_decimals", 4))

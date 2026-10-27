@@ -73,6 +73,13 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "merged vertical"):
             SasProcMeansVerticalGenerator().generate(configuration)
 
+    def test_generator_rejects_groups_as_rows_until_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = self._configuration(Path(temporary))
+        configuration["display"]["layout"] = "rows"
+        with self.assertRaisesRegex(ValueError, "Groups as Rows"):
+            SasProcMeansVerticalGenerator().generate(configuration)
+
     def test_generator_renders_filter_ast(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             configuration = self._configuration(Path(temporary))

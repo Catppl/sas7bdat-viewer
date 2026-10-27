@@ -57,7 +57,129 @@ def make_vertical_handle(root: Path, name: str, rows) -> DatasetHandle:
     )
 
 
+def make_vertical_rows_handle(root: Path, name: str, rows) -> DatasetHandle:
+    variables = (
+        VariableMetadata("USUBJID"),
+        VariableMetadata("PARAMCD"),
+        VariableMetadata("AVISIT"),
+        VariableMetadata("TRT01A"),
+        VariableMetadata("AVAL", kind="numeric"),
+    )
+    directory = root / name.casefold()
+    directory.mkdir()
+    database = directory / "dataset.sqlite"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            "CREATE TABLE dataset ("
+            "_source_row INTEGER PRIMARY KEY, USUBJID TEXT, PARAMCD TEXT, "
+            "AVISIT TEXT, TRT01A TEXT, AVAL REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO dataset (USUBJID, PARAMCD, AVISIT, TRT01A, AVAL) "
+            "VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        connection.commit()
+    source_path = root / f"{name.casefold()}.sas7bdat"
+    source_path.touch()
+    return DatasetHandle(
+        source_path,
+        directory / source_path.name,
+        database,
+        DatasetMetadata(name, len(rows), variables),
+        len(rows),
+        True,
+    )
+
+
 class ProcMeansVerticalTests(unittest.TestCase):
+    def test_groups_as_rows_materialize_context_as_result_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (
+                    ("S1", "Baseline", 1.0, 1.0),
+                    ("S2", "Baseline", 2.0, 2.0),
+                    ("S3", "Week 1", 3.0, 3.0),
+                ),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                row_group_variables=("TRT01A",),
+                statistics=("n", "mean"),
+                output_layout="rows",
+            )
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                rows = connection.execute(
+                    'SELECT "GROUP", "ITEM", "STATISTIC", "TOTAL" '
+                    "FROM dataset ORDER BY _source_row"
+                ).fetchall()
+            self.assertEqual(
+                rows,
+                [
+                    ("Baseline", "AVAL", "n", "2"),
+                    ("Baseline", "AVAL", "Mean", "2"),
+                    ("Week 1", "AVAL", "n", "1"),
+                    ("Week 1", "AVAL", "Mean", "3"),
+                ],
+            )
+            cell = lookup_cell(result, 1, "TOTAL")
+            self.assertIsNotNone(cell)
+            assert cell is not None
+            self.assertEqual(cell.group_values, ("Baseline",))
+            self.assertIn(
+                'TRT01A = "Baseline"',
+                build_cell_where_text(source.metadata, config, cell),
+            )
+            assert result.configuration_path is not None
+            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            self.assertEqual(configuration["display"]["layout"], "rows")
+            self.assertEqual(configuration["variables"]["row_group"], ["TRT01A"])
+
+    def test_rows_layout_keeps_group_values_as_result_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_rows_handle(
+                root,
+                "ADLB",
+                (
+                    ("S1", "ALB", "Baseline", "A", 1.0),
+                    ("S2", "ALB", "Baseline", "A", 3.0),
+                    ("S3", "ALB", "Week 1", "B", 4.0),
+                    ("S4", "ALB", "Week 1", "A", 5.0),
+                ),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                row_group_variables=("PARAMCD", "AVISIT"),
+                statistics=("n", "mean"),
+                output_layout="rows",
+            )
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                rows = connection.execute(
+                    'SELECT "GROUP", "ITEM", "STATISTIC", "COL1", "COL2", "TOTAL" '
+                    "FROM dataset ORDER BY _source_row"
+                ).fetchall()
+            self.assertEqual(
+                rows,
+                [
+                    ("ALB / Baseline", "AVAL", "n", "2", "0", "2"),
+                    ("ALB / Baseline", "AVAL", "Mean", "2", "—", "2"),
+                    ("ALB / Week 1", "AVAL", "n", "1", "1", "2"),
+                    ("ALB / Week 1", "AVAL", "Mean", "5", "4", "5"),
+                ],
+            )
+
     def test_result_cells_map_to_group_and_total_source_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -201,6 +323,7 @@ class ProcMeansVerticalTests(unittest.TestCase):
             assert result.configuration_path is not None
             configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
             self.assertEqual(configuration["type"], "proc_means_vertical")
+            self.assertEqual(configuration["display"]["layout"], "vertical")
             self.assertEqual(configuration["item"]["labels"]["aval"], "Total Cholesterol")
 
     def test_population_missing_treatment_blocks_run(self) -> None:
@@ -245,6 +368,28 @@ class ProcMeansVerticalTests(unittest.TestCase):
                 base_decimals=(("AVAL", 1), ("aval", 2)),
             )
             with self.assertRaisesRegex(ValueError, "only once"):
+                config.validate(source.metadata)
+
+    def test_rows_layout_requires_row_group_variables(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_vertical_handle(
+                Path(temporary), "ADLB", (("S1", "A", 1.0, 1.0),)
+            )
+            config = ProcMeansVerticalConfig(
+                ("AVAL",), output_layout="rows"
+            )
+            with self.assertRaisesRegex(ValueError, "Row Group Variable"):
+                config.validate(source.metadata)
+
+    def test_columns_layout_rejects_row_group_variables(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_vertical_handle(
+                Path(temporary), "ADLB", (("S1", "A", 1.0, 1.0),)
+            )
+            config = ProcMeansVerticalConfig(
+                ("AVAL",), row_group_variables=("TRT01A",)
+            )
+            with self.assertRaisesRegex(ValueError, "Groups as Rows"):
                 config.validate(source.metadata)
 
     def test_total_subject_n_is_recomputed_across_treatment_groups(self) -> None:
@@ -363,6 +508,16 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         builder.run_requested.connect(run_requests.append)
         builder.sas_code_requested.connect(sas_requests.append)
         builder.analysis_variables.set_variables(("AVAL",))
+        builder.groups_as_rows.click()
+        builder.row_group_variables.set_variables(("TRT01A",))
+        row_selection = builder.selection()
+        self.assertIsNotNone(row_selection)
+        assert row_selection is not None
+        self.assertEqual(row_selection.output_layout, "rows")
+        self.assertEqual(row_selection.row_group_variables, ("TRT01A",))
+        self.assertFalse(builder.sas_code_button.isEnabled())
+        builder.groups_as_columns.click()
+        self.assertTrue(builder.sas_code_button.isEnabled())
         self.assertEqual(builder.base_decimal_table.rowCount(), 1)
         decimal_combo = builder.base_decimal_table.cellWidget(0, 1)
         self.assertIsNotNone(decimal_combo)

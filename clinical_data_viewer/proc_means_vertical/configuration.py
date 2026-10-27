@@ -65,6 +65,7 @@ def build_proc_means_vertical_configuration(
         "variables": {
             "analysis": list(config.analysis_variables),
             "group": list(config.group_variables),
+            "row_group": list(config.row_group_variables),
             "treatment": config.treatment_variable or None,
             "population_treatment": config.population_treatment_variable or None,
         },
@@ -74,7 +75,9 @@ def build_proc_means_vertical_configuration(
         "statistics": list(config.statistics),
         "total": {"enabled": config.include_total, "method": "recompute"},
         "display": {
-            "layout": "vertical",
+            # Keep the existing JSON value for the original column layout;
+            # ``rows`` is the new opt-in layout.
+            "layout": "rows" if config.output_layout == "rows" else "vertical",
             "rounding": "half_up",
             "maximum_decimals": 4,
             "base_decimals": dict(config.base_decimals),

@@ -274,6 +274,8 @@ class ProcMeansVerticalController(AnalysisModuleController):
                 tuple(self._settings.proc_means_decimal_offsets.items()),
                 self._settings.proc_means_confidence,
                 selection.base_decimals,
+                selection.output_layout,
+                selection.row_group_variables,
             )
             config.validate(source.handle.metadata, population.handle.metadata if population else None)
         except ValueError as error:

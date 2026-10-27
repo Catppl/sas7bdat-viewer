@@ -49,10 +49,21 @@ def _drilldown_context(
     cell: ProcMeansVerticalCell,
 ) -> tuple[ProcMeansVerticalConfig, dict[str, object]]:
     if cell.group_values is None:
-        return replace(config, group_variables=()), {}
-    if len(cell.group_values) != len(config.group_variables):
+        return replace(config, group_variables=(), row_group_variables=()), {}
+    row_variables = tuple(config.row_group_variables)
+    all_variables = (*row_variables, *config.group_variables)
+    if len(cell.group_values) == len(all_variables):
+        selected_variables = all_variables
+    elif len(cell.group_values) == len(row_variables):
+        selected_variables = row_variables
+    else:
         raise ValueError("The vertical PROC MEANS result group mapping is invalid.")
-    return config, dict(zip(config.group_variables, cell.group_values, strict=True))
+    drilldown_config = replace(
+        config,
+        group_variables=selected_variables,
+        row_group_variables=(),
+    )
+    return drilldown_config, dict(zip(selected_variables, cell.group_values, strict=True))
 
 
 def build_cell_filter(
