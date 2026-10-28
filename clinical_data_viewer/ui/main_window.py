@@ -1722,9 +1722,10 @@ class MainWindow(QMainWindow):
 
     def show_proc_means_vertical_builder(self) -> None:
         self.analysis_controller.show_proc_means_vertical_builder()
-        # The vertical Builder is intentionally compact; its actions are
-        # arranged in two rows so the dock does not need the standard width.
-        compact_width = 180
+        # Keep the vertical Builder to roughly one quarter of the main
+        # window.  This is wide enough for the complete form without a
+        # horizontal scrollbar, while preserving most of the data-view area.
+        compact_width = max(320, min(400, self.width() // 4))
         self.analysis_dock.setMinimumWidth(compact_width)
         self.analysis_dock.resize(compact_width, self.analysis_dock.height())
         self.analysis_dock.show()

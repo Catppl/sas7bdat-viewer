@@ -67,6 +67,46 @@ class UiSmokeTests(unittest.TestCase):
                 window.close()
                 application.processEvents()
 
+    def test_vertical_proc_means_builder_uses_compact_responsive_width(self) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QScrollArea
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.temp_manager import TempManager
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow(
+                TestSettings(),
+                TempManager(root / "temp"),
+                FilterHistory(root / "history.sqlite"),
+            )
+            try:
+                window.resize(1280, 790)
+                window.show()
+                window.show_proc_means_vertical_builder()
+                application.processEvents()
+
+                self.assertTrue(window.analysis_dock.isVisible())
+                self.assertGreaterEqual(window.analysis_dock.width(), 320)
+                self.assertLessEqual(window.analysis_dock.width(), 400)
+                scroll = window.analysis_panel.proc_means_vertical_builder.findChild(
+                    QScrollArea
+                )
+                self.assertIsNotNone(scroll)
+                assert scroll is not None
+                self.assertEqual(scroll.horizontalScrollBar().maximum(), 0)
+            finally:
+                window.close()
+                application.processEvents()
+
     def test_row_comparison_persists_until_replaced_or_source_tab_closes(self) -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication

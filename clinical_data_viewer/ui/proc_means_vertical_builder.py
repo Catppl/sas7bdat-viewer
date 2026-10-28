@@ -70,7 +70,10 @@ class ProcMeansVerticalBuilder(QWidget):
         content = QWidget()
         content.setObjectName("procMeansVerticalBuilderContent")
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(6, 6, 6, 6)
+        # Keep the form usable at the compact Analysis Dock width.  The
+        # surrounding dock supplies the visual breathing room; smaller
+        # content margins avoid an unnecessary horizontal scrollbar.
+        layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(5)
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
