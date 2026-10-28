@@ -85,6 +85,36 @@ class BaselineCharacteristicsBuilderTests(unittest.TestCase):
         self.assertEqual(builder.items.rowCount(), 1)
         self.assertEqual(builder.current_filter_text(), 'SEX = "F"')
 
+    def test_population_dataset_and_filter_are_part_of_selection(self) -> None:
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.baseline_characteristics_builder import (
+            BaselineCharacteristicsBuilder,
+        )
+
+        builder = BaselineCharacteristicsBuilder()
+        source_metadata = DatasetMetadata(
+            "ADLB",
+            1,
+            (VariableMetadata("USUBJID"), VariableMetadata("SEX")),
+        )
+        population_metadata = DatasetMetadata(
+            "ADSL",
+            1,
+            (VariableMetadata("USUBJID"), VariableMetadata("TRT01A")),
+        )
+        builder.set_dataset(source_metadata, "adlb.sas7bdat")
+        builder.set_population_dataset(
+            population_metadata, "adsl.sas7bdat", 'SAFFL = "Y"'
+        )
+        builder.population_treatment_variable.setCurrentIndex(
+            builder.population_treatment_variable.findData("TRT01A")
+        )
+        builder.population_filter_editor.setText('SAFFL = "Y"')
+        selection = builder.selection()
+        self.assertIsNone(selection.population_dataset)
+        self.assertEqual(selection.population_treatment_variable, "TRT01A")
+        self.assertEqual(selection.population_filter_text, 'SAFFL = "Y"')
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -373,6 +373,15 @@ class ProcMeansVerticalController(AnalysisModuleController):
                 config,
                 population_tab.handle if population_tab else None,
             )
+            configuration["_runtime"] = {
+                "population_levels": list(
+                    self._engine.resolve_population_levels(
+                        source_tab.handle,
+                        config,
+                        population_tab.handle if population_tab else None,
+                    )
+                )
+            }
             code = self._sas_generator.generate(configuration)
         except (KeyError, TypeError, ValueError) as error:
             QMessageBox.critical(

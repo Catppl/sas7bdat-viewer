@@ -38,6 +38,7 @@ from ._base import AnalysisModuleController
 class BaselineCharacteristicsResultContext:
     source: DatasetHandle
     config: BaselineCharacteristicsConfig
+    population: DatasetHandle | None = None
 
 
 class BaselineCharacteristicsController(AnalysisModuleController):
@@ -54,6 +55,7 @@ class BaselineCharacteristicsController(AnalysisModuleController):
         )
         self._query_builder = CategoricalQueryBuilder(temp_manager)
         self._source: DatasetTab | None = None
+        self._population: DatasetTab | None = None
         self._input_tabs: set[DatasetTab] = set()
         self._results: dict[DatasetTab, BaselineCharacteristicsResultContext] = {}
 
@@ -63,12 +65,23 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             return None
         return self._source
 
+    @property
+    def population(self) -> DatasetTab | None:
+        if self._population is None or not self._host.is_open_dataset_tab(self._population):
+            return None
+        return self._population
+
     def is_input_tab(self, tab: object) -> bool:
         return tab in self._input_tabs
 
     def take_result_release_paths(self, tab: object) -> tuple[Path, ...] | None:
         context = self._results.pop(tab, None)
-        return None if context is None else (context.source.temporary_path.parent,)
+        if context is None:
+            return None
+        paths = [context.source.temporary_path.parent]
+        if context.population is not None:
+            paths.append(context.population.temporary_path.parent)
+        return tuple(dict.fromkeys(paths))
 
     def refresh_sources(self, datasets=None) -> None:
         available = (
@@ -82,8 +95,15 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             self._set_dataset(None)
         elif selected is not None:
             self._set_dataset(selected)
+        if self._population is not None and self.population is None:
+            self._population = None
+            self._set_population_dataset(None)
         self._panel.baseline_characteristics_builder.set_source_datasets(
             available, selected
+        )
+        population = self.population
+        self._panel.baseline_characteristics_builder.set_population_datasets(
+            available, population
         )
 
     def select_source(self, tab) -> None:
@@ -95,6 +115,16 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             return
         self._source = tab
         self._set_dataset(tab)
+
+    def select_population(self, tab) -> None:
+        if tab is None:
+            self._population = None
+            self._set_population_dataset(None)
+            return
+        if not isinstance(tab, DatasetTab) or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+            return
+        self._population = tab
+        self._set_population_dataset(tab)
 
     def show_builder(self) -> None:
         self.refresh_sources()
@@ -109,7 +139,9 @@ class BaselineCharacteristicsController(AnalysisModuleController):
 
     def clear_source(self) -> None:
         self._source = None
+        self._population = None
         self._set_dataset(None)
+        self._set_population_dataset(None)
         self.refresh_sources()
 
     def source_reload_started(self, tab: DatasetTab) -> None:
@@ -144,6 +176,17 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             tab.handle.kind,
         )
 
+    def _set_population_dataset(self, tab: DatasetTab | None) -> None:
+        builder = self._panel.baseline_characteristics_builder
+        if tab is None:
+            builder.set_population_dataset(None, "")
+            return
+        builder.set_population_dataset(
+            tab.handle.metadata,
+            str(tab.handle.source_path),
+            tab.current_where_text(),
+        )
+
     def _context(self, selection: BaselineCharacteristicsBuilderSelection):
         tab = self.source
         if (
@@ -157,33 +200,53 @@ class BaselineCharacteristicsController(AnalysisModuleController):
                 "The Builder source is unavailable. Open a fully loaded source dataset first.",
             )
             return None
+        population = self.population
+        if population is None:
+            answer = QMessageBox.question(
+                self._parent_widget(),
+                "Population Dataset Not Selected",
+                "No Population Dataset is selected. Use the current Analysis Dataset to calculate Population N?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return None
         try:
             compiled = FilterEngine(tab.handle.metadata.variables).compile(
                 selection.filter_text
             )
+            population_filter = FilterEngine(
+                (population or tab).handle.metadata.variables
+            ).compile(selection.population_filter_text)
             config = BaselineCharacteristicsConfig(
                 selection.items,
                 compiled,
                 selection.filter_text,
                 selection.header_label,
                 treatment_variable=selection.treatment_variable,
+                population_treatment_variable=selection.population_treatment_variable,
+                population_filter=population_filter,
+                population_filter_text=selection.population_filter_text,
             )
-            config.validate(tab.handle.metadata)
+            config.validate(
+                tab.handle.metadata,
+                population.handle.metadata if population else None,
+            )
         except ValueError as error:
             QMessageBox.warning(
                 self._parent_widget(), "Baseline Characteristics", str(error)
             )
             return None
-        return tab, config
+        return tab, population, config
 
     def run(self, selection: BaselineCharacteristicsBuilderSelection) -> None:
         context = self._context(selection)
         if context is None:
             return
-        tab, config = context
+        tab, population, config = context
         source = tab.handle
         builder = self._panel.baseline_characteristics_builder
-        self._input_tabs = {tab}
+        self._input_tabs = {tab} | ({population} if population else set())
         builder.set_busy(
             True, "Calculating Baseline Characteristics in the background…"
         )
@@ -195,8 +258,10 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             )
             result_tab = self._host.create_analysis_result_tab(handle)
             self._host.retain_analysis_directory(source.temporary_path.parent)
+            if population is not None:
+                self._host.retain_analysis_directory(population.handle.temporary_path.parent)
             self._results[result_tab] = BaselineCharacteristicsResultContext(
-                source, config
+                source, config, population.handle if population else None
             )
             self._host.show_analysis_result_tab(
                 result_tab, "Baseline Characteristics Result"
@@ -211,7 +276,9 @@ class BaselineCharacteristicsController(AnalysisModuleController):
 
         self._host.submit_analysis_task(
             builder,
-            lambda worker: self._engine.run(source, config, worker.report),
+            lambda worker: self._engine.run(
+                source, config, worker.report, population.handle if population else None
+            ),
             completed,
             failed,
         )
@@ -222,7 +289,7 @@ class BaselineCharacteristicsController(AnalysisModuleController):
         context = self._context(selection)
         if context is None:
             return
-        tab, config = context
+        tab, population, config = context
         if tab.handle.kind != "sas":
             QMessageBox.warning(
                 self._parent_widget(),
@@ -232,7 +299,7 @@ class BaselineCharacteristicsController(AnalysisModuleController):
             return
         builder = self._panel.baseline_characteristics_builder
         source = tab.handle
-        self._input_tabs = {tab}
+        self._input_tabs = {tab} | ({population} if population else set())
         builder.set_busy(True, "Generating Baseline Characteristics SAS code…")
 
         def completed(code: str) -> None:
@@ -254,12 +321,28 @@ class BaselineCharacteristicsController(AnalysisModuleController):
 
         self._host.submit_analysis_task(
             builder,
-            lambda _worker: self._sas_generator.generate(
-                build_baseline_characteristics_configuration(source, config)
+            lambda _worker: self._generate_sas_code(
+                source, config, population.handle if population else None
             ),
             completed,
             failed,
         )
+
+    def _generate_sas_code(
+        self,
+        source: DatasetHandle,
+        config: BaselineCharacteristicsConfig,
+        population: DatasetHandle | None,
+    ) -> str:
+        configuration = build_baseline_characteristics_configuration(
+            source, config, population=population
+        )
+        configuration["_runtime"] = {
+            "population_levels": list(
+                self._engine.resolve_population_levels(source, config, population)
+            )
+        }
+        return self._sas_generator.generate(configuration)
 
     def open_long_result(self) -> None:
         tab = self._host.current_dataset_tab()

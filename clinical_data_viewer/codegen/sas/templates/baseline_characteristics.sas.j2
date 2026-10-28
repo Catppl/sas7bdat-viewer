@@ -17,8 +17,12 @@ proc sql noprint;
   from work._bc_source where missing({{ subject }});
   select count(*) - count(distinct {{ subject }}) into :_bc_duplicate_subject trimmed
   from work._bc_source;
-  select count(distinct {{ subject }}) into :_bc_header_n trimmed
-  from work._bc_source;
+  select count(distinct {{ subject }}) into :n1 trimmed
+{% if population_is_source %}  from work._bc_source;
+{% else %}  from {{ population.library }}.{{ population.member }}{% if population_where_expression %} where {{ population_where_expression }};{% else %};{% endif %}{% endif %}
+  select count(distinct {{ subject }}) into :nt trimmed
+{% if population_is_source %}  from work._bc_source;
+{% else %}  from {{ population.library }}.{{ population.member }}{% if population_where_expression %} where {{ population_where_expression }};{% else %};{% endif %}{% endif %}
 quit;
 
 %macro _bc_validate;
@@ -58,7 +62,7 @@ proc sql;
   create table work._bc_cat_{{ item.order }} as
   select level_value, min(sort_rank) as sort_rank,
          count(distinct {{ subject }}) as numerator,
-         &_bc_header_n as denominator,
+         &n1 as denominator,
          calculated numerator * 100 / calculated denominator as percent
   from work._bc_cat_source_{{ item.order }}
   group by level_value
@@ -101,7 +105,7 @@ data work._bc_item_{{ item.order }};
   set work._bc_stat_{{ item.order }};
   item_order={{ item.order }}; item_kind="continuous";
   variable={{ item.variable | sas_string }}; item_label={{ item.label | sas_string }};
-  unit=""; denominator=&_bc_header_n; numerator=n;
+  unit=""; denominator=&n1; numerator=n;
   row_order={{ item.order }}*100000; row_label=item_label;
   display_value=""; output;
 

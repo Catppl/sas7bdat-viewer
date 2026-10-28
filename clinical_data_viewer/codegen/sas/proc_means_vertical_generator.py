@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
@@ -42,6 +43,18 @@ def _sas_name(value: object) -> str:
 
 def _sas_filter(expression: dict[str, object] | None) -> str:
     return sas_filter_expression(expression) if expression else ""
+
+
+def _sas_literal(value: object, kind: str) -> str:
+    if kind == "character":
+        return sas_string(value)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(  # noqa: TRY004 - public configuration validation
+            "Numeric treatment levels must contain numeric values."
+        )
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return repr(value)
 
 
 def _reference(value: object, field: str) -> tuple[str, str]:
@@ -92,9 +105,9 @@ class SasProcMeansVerticalGenerator:
                 "SAS code generation for merged vertical PROC MEANS sources is not available yet."
             )
         input_format = str(input_block.get("format", "")).casefold()
-        if input_format not in {"sas7bdat", "xpt"}:
+        if input_format != "sas7bdat":
             raise ValueError(
-                f"Unsupported input format for SAS generation: {input_format}"
+                "Vertical PROC MEANS SAS generation requires a sas7bdat source."
             )
 
         variables = configuration.get("variable_metadata")
@@ -167,6 +180,15 @@ class SasProcMeansVerticalGenerator:
             for key, value in dict(display.get("statistic_decimals", {})).items()
         }
 
+        calculation = configuration.get("calculation")
+        calculation = calculation if isinstance(calculation, dict) else {}
+        confidence = float(calculation.get("confidence", 0.95))
+        if not 0 < confidence < 1:
+            raise ValueError("Confidence must be between 0 and 1.")
+        confidence_percent = (
+            format(Decimal(str(confidence)) * 100, "f").rstrip("0").rstrip(".")
+        )
+
         rows: list[dict[str, object]] = []
         consumed: set[str] = set()
         labels = {
@@ -202,16 +224,45 @@ class SasProcMeansVerticalGenerator:
             if statistic in consumed:
                 continue
             if statistic in {"q1", "q3"} and {"q1", "q3"}.issubset(statistics):
-                statistic_rows.append({"label": "Q1, Q3", "keys": ["q1", "q3"]})
+                statistic_rows.append(
+                    {
+                        "label": "Q1, Q3",
+                        "keys": ["q1", "q3"],
+                        "fixed_decimals": None,
+                    }
+                )
                 consumed.update({"q1", "q3"})
             elif statistic in {"min", "max"} and {"min", "max"}.issubset(statistics):
-                statistic_rows.append({"label": "Min, Max", "keys": ["min", "max"]})
+                statistic_rows.append(
+                    {
+                        "label": "Min, Max",
+                        "keys": ["min", "max"],
+                        "fixed_decimals": None,
+                    }
+                )
                 consumed.update({"min", "max"})
+            elif statistic in {"lclm", "uclm"} and {"lclm", "uclm"}.issubset(
+                statistics
+            ):
+                statistic_rows.append(
+                    {
+                        "label": f"{confidence_percent}% CI Mean",
+                        "keys": ["lclm", "uclm"],
+                        "fixed_decimals": 1,
+                    }
+                )
+                consumed.update({"lclm", "uclm"})
             else:
                 label = {"subjects": "N", "n": "n", "nmiss": "NMISS"}.get(
                     statistic, statistic.title()
                 )
-                statistic_rows.append({"label": label, "keys": [statistic]})
+                statistic_rows.append(
+                    {
+                        "label": label,
+                        "keys": [statistic],
+                        "fixed_decimals": None,
+                    }
+                )
                 consumed.add(statistic)
 
         groups = []
@@ -236,9 +287,9 @@ class SasProcMeansVerticalGenerator:
             population_input if isinstance(population_input, dict) else input_block
         )
         population_format = str(population_input.get("format", input_format)).casefold()
-        if population_format not in {"sas7bdat", "xpt"}:
+        if population_format != "sas7bdat":
             raise ValueError(
-                f"Unsupported population input format: {population_format}"
+                "Vertical PROC MEANS SAS generation requires a sas7bdat population source."
             )
 
         targets = configuration.get("targets")
@@ -265,16 +316,29 @@ class SasProcMeansVerticalGenerator:
             f"{population_library}.{population_member}", "targets.sas population"
         )
 
-        calculation = configuration.get("calculation")
-        calculation = calculation if isinstance(calculation, dict) else {}
-        confidence = float(calculation.get("confidence", 0.95))
-        if not 0 < confidence < 1:
-            raise ValueError("Confidence must be between 0 and 1.")
+        source_filter = _sas_filter(configuration.get("dataset_filter", {}).get("ast"))
+        population_filter = _sas_filter(population.get("filter", {}).get("ast"))
+        population_uses_source = population.get("input") is None
+        same_population_input = population_uses_source or (
+            population_library.casefold() == source_library.casefold()
+            and population_member.casefold() == source_member.casefold()
+            and population_format == input_format
+        )
+        reuse_analysis_data = population_uses_source or (
+            same_population_input and population_filter == source_filter
+        )
+        source_work_member = _safe_token(source_member)
+        if reuse_analysis_data:
+            population_work_member = source_work_member
+        else:
+            population_work_member = _safe_token(population_member)
+            if population_work_member == source_work_member:
+                population_work_member = _safe_token(f"{population_member}_pop")
 
         population_variables = population.get("variables")
         population_variables = (
             population_variables
-            if isinstance(population_variables, dict)
+            if isinstance(population_variables, dict) and population_variables
             else variable_metadata
         )
         treatment_name = str(variable_block.get("treatment") or "")
@@ -298,12 +362,57 @@ class SasProcMeansVerticalGenerator:
         population_treatment_meta = {
             str(name).casefold(): value for name, value in population_variables.items()
         }.get(population_treatment_name.casefold(), {})
+        source_treatment_kind = str(
+            source_treatment_meta.get("type", "character")
+        ).casefold()
+        population_treatment_kind = str(
+            population_treatment_meta.get("type", "character")
+        ).casefold()
+
+        runtime = configuration.get("_runtime")
+        runtime = runtime if isinstance(runtime, dict) else {}
+        population_levels = runtime.get("population_levels", [])
+        if not isinstance(population_levels, list | tuple):
+            raise ValueError(  # noqa: TRY004 - public configuration validation
+                "Runtime population levels must be a list."
+            )
+        population_counts: list[dict[str, object]] = []
+        if treatment_name:
+            if not population_levels:
+                raise ValueError(
+                    "No Population treatment levels were found in the current data."
+                )
+            for index, value in enumerate(population_levels, start=1):
+                if value is None:
+                    raise ValueError(
+                        "Population treatment levels cannot contain missing values."
+                    )
+                population_counts.append(
+                    {
+                        "macro": f"n{index}",
+                        "population_literal": _sas_literal(
+                            value, population_treatment_kind
+                        ),
+                        "source_literal": _sas_literal(value, source_treatment_kind),
+                    }
+                )
+            total_n_macro = "nt"
+        else:
+            population_counts.append(
+                {
+                    "macro": "n1",
+                    "population_literal": None,
+                    "source_literal": None,
+                }
+            )
+            total_n_macro = "n1"
 
         return {
             "version": 1,
             "source": {
                 "library": source_library,
                 "member": source_member,
+                "work_member": source_work_member,
                 "directory": input_block.get("source_directory"),
                 "path": input_block.get("source_path"),
                 "format": input_format,
@@ -311,18 +420,18 @@ class SasProcMeansVerticalGenerator:
             "population_source": {
                 "library": population_library,
                 "member": population_member,
+                "work_member": population_work_member,
                 "directory": population_input.get("source_directory"),
                 "path": population_input.get("source_path"),
                 "format": population_format,
-                "uses_source": population.get("input") is None,
+                "uses_source": population_uses_source,
+                "reuse_analysis_data": reuse_analysis_data,
             },
             "output_library": output_library,
             "output_member": output_member,
             "output_dataset": output_dataset,
-            "source_filter": _sas_filter(
-                configuration.get("dataset_filter", {}).get("ast")
-            ),
-            "population_filter": _sas_filter(population.get("filter", {}).get("ast")),
+            "source_filter": source_filter,
+            "population_filter": population_filter,
             "analysis": rows,
             "analysis_count": len(rows),
             "group_variables": groups,
@@ -336,17 +445,13 @@ class SasProcMeansVerticalGenerator:
             "offsets": offsets,
             "include_total": bool(configuration.get("total", {}).get("enabled", True)),
             "treatment": treatment_name,
-            "population_treatment": population_treatment_name
-            if variable_block.get("population_treatment")
-            else "",
+            "population_treatment": population_treatment_name if treatment_name else "",
+            "population_counts": population_counts,
+            "total_n_macro": total_n_macro,
             "treatment_group_index": treatment_group_index,
             "treatment_group": treatment_group,
-            "source_treatment_kind": str(
-                source_treatment_meta.get("type", "character")
-            ).casefold(),
-            "population_treatment_kind": str(
-                population_treatment_meta.get("type", "character")
-            ).casefold(),
+            "source_treatment_kind": source_treatment_kind,
+            "population_treatment_kind": population_treatment_kind,
             "subject": "USUBJID",
             "confidence": confidence,
             "alpha": round(1.0 - confidence, 12),

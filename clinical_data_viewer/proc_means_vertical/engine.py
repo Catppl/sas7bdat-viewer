@@ -36,8 +36,11 @@ def _format_value(value: object, decimals: int) -> str:
 
 
 def _statistic_rows(
-    statistics: tuple[str, ...],
+    statistics: tuple[str, ...], confidence: float = 0.95
 ) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    confidence_percent = (
+        format(Decimal(str(confidence)) * 100, "f").rstrip("0").rstrip(".")
+    )
     rows: list[tuple[str, tuple[str, ...]]] = []
     consumed: set[str] = set()
     for statistic in statistics:
@@ -49,6 +52,9 @@ def _statistic_rows(
         elif statistic in {"min", "max"} and {"min", "max"}.issubset(statistics):
             rows.append(("Min, Max", ("min", "max")))
             consumed.update({"min", "max"})
+        elif statistic in {"lclm", "uclm"} and {"lclm", "uclm"}.issubset(statistics):
+            rows.append((f"{confidence_percent}% CI Mean", ("lclm", "uclm")))
+            consumed.update({"lclm", "uclm"})
         else:
             labels = {
                 "n": "n",
@@ -132,6 +138,19 @@ class ProcMeansVerticalEngine:
             len(all_subjects),
             treatment,
         )
+
+    def resolve_population_levels(
+        self,
+        source: DatasetHandle,
+        config: ProcMeansVerticalConfig,
+        population: DatasetHandle | None = None,
+    ) -> tuple[object, ...]:
+        """Resolve the current Population N treatment values for SAS codegen."""
+        config.validate(source.metadata, population.metadata if population else None)
+        counts, _total, treatment = self._population_counts(source, config, population)
+        if treatment is None:
+            return ()
+        return tuple(sorted(counts, key=lambda value: _group_sort_key((value,))))
 
     def _run_rows(
         self,
@@ -306,7 +325,7 @@ class ProcMeansVerticalEngine:
         }
         decimal_offsets = dict(config.statistic_decimals)
         try:
-            rows_definition = _statistic_rows(config.statistics)
+            rows_definition = _statistic_rows(config.statistics, config.confidence)
             for row_values in row_keys_ordered:
                 row_label = label(row_values)
                 for analysis in analyses:
@@ -371,10 +390,14 @@ class ProcMeansVerticalEngine:
                             )
                             if configured_base is None:
                                 configured_base = base_decimals
-                            decimals = min(
-                                4,
-                                configured_base
-                                + decimal_offsets.get(statistic_keys[0], 0),
+                            decimals = (
+                                1
+                                if statistic_keys == ("lclm", "uclm")
+                                else min(
+                                    4,
+                                    configured_base
+                                    + decimal_offsets.get(statistic_keys[0], 0),
+                                )
                             )
                             display_values.append(
                                 ", ".join(
@@ -562,7 +585,7 @@ class ProcMeansVerticalEngine:
         }
         decimal_offsets = dict(config.statistic_decimals)
         try:
-            rows_definition = _statistic_rows(config.statistics)
+            rows_definition = _statistic_rows(config.statistics, config.confidence)
             for analysis in analyses:
                 item_label = labels.get(
                     analysis.name.casefold(), analysis.label or analysis.name
@@ -612,9 +635,14 @@ class ProcMeansVerticalEngine:
                         )
                         if configured_base is None:
                             configured_base = base_decimals
-                        decimals = min(
-                            4,
-                            configured_base + decimal_offsets.get(statistic_keys[0], 0),
+                        decimals = (
+                            1
+                            if statistic_keys == ("lclm", "uclm")
+                            else min(
+                                4,
+                                configured_base
+                                + decimal_offsets.get(statistic_keys[0], 0),
+                            )
                         )
                         formatted = [
                             _format_value(statistics.get(key), decimals)

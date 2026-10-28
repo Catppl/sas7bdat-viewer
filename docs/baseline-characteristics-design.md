@@ -41,6 +41,25 @@ not change.
 - No separate Total column is produced unless a future approved contract adds
   one explicitly.
 
+### Population N
+
+- The Builder has an independent Population Dataset selector and Population
+  WHERE editor. The selected population source is not required to be the
+  analysis source.
+- Population N is `count(distinct USUBJID)` from the selected population
+  dataset after its Population WHERE. When a treatment/group variable is
+  selected, the count is calculated independently for each nonmissing
+  population treatment level; those values drive the result-column headers.
+  The analysis Dataset Filter is not applied to that dataset.
+- If no Population Dataset is selected, the Builder warns the user and may
+  fall back to the current analysis dataset; in that fallback, the analysis
+  filter remains the population filter so existing single-source behavior is
+  preserved.
+- The selected Population Dataset, metadata, and filter AST are written to the
+  result configuration JSON and are retained for result lifetime management.
+- The SAS generator reads the selected population member directly for these
+  counts; it does not rename it to an artificial population source name.
+
 ## Ordered mixed items
 
 The Builder will eventually maintain one ordered, duplicate-free sequence of

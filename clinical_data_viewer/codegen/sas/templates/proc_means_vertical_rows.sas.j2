@@ -7,69 +7,52 @@
 options validvarname=any;
 
 /* Prepare source */
-{% if source.format == "xpt" %}
-libname {{ source.library }} xport {{ source.path | sas_string }};
-{% else %}
-libname {{ source.library }} {{ source.directory | sas_string }};
-{% endif %}
-data pm_src;
+data {{ source.work_member | sas_name }};
     set {{ source.library }}.{{ source.member | sas_name }};
 {% if source_filter %}    where {{ source_filter }};
 {% endif %}run;
 
-{% if population_source.uses_source %}
-/* Use the filtered analysis source for Population N */
-data pop_src;
-    set pm_src;
-run;
+{% if population_source.reuse_analysis_data %}
+/* Population N uses the prepared {{ source.work_member }} data */
 {% else %}
 /* Prepare population source */
-{% if population_source.format == "xpt" %}
-libname {{ population_source.library }} xport {{ population_source.path | sas_string }};
-{% elif population_source.library != source.library %}
-libname {{ population_source.library }} {{ population_source.directory | sas_string }};
-{% endif %}
-data pop_src;
+data {{ population_source.work_member | sas_name }};
     set {{ population_source.library }}.{{ population_source.member | sas_name }};
 {% if population_filter %}    where {{ population_filter }};
 {% endif %}run;
 {% endif %}
 
 /* Population N */
-data pop0;
-    set pop_src;
-    length trt_key $200;
-{% if population_treatment %}
-{% if population_treatment_kind == "numeric" %}    trt_key = strip(put({{ population_treatment | sas_name }}, best32.));
-{% else %}    trt_key = strip({{ population_treatment | sas_name }});
-{% endif %}    if missing({{ population_treatment | sas_name }}) then do;
+{% if population_treatment %}data _null_;
+    set {{ population_source.work_member | sas_name }}(keep={{ population_treatment | sas_name }});
+    if missing({{ population_treatment | sas_name }}) then do;
         putlog "ERROR: Population treatment contains missing values.";
-        stop;
+        abort cancel;
     end;
-{% else %}    trt_key = "ALL";
-{% endif %}    if missing({{ subject | sas_name }}) then delete;
 run;
+{% endif %}
 
-proc sql;
-    create table pop_n as
-    select trt_key,
-           count(distinct {{ subject | sas_name }}) as big_n
-    from pop0
-    group by trt_key;
-quit;
+proc sql noprint;
+{% for count in population_counts %}    select count(distinct {{ subject | sas_name }})
+        into :{{ count.macro }}
+    from {{ population_source.work_member | sas_name }}{% if population_treatment %}
+    where {{ population_treatment | sas_name }} = {{ count.population_literal }}{% endif %};
+{% endfor %}{% if population_treatment %}    select count(distinct {{ subject | sas_name }})
+        into :{{ total_n_macro }}
+    from {{ population_source.work_member | sas_name }}
+    where not missing({{ population_treatment | sas_name }});
+{% endif %}quit;
 
-proc sql;
-    create table pop_total as
-    select count(distinct {{ subject | sas_name }}) as big_n
-    from pop0;
-quit;
+{% for count in population_counts %}%let {{ count.macro }}=&{{ count.macro }};
+{% endfor %}{% if population_treatment %}%let {{ total_n_macro }}=&{{ total_n_macro }};
+{% endif %}
 
 /* Runtime row-group order */
 proc sql;
     create table row0 as
     select distinct
 {% for group in row_group_variables %}        {{ group.sas_name }}{% if not loop.last %},{% endif %}
-{% endfor %}    from pm_src;
+{% endfor %}    from {{ source.work_member | sas_name }};
 quit;
 
 data row;
@@ -106,12 +89,12 @@ proc sql;
     create table col0 as
     select distinct
 {% for group in group_variables %}        {{ group.sas_name }}{% if not loop.last %},{% endif %}
-{% endfor %}    from pm_src;
+{% endfor %}    from {{ source.work_member | sas_name }};
 quit;
 
 data col;
     set col0;
-    length col_label $200 trt_key $200;
+    length col_label $200;
 {% for group in group_variables %}    length g{{ group.index }}_key g{{ group.index }}_label $200;
 {% if group.kind == "numeric" %}    if missing({{ group.sas_name }}) then do;
         g{{ group.index }}_label = "(Missing)";
@@ -126,11 +109,7 @@ data col;
     if missing({{ group.sas_name }}) then g{{ group.index }}_key = "";
     else g{{ group.index }}_key = lowcase(strip({{ group.sas_name }}));
 {% endif %}{% endfor %}    col_label = catx(" / "{% for group in group_variables %}, g{{ group.index }}_label{% endfor %});
-{% if treatment_group %}
-{% if treatment_group.kind == "numeric" %}    trt_key = strip(put({{ treatment_group.sas_name }}, best32.));
-{% else %}    trt_key = strip({{ treatment_group.sas_name }});
-{% endif %}{% else %}    trt_key = "ALL";
-{% endif %}run;
+run;
 
 proc sort data=col;
     by {% for group in group_variables %}g{{ group.index }}_key{% if not loop.last %} {% endif %}{% endfor %};
@@ -142,10 +121,9 @@ data col;
 run;
 {% else %}
 data col;
-    length col_label $200 trt_key $200;
+    length col_label $200;
     col_ord = 1;
     col_label = "Overall";
-    trt_key = "ALL";
     output;
 run;
 {% endif %}
@@ -155,33 +133,23 @@ proc sql noprint;
     from col;
 quit;
 
-{% if treatment_group %}
-proc sql;
-    create table col_n as
-    select c.*, p.big_n
-    from col as c
-    left join pop_n as p
-        on c.trt_key = p.trt_key;
-quit;
-{% else %}
-proc sql;
-    create table col_n as
-    select c.*, p.big_n
-    from col as c, pop_total as p;
-quit;
-{% endif %}
+data col_n;
+    set col;
+{% if treatment_group %}{% for count in population_counts %}    {% if loop.first %}if{% else %}else if{% endif %} {{ treatment_group.sas_name }} = {{ count.source_literal }} then big_n = &{{ count.macro }};
+{% endfor %}    else big_n = .;
+{% else %}    big_n = &{{ total_n_macro }};
+{% endif %}run;
 
-proc sql;
-    create table row_pop as
-    select r.*, p.big_n
-    from row as r, pop_total as p;
-quit;
+data row_pop;
+    set row;
+    big_n = &{{ total_n_macro }};
+run;
 
 {% for analysis in analysis %}
 {% if analysis.base_decimal is none %}
 /* Determine base decimals for {{ analysis.name }} from the current source */
 data dec_{{ analysis.token }};
-    set pm_src(keep={{ analysis.name | sas_name }});
+    set {{ source.work_member | sas_name }}(keep={{ analysis.name | sas_name }});
     if not missing({{ analysis.name | sas_name }});
     base_dec = 0;
     do dec = 0 to 4;
@@ -202,7 +170,7 @@ quit;
 {% endif %}
 
 /* Statistics for {{ analysis.name }} */
-proc means data=pm_src noprint nway missing
+proc means data={{ source.work_member | sas_name }} noprint nway missing
     vardef=df qntldef=5 alpha={{ alpha }};
     class {% for group in row_group_variables %}{{ group.sas_name }} {% endfor %}{% for group in group_variables %}{{ group.sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
     var {{ analysis.name | sas_name }};
@@ -219,7 +187,7 @@ proc sql;
 {% for group in row_group_variables %}        {{ group.sas_name }},{% endfor %}
 {% for group in group_variables %}        {{ group.sas_name }},{% endfor %}
         count(distinct {{ subject | sas_name }}) as subject_n
-    from pm_src
+    from {{ source.work_member | sas_name }}
     where not missing({{ analysis.name | sas_name }})
       and not missing({{ subject | sas_name }})
     group by {% for group in row_group_variables %}{{ group.sas_name }}{% if not loop.last or group_variables %}, {% endif %}{% endfor %}{% for group in group_variables %}{{ group.sas_name }}{% if not loop.last %}, {% endif %}{% endfor %};
@@ -247,7 +215,7 @@ quit;
 
 {% if include_total %}
 /* Total statistics for {{ analysis.name }} within each row group */
-proc means data=pm_src noprint nway missing
+proc means data={{ source.work_member | sas_name }} noprint nway missing
     vardef=df qntldef=5 alpha={{ alpha }};
     class {% for group in row_group_variables %}{{ group.sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
     var {{ analysis.name | sas_name }};
@@ -262,7 +230,7 @@ proc sql;
     select
 {% for group in row_group_variables %}        {{ group.sas_name }},{% endfor %}
         count(distinct {{ subject | sas_name }}) as subject_n
-    from pm_src
+    from {{ source.work_member | sas_name }}
     where not missing({{ analysis.name | sas_name }})
       and not missing({{ subject | sas_name }})
     group by {% for group in row_group_variables %}{{ group.sas_name }}{% if not loop.last %}, {% endif %}{% endfor %};
@@ -325,8 +293,9 @@ data pm_decimals;
     stat_key = {{ key | sas_string }};
     base_dec = &base_{{ analysis.token }};
     add_dec = {{ offsets.get(key, 0) }};
-    display_dec = min(4, base_dec + add_dec);
-    output;
+{% if row.fixed_decimals is not none %}    display_dec = {{ row.fixed_decimals }};
+{% else %}    display_dec = min(4, base_dec + add_dec);
+{% endif %}    output;
 {% endfor %}{% endfor %}{% endfor %}    keep analysis stat_key base_dec add_dec display_dec;
 run;
 
@@ -392,26 +361,19 @@ proc sql noprint;
         into :col_labels separated by " "
     from col_n
     order by col_ord;
-{% if include_total %}    select cats("col", &n_col + 1, "=", quote(cats("Total (N=", put(big_n, comma12.), ")")))
-        into :total_label trimmed
-    from pop_total;
-{% endif %}
 quit;
 
 proc datasets library={{ output_library }} nolist;
     modify {{ output_member }};
-    label group = "Group" item = "Item" statistic = "Statistic" &col_labels{% if include_total %} &total_label{% endif %};
+    label group = "Group" item = "Item" statistic = "Statistic" &col_labels{% if include_total %} col%eval(&n_col + 1) = "Total (N=&{{ total_n_macro }})"{% endif %};
 quit;
 
 /* Clean up intermediate WORK tables */
 proc datasets library=work nolist;
-    delete pm_src pop_src pop0 pop_n pop_total row0 row row_pop col0 col col_n
+    delete {{ source.work_member | sas_name }}{% if not population_source.reuse_analysis_data %} {{ population_source.work_member | sas_name }}{% endif %}
+        row0 row row_pop col0 col col_n
         pm_labels pm_decimals pm_values pm_display pm_long
 {% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} grid_{{ analysis.token }} out_{{ analysis.token }} values_{{ analysis.token }} dec_{{ analysis.token }}
 {% if include_total %}        stat_total_{{ analysis.token }} subj_total_{{ analysis.token }} out_total_{{ analysis.token }}
 {% endif %}{% endfor %};
 quit;
-
-libname {{ source.library }} clear;
-{% if population_source.library != source.library %}libname {{ population_source.library }} clear;
-{% endif %}

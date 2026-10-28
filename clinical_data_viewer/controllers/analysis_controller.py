@@ -254,6 +254,9 @@ class AnalysisController(QObject):
         baseline_builder.source_selected.connect(
             self.baseline_characteristics.select_source
         )
+        baseline_builder.population_selected.connect(
+            self.baseline_characteristics.select_population
+        )
         baseline_builder.validation_error.connect(
             lambda message: QMessageBox.warning(
                 self._parent_widget(), "Baseline Characteristics", message

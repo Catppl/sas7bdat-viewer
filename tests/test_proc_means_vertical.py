@@ -93,6 +93,28 @@ def make_vertical_rows_handle(root: Path, name: str, rows) -> DatasetHandle:
 
 
 class ProcMeansVerticalTests(unittest.TestCase):
+    def test_resolve_population_levels_uses_current_population_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (("S1", "B", 1.0, 1.0), ("S2", "A", 2.0, 2.0)),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                population_treatment_variable="TRT01A",
+                statistics=("mean",),
+            )
+
+            levels = ProcMeansVerticalEngine(
+                TempManager(root / "temp")
+            ).resolve_population_levels(source, config)
+
+            self.assertEqual(levels, ("A", "B"))
+
     def test_groups_as_rows_materialize_context_as_result_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -364,6 +386,63 @@ class ProcMeansVerticalTests(unittest.TestCase):
             ],
             ["Q1, Q3", "Mean", "Min, Max"],
         )
+
+    def test_confidence_limits_share_one_dynamic_display_row(self) -> None:
+        self.assertEqual(
+            _statistic_rows(("uclm", "mean", "lclm"), 0.9),
+            (
+                ("90% CI Mean", ("lclm", "uclm")),
+                ("Mean", ("mean",)),
+            ),
+        )
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("scipy") is not None, "requires scipy"
+    )
+    def test_confidence_limits_display_like_min_max(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (
+                    ("S1", "A", 1.0, 1.0),
+                    ("S2", "A", 2.0, 2.0),
+                    ("S3", "A", 3.0, 3.0),
+                ),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL",),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                population_treatment_variable="TRT01A",
+                statistics=("lclm", "uclm"),
+                include_total=False,
+                base_decimals=(("AVAL", 0),),
+            )
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                rows = connection.execute(
+                    'SELECT "STATISTIC", "COL1" FROM dataset ORDER BY _source_row'
+                ).fetchall()
+                long_rows = connection.execute(
+                    'SELECT "STATISTIC", "DISPLAY_VALUE" '
+                    "FROM proc_means_vertical_long ORDER BY _source_row"
+                ).fetchall()
+
+            self.assertEqual(rows, [("95% CI Mean", "-0.5, 4.5")])
+            self.assertEqual(long_rows, [("95% CI Mean", "-0.5, 4.5")])
+            cell = lookup_cell(result, 1, "COL1")
+            self.assertIsNotNone(cell)
+            assert cell is not None
+            self.assertEqual(cell.statistic_key, "lclm")
+            self.assertEqual(cell.statistic_label, "95% CI Mean")
+            self.assertIn(
+                "not missing(AVAL)",
+                build_cell_where_text(source.metadata, config, cell),
+            )
 
     def test_vertical_requires_usubjid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

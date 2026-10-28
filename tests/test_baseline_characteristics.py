@@ -62,6 +62,34 @@ def make_handle(root: Path, rows) -> DatasetHandle:
     )
 
 
+def make_population_handle(root: Path, rows) -> DatasetHandle:
+    directory = root / "population"
+    directory.mkdir()
+    database = directory / "dataset.sqlite"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            "CREATE TABLE dataset ("
+            "_source_row INTEGER PRIMARY KEY, USUBJID TEXT, SAFFL TEXT, SEX TEXT, "
+            "AGEGR1N REAL, AGE REAL, WEIGHTBL REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO dataset (USUBJID, SAFFL, SEX, AGEGR1N, AGE, WEIGHTBL) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        connection.commit()
+    source = root / "population.sas7bdat"
+    source.touch()
+    return DatasetHandle(
+        source,
+        directory / source.name,
+        database,
+        DatasetMetadata("ADSL", len(rows), VARIABLES),
+        len(rows),
+        True,
+    )
+
+
 def make_config(source: DatasetHandle) -> BaselineCharacteristicsConfig:
     filter_text = 'SAFFL = "Y"'
     return BaselineCharacteristicsConfig(
@@ -95,6 +123,45 @@ def make_config(source: DatasetHandle) -> BaselineCharacteristicsConfig:
 
 
 class BaselineCharacteristicsTests(unittest.TestCase):
+    def test_population_dataset_drives_header_n_and_is_saved_in_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                (
+                    ("S1", "Y", "F", 1, 34, 60),
+                    ("S2", "Y", "M", 2, 36, 70),
+                    ("S3", "Y", "F", 1, 38, 65),
+                ),
+            )
+            population = make_population_handle(
+                root,
+                (
+                    ("S1", "Y", "F", 1, 34, 60),
+                    ("S2", "Y", "M", 2, 36, 70),
+                    ("S4", "N", "F", 1, 40, 75),
+                ),
+            )
+            filter_text = 'SAFFL = "Y"'
+            config = BaselineCharacteristicsConfig(
+                (BaselineCategoricalItem("SEX", "Sex"),),
+                FilterEngine(source.metadata.variables).compile(filter_text),
+                filter_text,
+                population_filter=FilterEngine(population.metadata.variables).compile(
+                    filter_text
+                ),
+                population_filter_text=filter_text,
+            )
+            result = BaselineCharacteristicsEngine(TempManager(root / "temp")).run(
+                source, config, population=population
+            )
+            self.assertEqual(result.metadata.variables[1].label, "Overall\n(N=2)")
+            assert result.configuration_path is not None
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(configuration["population"]["input"]["dataset"], "ADSL")
+            self.assertEqual(configuration["population"]["filter"]["text"], filter_text)
     def test_custom_level_labels_include_explicit_missing_level(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

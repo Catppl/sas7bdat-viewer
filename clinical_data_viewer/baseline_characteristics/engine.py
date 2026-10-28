@@ -90,6 +90,40 @@ class BaselineCharacteristicsEngine:
             config.population_filter.parameters,
         )
 
+    def resolve_population_levels(
+        self,
+        source: DatasetHandle,
+        config: BaselineCharacteristicsConfig,
+        population: DatasetHandle | None = None,
+    ) -> tuple[object, ...]:
+        """Resolve Population treatment levels for a reusable SAS program."""
+        config.validate(source.metadata, population.metadata if population else None)
+        if not config.treatment_variable:
+            return ()
+        population_source = population or source
+        population_fields = {
+            variable.name.casefold(): variable
+            for variable in population_source.metadata.variables
+        }
+        population_treatment_name = (
+            config.population_treatment_variable or config.treatment_variable
+        )
+        treatment = population_fields[population_treatment_name.casefold()]
+        where, parameters = self._population_where(config)
+        if population is None and not where:
+            where, parameters = self._where(config)
+        uri = population_source.database_path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
+            rows = connection.execute(
+                f"SELECT DISTINCT {quote_identifier(treatment.name)} "
+                f"FROM dataset{where}"
+                + (" AND " if where else " WHERE ")
+                + _missing_sql(treatment, missing=False)
+                + f" ORDER BY {quote_identifier(treatment.name)}",
+                parameters,
+            ).fetchall()
+        return tuple(row[0] for row in rows)
+
     def run(
         self,
         source: DatasetHandle,
@@ -113,6 +147,10 @@ class BaselineCharacteristicsEngine:
         }
         population_subject = population_fields[config.subject_id_variable.casefold()]
         population_where, population_parameters = self._population_where(config)
+        if population is None and not population_where:
+            # Backward-compatible fallback: when no independent population
+            # dataset is selected, Population N follows the analysis filter.
+            population_where, population_parameters = where, parameters
         uri = source.database_path.resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True)) as connection:
             missing_subjects = connection.execute(
@@ -139,7 +177,6 @@ class BaselineCharacteristicsEngine:
             )
             if config.treatment_variable:
                 treatment = fields[config.treatment_variable.casefold()]
-                treatment_column = quote_identifier(treatment.name)
                 population_treatment = population_fields[
                     population_treatment_name.casefold()
                 ]
@@ -214,7 +251,7 @@ class BaselineCharacteristicsEngine:
                         )
                     else:
                         assert isinstance(item, BaselineContinuousItem)
-                self._write_continuous(
+                        self._write_continuous(
                             connection,
                             writer,
                             config,

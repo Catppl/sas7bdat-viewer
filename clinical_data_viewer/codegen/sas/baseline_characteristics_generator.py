@@ -100,6 +100,11 @@ class SasBaselineCharacteristicsGenerator:
             raise ValueError("input.source_path is required.")
         if source_format == "sas7bdat" and not source.get("source_directory"):
             raise ValueError("input.source_directory is required for SAS7BDAT input.")
+        target_block = _mapping(configuration["targets"], "targets")
+        sas_target = _mapping(target_block.get("sas"), "targets.sas")
+        source_library = str(sas_target.get("source_library") or "")
+        if not _SAS_NAME.fullmatch(source_library) or len(source_library) > 8:
+            raise ValueError("source_library must be a valid 1-8 character SAS libref.")
 
         variable_metadata = _mapping(
             configuration["variable_metadata"], "variable_metadata"
@@ -120,11 +125,9 @@ class SasBaselineCharacteristicsGenerator:
         if subject is None:
             raise ValueError(f"Subject variable does not exist: {subject_requested}.")
         treatment_requested = str(universe.get("treatment_variable") or "")
-        if treatment_requested:
-            raise ValueError(
-                "SAS code generation with treatment columns is not available yet. "
-                "Run the Python Baseline Characteristics engine instead."
-            )
+        population_treatment_requested = str(
+            universe.get("population_treatment_variable") or ""
+        )
         if (
             universe.get("subject_missing") != "error"
             or universe.get("duplicate_subject_rows") != "error"
@@ -142,6 +145,137 @@ class SasBaselineCharacteristicsGenerator:
             )
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(f"Unsupported dataset_filter AST: {error}") from error
+
+        population_block = configuration.get("population")
+        if population_block is None:
+            population = {
+                "format": source_format,
+                "source_path": str(source.get("source_path") or ""),
+                "source_directory": str(source.get("source_directory") or ""),
+                "library": source_library,
+                "member": sas_name(str(source.get("dataset") or "")),
+            }
+            population_variable_metadata = variable_metadata
+            population_where_expression = where_expression
+            population_is_source = True
+        else:
+            population_block = _mapping(population_block, "population")
+            population_input = _mapping(population_block.get("input"), "population.input")
+            if population_input.get("kind") != "sas":
+                raise ValueError("population.input.kind must be 'sas'.")
+            population_format = str(population_input.get("format") or "").casefold()
+            if population_format not in {"sas7bdat", "xpt"}:
+                raise ValueError(f"Unsupported population input format: {population_format}.")
+            if not population_input.get("source_path"):
+                raise ValueError("population.input.source_path is required.")
+            if population_format == "sas7bdat" and not population_input.get(
+                "source_directory"
+            ):
+                raise ValueError(
+                    "population.input.source_directory is required for SAS7BDAT input."
+                )
+            population_variable_metadata = _mapping(
+                population_block.get("variable_metadata"),
+                "population.variable_metadata",
+            )
+            population_filter = _mapping(population_block.get("filter"), "population.filter")
+            if population_filter.get("language") != "sas_like" or "ast" not in population_filter:
+                raise ValueError("population.filter must contain a sas_like AST.")
+            try:
+                population_where_expression = sas_filter_expression(
+                    population_filter.get("ast"), compact_and=True
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"Unsupported population.filter AST: {error}") from error
+            population_member = str(population_input.get("dataset") or "")
+            if not population_member:
+                raise ValueError("population.input.dataset is required.")
+            population = {
+                "format": population_format,
+                "source_path": str(population_input.get("source_path") or ""),
+                "source_directory": str(population_input.get("source_directory") or ""),
+                "library": source_library,
+                "member": sas_name(population_member),
+            }
+            population_is_source = False
+
+        population_metadata_names = {
+            str(name).casefold(): str(name)
+            for name in population_variable_metadata
+        }
+        if subject_requested.casefold() not in population_metadata_names:
+            raise ValueError(
+                f"Subject variable does not exist in population input: {subject_requested}."
+            )
+        treatment_name = (
+            variable_names.get(treatment_requested.casefold())
+            if treatment_requested
+            else None
+        )
+        population_treatment_name = (
+            population_metadata_names.get(
+                (population_treatment_requested or treatment_requested).casefold()
+            )
+            if treatment_requested
+            else None
+        )
+        if treatment_requested and treatment_name is None:
+            raise ValueError(f"Treatment variable does not exist: {treatment_requested}.")
+        if treatment_requested and population_treatment_name is None:
+            raise ValueError(
+                "Population treatment variable does not exist in population input: "
+                f"{population_treatment_requested or treatment_requested}."
+            )
+        if treatment_requested:
+            source_kind = variable_types[treatment_name.casefold()]
+            population_kind = str(
+                _mapping(
+                    population_variable_metadata[population_treatment_name],
+                    f"population.variable_metadata.{population_treatment_name}",
+                ).get("type")
+            )
+            if source_kind != population_kind:
+                raise ValueError(
+                    "Analysis and population treatment variables must have the same type."
+                )
+        runtime = configuration.get("_runtime")
+        runtime = runtime if isinstance(runtime, Mapping) else {}
+        population_levels = runtime.get("population_levels", [])
+        if not isinstance(population_levels, list | tuple):
+            raise ValueError(  # noqa: TRY004 - invalid contract is reported uniformly
+                "Runtime population levels must be a list."
+            )
+        population_counts: list[dict[str, object]] = []
+        if treatment_requested:
+            if not population_levels:
+                raise ValueError(
+                    "No Population treatment levels were found in the current data."
+                )
+            for index, value in enumerate(population_levels, start=1):
+                if value is None:
+                    raise ValueError(
+                        "Population treatment levels cannot contain missing values."
+                    )
+                population_counts.append(
+                    {
+                        "macro": f"n{index}",
+                        "population_literal": _literal(
+                            value,
+                            str(
+                                _mapping(
+                                    population_variable_metadata[population_treatment_name],
+                                    f"population.variable_metadata.{population_treatment_name}",
+                                ).get("type")
+                            ),
+                            f"population treatment level {index}",
+                        ),
+                        "source_literal": _literal(
+                            value,
+                            variable_types[treatment_name.casefold()],
+                            f"treatment level {index}",
+                        ),
+                    }
+                )
 
         raw_items = configuration["items"]
         if not isinstance(raw_items, list) or not raw_items:
@@ -300,6 +434,29 @@ class SasBaselineCharacteristicsGenerator:
             },
             "subject": sas_name(subject),
             "where_expression": where_expression,
+            "population": population,
+            "population_where_expression": population_where_expression,
+            "population_is_source": population_is_source,
+            "treatment": {
+                "enabled": bool(treatment_requested),
+                "source": sas_name(treatment_name) if treatment_name else "",
+                "population": sas_name(population_treatment_name)
+                if population_treatment_name
+                else "",
+                "source_kind": variable_types[treatment_name.casefold()]
+                if treatment_name
+                else "",
+                "population_kind": str(
+                    _mapping(
+                        population_variable_metadata[population_treatment_name],
+                        f"population.variable_metadata.{population_treatment_name}",
+                    ).get("type")
+                )
+                if population_treatment_name
+                else "",
+            },
+            "population_counts": population_counts,
+            "total_n_macro": "nt" if treatment_requested else "n1",
             "items": items,
             "header_label": str(display.get("header_label") or "Overall"),
             "output": output,
@@ -309,9 +466,12 @@ class SasBaselineCharacteristicsGenerator:
     def generate(self, configuration: Mapping[str, object]) -> str:
         context = self._prepare(configuration)
         try:
-            return self.environment.get_template(
-                "baseline_characteristics.sas.j2"
-            ).render(**context)
+            template_name = (
+                "baseline_characteristics_grouped.sas.j2"
+                if context["treatment"]["enabled"]
+                else "baseline_characteristics.sas.j2"
+            )
+            return self.environment.get_template(template_name).render(**context)
         except TemplateError as error:
             raise ValueError(
                 f"Baseline Characteristics SAS template failed: {error}"
