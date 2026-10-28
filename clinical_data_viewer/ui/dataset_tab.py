@@ -543,6 +543,20 @@ class DatasetTab(QWidget):
         self._rebuild_filter_chips()
         self.analysis_invalidated.emit()
 
+    def set_where_display(self, where_text: str) -> None:
+        """Show a provenance WHERE expression without re-querying this result.
+
+        Analysis drill-down results are already materialized using the source
+        expression. Their result schema may intentionally contain only the
+        subject column, so applying the source filter again would reference
+        columns that do not exist in the query result.
+        """
+        self.column_filters.clear()
+        self.where_compiled_filter = CompiledFilter("", ())
+        self.applied_where = where_text.strip()
+        self._sync_where_editor()
+        self._rebuild_filter_chips()
+
     def reapply_current_filter(self, *, add_history: bool) -> None:
         self.pending_history_text = self.current_where_text() if add_history else ""
         self.generation += 1

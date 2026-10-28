@@ -95,6 +95,125 @@ def make_config(source: DatasetHandle) -> BaselineCharacteristicsConfig:
 
 
 class BaselineCharacteristicsTests(unittest.TestCase):
+    def test_custom_level_labels_include_explicit_missing_level(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                (
+                    ("S1", "Y", "F", 1, 34, 60),
+                    ("S2", "Y", "M", 2, 36, 70),
+                    ("S3", "Y", "", 1, 38, 65),
+                ),
+            )
+            config = BaselineCharacteristicsConfig(
+                (
+                    BaselineCategoricalItem(
+                        "SEX",
+                        "Sex",
+                        "custom",
+                        ("F", "M", None),
+                        1,
+                        (("F", "Female"), ("M", "Male"), (None, "Missing")),
+                    ),
+                )
+            )
+            result = BaselineCharacteristicsEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                labels = connection.execute(
+                    'SELECT "ROW_LABEL" FROM dataset ORDER BY _source_row'
+                ).fetchall()
+            self.assertEqual(
+                [row[0] for row in labels[1:]],
+                ["\u00a0" * 4 + "Female", "\u00a0" * 4 + "Male", "\u00a0" * 4 + "Missing"],
+            )
+
+    def test_selected_statistics_are_rendered_without_auto_decimals(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_handle(
+                root,
+                (("S1", "Y", "F", 1, 34.56, 60), ("S2", "Y", "M", 2, 36.78, 70)),
+            )
+            config = BaselineCharacteristicsConfig(
+                (
+                    BaselineContinuousItem(
+                        "AGE",
+                        "Age",
+                        statistic_decimals=(("mean", 0),),
+                        statistics=("n", "mean"),
+                    ),
+                )
+            )
+            result = BaselineCharacteristicsEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                rows = connection.execute(
+                    "SELECT statistic_key, display_value "
+                    "FROM baseline_characteristics_long WHERE statistic_key IS NOT NULL "
+                    "ORDER BY row_order"
+                ).fetchall()
+            self.assertEqual(rows, [("n", "2"), ("mean", "36")])
+
+    def test_treatment_variable_creates_one_result_column_per_level(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "source" / "dataset.sqlite"
+            database.parent.mkdir()
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute(
+                    "CREATE TABLE dataset ("
+                    "_source_row INTEGER PRIMARY KEY, USUBJID TEXT, TRT TEXT, SEX TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO dataset (USUBJID, TRT, SEX) VALUES (?, ?, ?)",
+                    (("S1", "A", "F"), ("S2", "A", "M"), ("S3", "B", "F")),
+                )
+                connection.commit()
+            source_path = root / "adsl.sas7bdat"
+            source_path.touch()
+            source = DatasetHandle(
+                source_path,
+                root / "source" / source_path.name,
+                database,
+                DatasetMetadata(
+                    "ADSL",
+                    3,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("TRT"),
+                        VariableMetadata("SEX"),
+                    ),
+                ),
+                3,
+                True,
+            )
+            config = BaselineCharacteristicsConfig(
+                (BaselineCategoricalItem("SEX", "Sex"),),
+                treatment_variable="TRT",
+            )
+            result = BaselineCharacteristicsEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            self.assertEqual(
+                [variable.name for variable in result.metadata.variables],
+                ["ROW_LABEL", "TRT_1", "TRT_2"],
+            )
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                female_row = connection.execute(
+                    'SELECT _source_row FROM dataset WHERE "ROW_LABEL" = ?',
+                    ("\u00a0" * 4 + "F",),
+                ).fetchone()[0]
+            cell = lookup_cell(result, female_row, "TRT_1")
+            assert cell is not None
+            self.assertEqual(
+                build_cell_where_text(source.metadata, config, cell),
+                'TRT = "A" and SEX = "F"',
+            )
+
     def test_mixed_items_keep_configured_order_and_statistics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

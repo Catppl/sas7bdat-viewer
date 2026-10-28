@@ -162,7 +162,11 @@ class BaselineCharacteristicsController(AnalysisModuleController):
                 selection.filter_text
             )
             config = BaselineCharacteristicsConfig(
-                selection.items, compiled, selection.filter_text, selection.header_label
+                selection.items,
+                compiled,
+                selection.filter_text,
+                selection.header_label,
+                treatment_variable=selection.treatment_variable,
             )
             config.validate(tab.handle.metadata)
         except ValueError as error:
@@ -331,6 +335,7 @@ class BaselineCharacteristicsController(AnalysisModuleController):
                 self._host.discard_analysis_result(handle)
                 return
             query_tab = self._host.create_analysis_result_tab(handle)
+            query_tab.set_where_display(where_text)
             self._host.show_analysis_result_tab(query_tab, title)
 
         self._host.submit_analysis_task(

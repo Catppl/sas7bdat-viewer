@@ -33,10 +33,13 @@ not change.
 - After the Dataset Filter is applied, the analysis universe must contain one
   row per nonmissing `USUBJID`. Duplicate participant rows are an error because
   the shell defines `N` and `n` as participant counts.
-- The first version has one summary column and no treatment/group columns.
-- The editable column heading defaults to `Overall` and the header displays the
-  analysis-universe count as `N=xx`.
-- No separate Total column is produced in the single-column layout.
+- The Builder offers an optional column-grouping (treatment) variable. When it
+  is empty, the result has one `Overall` column; when selected, one column is
+  produced for each nonmissing treatment level with that level's participant N.
+- The editable column heading defaults to `Overall` for the single-column
+  layout. Treatment column labels are the raw treatment levels plus their N.
+- No separate Total column is produced unless a future approved contract adds
+  one explicitly.
 
 ## Ordered mixed items
 
@@ -48,7 +51,6 @@ Every item stores:
 
 - source variable;
 - display label;
-- optional unit;
 - item type;
 - type-specific display and calculation settings.
 
@@ -85,20 +87,23 @@ Variable storage type and analysis role are separate contracts:
 - Each observed nonmissing level is shown as an indented row.
 - `n` is the number of distinct participants at that level.
 - Percentage is `level participant n / header N * 100`.
-- Missing categorical values are excluded and are not displayed as a level.
+- Missing categorical values are excluded by default. A Custom level mapping
+  may explicitly include the missing value and its display label.
 - Only levels represented in the filtered analysis universe are displayed.
 - The default level order is runtime raw-value ascending, with numeric values
   sorted numerically, character values case-insensitively, and missing last.
 - Each item may instead define an explicit custom raw-value order. Values not in
   the custom list follow the configured values in runtime ascending order.
+- Custom levels may map raw values to exact display labels, for example
+  `F=Female`, `M=Male`, and `''=Missing`; the mapped label is used verbatim.
 - Percentage rounding uses `ROUND_HALF_UP`; the default display has one decimal
   place and allows zero through four decimal places.
 - A zero denominator displays `0 (-)` in plain-text exports and the Viewer.
 
 ## Continuous item contract
 
-- The item heading is `<label> (<unit>)` when a unit is configured, otherwise
-  `<label>`.
+- The item heading is exactly the user-configured `label`. There is no separate
+  Unit setting.
 - The fixed statistic order is:
   1. `n`
   2. `Mean`
@@ -113,11 +118,12 @@ Variable storage type and analysis role are separate contracts:
 - Median and quartiles use the existing SAS-compatible `QNTLDEF=5` logic.
 - No `NMISS`, standard error, or confidence-limit row is added.
 - `n` is always displayed as an integer.
-- Each continuous item stores an explicit `Auto` or zero-through-four decimal
-  setting for each displayed statistic. Paired statistics use one setting per
-  component when needed to reproduce the shell.
-- `Auto` is based on observed raw-value precision and all numeric rounding uses
-  `ROUND_HALF_UP`, capped at four decimal places.
+- Each continuous item stores a user-specified zero-through-four decimal
+  setting for each displayed statistic. The Builder shows all statistics at
+  once with checkboxes; `Q1`/`Q3` and `Min`/`Max` are linked pairs. Decimal
+  selectors change only through an explicit mouse click.
+- There is no automatic decimal-place inference; all numeric rounding uses
+  `ROUND_HALF_UP`.
 - A statistic with no calculable value displays `-`.
 
 ## Display contract
@@ -125,7 +131,8 @@ Variable storage type and analysis role are separate contracts:
 - The result is a clinical black-and-white three-line table.
 - The first column contains item headings, indented categorical levels, and
   indented continuous statistic labels.
-- The second column contains the editable header, `N=xx`, and result values.
+- The second and later columns contain treatment headers with `N=xx` and result
+  values; the no-treatment layout contains the editable Overall header.
 - Item headings are visually distinct from child rows without introducing a
   full table grid.
 - Categorical values display as `n (percent)`.
@@ -142,7 +149,7 @@ Variable storage type and analysis role are separate contracts:
 | --- | --- |
 | Missing participant ID | Excluded from participant counts and reported as a validation error when present in the filtered universe |
 | Duplicate participant row | Validation error before calculation |
-| Missing categorical value | Excluded and not displayed |
+| Missing categorical value | Excluded unless explicitly mapped in Custom levels |
 | Missing continuous value | Excluded from the statistic; reflected by the continuous `n` |
 | Item order | Explicit Builder order |
 | Categorical level order | Runtime ascending or per-item custom raw-value order |
@@ -157,8 +164,9 @@ traceable participant universe.
   participants.
 - A continuous statistic cell opens source rows with a nonmissing value for the
   selected variable. The `n` cell uses the same nonmissing universe.
-- Drill-down uses the saved Dataset Filter and raw typed values, never the
-  formatted display text.
+- Drill-down uses the saved Dataset Filter, treatment level, and raw typed item
+  values, never the formatted display text. The resulting WHERE text is shown
+  in the Drill Down view.
 - Filtering, sorting, or paging the result must not break cell lookup.
 - Closed or stale source/result contexts must produce a clear message rather
   than silently querying a different dataset.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QComboBox
 
 
@@ -10,4 +11,11 @@ class ClickOnlyComboBox(QComboBox):
         event.ignore()
 
 
-__all__ = ["ClickOnlyComboBox"]
+class MouseOnlyComboBox(ClickOnlyComboBox):
+    """A selector whose value can only be changed with a mouse click."""
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        event.ignore()
+
+
+__all__ = ["ClickOnlyComboBox", "MouseOnlyComboBox"]

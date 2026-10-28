@@ -64,9 +64,10 @@ def build_baseline_characteristics_configuration(
             "order": order,
             "variable": variable.name,
             "storage_type": variable.kind,
-            "label": item.label or variable.label or variable.name,
+            "label": item.label,
         }
         if isinstance(item, BaselineCategoricalItem):
+            level_labels = dict(item.level_labels)
             items.append(
                 {
                     **common,
@@ -81,6 +82,16 @@ def build_baseline_characteristics_configuration(
                             if item.level_sort_method == "custom"
                             else {}
                         ),
+                        **(
+                            {
+                                "labels": [
+                                    {"value": value, "label": label}
+                                    for value, label in item.level_labels
+                                ]
+                            }
+                            if level_labels
+                            else {}
+                        ),
                     },
                     "percent_digits": item.percent_digits,
                 }
@@ -93,14 +104,7 @@ def build_baseline_characteristics_configuration(
                     "role": "continuous",
                     "unit": item.unit,
                     "statistics": [
-                        "n",
-                        "mean",
-                        "std",
-                        "median",
-                        "q1",
-                        "q3",
-                        "min",
-                        "max",
+                        *item.statistics,
                     ],
                     "statistic_decimals": dict(item.statistic_decimals),
                     "missing": "exclude_from_statistics",
@@ -116,6 +120,7 @@ def build_baseline_characteristics_configuration(
         "dataset_filter": _filter(source, config.filter_text),
         "analysis_universe": {
             "subject_variable": config.subject_id_variable,
+            "treatment_variable": config.treatment_variable or None,
             "subject_missing": "error",
             "duplicate_subject_rows": "error",
             "runtime_header_n": runtime_header_n,
@@ -136,7 +141,7 @@ def build_baseline_characteristics_configuration(
             "continuous_statistics": "fixed_shell_order",
         },
         "display": {
-            "layout": "single_summary_column",
+            "layout": "treatment_columns" if config.treatment_variable else "single_summary_column",
             "header_label": config.header_label,
             "rounding": "half_up",
             "maximum_decimals": 4,

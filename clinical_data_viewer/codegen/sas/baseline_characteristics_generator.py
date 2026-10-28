@@ -32,6 +32,8 @@ def _output_reference(value: object, label: str) -> str:
 
 def _literal(value: object, kind: str, label: str) -> str:
     if kind == "character":
+        if value is None:
+            return sas_string("")
         if not isinstance(value, str):
             raise ValueError(f"{label} must be character.")
         return sas_string(value)
@@ -117,6 +119,12 @@ class SasBaselineCharacteristicsGenerator:
         subject = variable_names.get(subject_requested.casefold())
         if subject is None:
             raise ValueError(f"Subject variable does not exist: {subject_requested}.")
+        treatment_requested = str(universe.get("treatment_variable") or "")
+        if treatment_requested:
+            raise ValueError(
+                "SAS code generation with treatment columns is not available yet. "
+                "Run the Python Baseline Characteristics engine instead."
+            )
         if (
             universe.get("subject_missing") != "error"
             or universe.get("duplicate_subject_rows") != "error"
@@ -163,11 +171,12 @@ class SasBaselineCharacteristicsGenerator:
                 "order": position,
                 "role": role,
                 "variable": sas_name(name),
-                "label": str(item.get("label") or name),
+                "label": str(item.get("label") or ""),
                 "unit": str(item.get("unit") or ""),
                 "storage_type": kind,
                 "percent_digits": item.get("percent_digits", 1),
                 "statistic_decimals": item.get("statistic_decimals", {}),
+                "include_missing": False,
             }
             if role == "categorical":
                 if (
@@ -187,15 +196,23 @@ class SasBaselineCharacteristicsGenerator:
                 custom_levels = level_order.get("values", [])
                 if not isinstance(custom_levels, list):
                     raise ValueError(f"Custom levels for {name} must be an array.")
+                raw_labels = level_order.get("labels", [])
+                labels_by_value = {
+                    json_item.get("value"): json_item.get("label")
+                    for json_item in raw_labels
+                    if isinstance(json_item, Mapping)
+                }
                 prepared["custom_levels"] = [
                     {
                         "rank": rank,
+                        "display": str(labels_by_value.get(value) or ("Missing" if value is None else value)),
                         "literal": _literal(
                             value, kind, f"items[{position}].level_order.values[{rank}]"
                         ),
                     }
                     for rank, value in enumerate(custom_levels, start=1)
                 ]
+                prepared["include_missing"] = any(value is None for value in custom_levels)
                 percent_digits = item.get("percent_digits")
                 if (
                     isinstance(percent_digits, bool)
@@ -206,6 +223,22 @@ class SasBaselineCharacteristicsGenerator:
                         f"Percent decimals for {name} must be between 0 and 4."
                     )
             else:
+                raw_statistics = item.get("statistics", [
+                    "n", "mean", "std", "median", "q1", "q3", "min", "max"
+                ])
+                if not isinstance(raw_statistics, list) or not raw_statistics:
+                    raise ValueError(f"Statistics for {name} must be a non-empty array.")
+                if any(
+                    statistic
+                    not in {"n", "mean", "std", "median", "q1", "q3", "min", "max"}
+                    for statistic in raw_statistics
+                ):
+                    raise ValueError(f"Unsupported statistic for {name}.")
+                if ("q1" in raw_statistics) != ("q3" in raw_statistics):
+                    raise ValueError("Q1 and Q3 must be selected together.")
+                if ("min" in raw_statistics) != ("max" in raw_statistics):
+                    raise ValueError("Min and Max must be selected together.")
+                prepared["statistics"] = raw_statistics
                 raw_decimals = item.get("statistic_decimals", {})
                 if not isinstance(raw_decimals, Mapping):
                     raise ValueError(
@@ -213,15 +246,13 @@ class SasBaselineCharacteristicsGenerator:
                     )
                 decimals: dict[str, int | None] = {}
                 for statistic in ("mean", "std", "median", "q1", "q3", "min", "max"):
-                    value = raw_decimals.get(statistic)
-                    if value is not None and (
+                    value = raw_decimals.get(statistic, 0)
+                    if value is None or (
                         isinstance(value, bool)
                         or not isinstance(value, int)
                         or not 0 <= value <= 4
                     ):
-                        raise ValueError(
-                            f"Statistic decimals for {name} must be Auto or 0-4."
-                        )
+                        raise ValueError(f"Statistic decimals for {name} must be 0-4.")
                     decimals[statistic] = value
                 prepared["statistic_decimals"] = decimals
             items.append(prepared)

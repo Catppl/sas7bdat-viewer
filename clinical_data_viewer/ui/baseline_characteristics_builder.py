@@ -4,8 +4,10 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -31,6 +33,7 @@ from ..baseline_characteristics import (
 from ..domain import DatasetMetadata, VariableMetadata
 from .analysis_source_selector import AnalysisSourceSelector
 from .proc_means_builder import FilterTextEditor
+from .widgets import ClickOnlyComboBox, MouseOnlyComboBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +41,7 @@ class BaselineCharacteristicsBuilderSelection:
     items: tuple[BaselineItem, ...]
     filter_text: str
     header_label: str
+    treatment_variable: str = ""
 
 
 class BaselineCharacteristicsBuilder(QWidget):
@@ -82,8 +86,12 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.subject_id = QLineEdit("USUBJID")
         self.subject_id.setReadOnly(True)
         self.header_label = QLineEdit("Overall")
+        self.treatment_variable = ClickOnlyComboBox()
+        self.treatment_variable.addItem("Overall (no treatment)", "")
+        self.treatment_variable.currentIndexChanged.connect(self._treatment_changed)
         form.addRow("Participant ID", self.subject_id)
         form.addRow("Summary Column Header", self.header_label)
+        form.addRow("Column Grouping Variable", self.treatment_variable)
         layout.addLayout(form)
 
         layout.addWidget(QLabel("Analysis Filter"))
@@ -160,13 +168,14 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.sas_code_button.clicked.connect(self._generate_sas_code)
         self.clear_button.clicked.connect(self.clear)
         self.run_button.clicked.connect(self._run)
-        for button in (
-            self.preview_button,
-            self.sas_code_button,
-            self.clear_button,
-            self.run_button,
+        action_grid = QGridLayout()
+        for index, button in enumerate(
+            (self.preview_button, self.sas_code_button, self.clear_button, self.run_button)
         ):
-            actions.addWidget(button)
+            action_grid.addWidget(button, index // 2, index % 2)
+        action_grid.setColumnStretch(0, 1)
+        action_grid.setColumnStretch(1, 1)
+        actions.addLayout(action_grid)
         layout.addLayout(actions)
         self.set_dataset(None, "")
 
@@ -181,7 +190,9 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.categorical_sort.addItem("Custom", "custom")
         self.categorical_order = QPlainTextEdit()
         self.categorical_order.setMaximumHeight(68)
-        self.categorical_order.setPlaceholderText("One raw level per line")
+        self.categorical_order.setPlaceholderText(
+            "One raw level=display label per line, e.g. F=Female\nM=Male\n''=Missing"
+        )
         self.percent_digits = QSpinBox()
         self.percent_digits.setRange(0, 4)
         self.percent_digits.setValue(1)
@@ -200,19 +211,10 @@ class BaselineCharacteristicsBuilder(QWidget):
         layout = QVBoxLayout(box)
         form = QFormLayout()
         self.continuous_label = QLineEdit()
-        self.continuous_unit = QLineEdit()
         form.addRow("Label", self.continuous_label)
-        form.addRow("Unit", self.continuous_unit)
         layout.addLayout(form)
-        self.decimal_table = QTableWidget(8, 2)
-        self.decimal_table.setHorizontalHeaderLabels(["Statistic", "Decimals"])
-        self.decimal_table.verticalHeader().hide()
-        self.decimal_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.Stretch
-        )
-        self.decimal_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeToContents
-        )
+        layout.addWidget(QLabel("Statistics (select Q1+Q3 and Min+Max as pairs)"))
+        statistics_grid = QGridLayout()
         labels = (
             ("n", "n"),
             ("mean", "Mean"),
@@ -223,23 +225,25 @@ class BaselineCharacteristicsBuilder(QWidget):
             ("min", "Min"),
             ("max", "Max"),
         )
+        self._statistic_checks: dict[str, QCheckBox] = {}
         self._decimal_combos: dict[str, QComboBox] = {}
         for row, (key, label) in enumerate(labels):
-            self.decimal_table.setItem(row, 0, QTableWidgetItem(label))
-            combo = QComboBox()
-            combo.addItem("Auto", None)
+            check = QCheckBox(label)
+            check.setChecked(True)
+            check.stateChanged.connect(lambda _state, changed=key: self._statistic_changed(changed))
+            self._statistic_checks[key] = check
+            combo = MouseOnlyComboBox()
             for digits in range(5):
                 combo.addItem(str(digits), digits)
             if key == "n":
-                combo.setCurrentIndex(1)
+                combo.setCurrentIndex(0)
                 combo.setEnabled(False)
             combo.currentIndexChanged.connect(self._save_selected_editor)
-            self.decimal_table.setCellWidget(row, 1, combo)
+            statistics_grid.addWidget(check, row, 0)
+            statistics_grid.addWidget(combo, row, 1)
             self._decimal_combos[key] = combo
-        self.decimal_table.setMaximumHeight(250)
-        layout.addWidget(self.decimal_table)
+        layout.addLayout(statistics_grid)
         self.continuous_label.editingFinished.connect(self._save_selected_editor)
-        self.continuous_unit.editingFinished.connect(self._save_selected_editor)
         return box
 
     def set_source_datasets(self, datasets, selected=None) -> None:
@@ -263,7 +267,25 @@ class BaselineCharacteristicsBuilder(QWidget):
         if metadata is not None and not self._filter_initialized:
             self.filter_editor.setText(filter_text)
             self._filter_initialized = True
+        self._refresh_treatment_variables()
         self._refresh_items()
+        self._update_enabled()
+
+    def _refresh_treatment_variables(self) -> None:
+        selected = self.treatment_variable.currentData()
+        self.treatment_variable.blockSignals(True)
+        self.treatment_variable.clear()
+        self.treatment_variable.addItem("Overall (no treatment)", "")
+        if self._metadata is not None:
+            for variable in self._metadata.variables:
+                if variable.name.casefold() == "usubjid":
+                    continue
+                self.treatment_variable.addItem(variable.name, variable.name)
+        index = self.treatment_variable.findData(selected or "")
+        self.treatment_variable.setCurrentIndex(max(0, index))
+        self.treatment_variable.blockSignals(False)
+
+    def _treatment_changed(self, _index: int) -> None:
         self._update_enabled()
 
     def inherit_current_filter(self, filter_text: str) -> None:
@@ -380,7 +402,12 @@ class BaselineCharacteristicsBuilder(QWidget):
             self.categorical_sort.setCurrentIndex(
                 self.categorical_sort.findData(item.level_sort_method)
             )
-            self.categorical_order.setPlainText("\n".join(map(str, item.level_order)))
+            labels = dict(item.level_labels)
+            lines = []
+            for value in item.level_order:
+                raw = "''" if value is None else str(value)
+                lines.append(f"{raw}={labels.get(value, raw)}")
+            self.categorical_order.setPlainText("\n".join(lines))
             self.percent_digits.setValue(item.percent_digits)
             for widget in (
                 self.categorical_label,
@@ -393,17 +420,33 @@ class BaselineCharacteristicsBuilder(QWidget):
             return
         self.editor_stack.setCurrentIndex(2)
         self.continuous_label.blockSignals(True)
-        self.continuous_unit.blockSignals(True)
         self.continuous_label.setText(item.label)
-        self.continuous_unit.setText(item.unit)
         configured = dict(item.statistic_decimals)
         for key, combo in self._decimal_combos.items():
             combo.blockSignals(True)
-            value = 0 if key == "n" else configured.get(key)
-            combo.setCurrentIndex(0 if value is None else value + 1)
+            value = 0 if key == "n" else configured.get(key, 0)
+            combo.setCurrentIndex(int(value))
             combo.blockSignals(False)
+        for key, check in self._statistic_checks.items():
+            check.blockSignals(True)
+            check.setChecked(key in item.statistics)
+            check.blockSignals(False)
         self.continuous_label.blockSignals(False)
-        self.continuous_unit.blockSignals(False)
+
+    def _statistic_changed(self, key: str) -> None:
+        if key in {"q1", "q3"}:
+            other = "q3" if key == "q1" else "q1"
+        elif key in {"min", "max"}:
+            other = "max" if key == "min" else "min"
+        else:
+            other = None
+        if other is not None:
+            self._statistic_checks[other].blockSignals(True)
+            self._statistic_checks[other].setChecked(
+                self._statistic_checks[key].isChecked()
+            )
+            self._statistic_checks[other].blockSignals(False)
+        self._save_selected_editor()
 
     def _save_selected_editor(self, *_args) -> None:
         row = self.items.currentRow()
@@ -415,24 +458,33 @@ class BaselineCharacteristicsBuilder(QWidget):
             self.categorical_order.setEnabled(method == "custom")
             variable = self._variable(item.variable)
             values: list[object] = []
+            labels: list[tuple[object, str]] = []
             if method == "custom" and variable is not None:
                 for text in self.categorical_order.toPlainText().splitlines():
                     text = text.strip()
                     if not text:
                         continue
-                    if variable.kind == "numeric":
+                    raw_text, separator, display_text = text.partition("=")
+                    raw_text = raw_text.strip()
+                    display_text = display_text.strip() if separator else raw_text
+                    if raw_text in {"''", '""'}:
+                        raw_value: object = None
+                    elif variable.kind == "numeric":
                         try:
-                            values.append(float(text))
+                            raw_value = float(raw_text)
                         except ValueError:
-                            values.append(text)
+                            raw_value = raw_text
                     else:
-                        values.append(text)
+                        raw_value = raw_text
+                    values.append(raw_value)
+                    labels.append((raw_value, display_text))
             self._items[row] = BaselineCategoricalItem(
                 item.variable,
                 self.categorical_label.text().strip(),
                 method,
                 tuple(values),
                 self.percent_digits.value(),
+                tuple(labels),
             )
         else:
             decimals = tuple(
@@ -440,11 +492,14 @@ class BaselineCharacteristicsBuilder(QWidget):
                 for key, combo in self._decimal_combos.items()
                 if key != "n"
             )
+            statistics = tuple(
+                key for key, check in self._statistic_checks.items() if check.isChecked()
+            )
             self._items[row] = BaselineContinuousItem(
                 item.variable,
                 self.continuous_label.text().strip(),
-                self.continuous_unit.text().strip(),
-                decimals,
+                statistic_decimals=decimals,
+                statistics=statistics,
             )
         label_item = self.items.item(row, 3)
         if label_item is not None:
@@ -470,6 +525,7 @@ class BaselineCharacteristicsBuilder(QWidget):
             tuple(self._items),
             self.current_filter_text(),
             self.header_label.text().strip(),
+            str(self.treatment_variable.currentData() or ""),
         )
 
     def _run(self) -> None:
@@ -498,6 +554,7 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.filter_editor.clear()
         self._filter_initialized = False
         self.header_label.setText("Overall")
+        self._refresh_treatment_variables()
         self._refresh_items()
         self.cleared.emit()
 
@@ -517,6 +574,7 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.sas_code_button.setEnabled(
             has_source
             and self._source_kind == "sas"
+            and not bool(self.treatment_variable.currentData())
             and bool(self._items)
             and not self._busy
         )

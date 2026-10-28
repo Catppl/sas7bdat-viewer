@@ -27,18 +27,27 @@ LONG_VARIABLES = (
 
 
 class BaselineCharacteristicsResultWriter:
-    def __init__(self, database_path: Path, header_label: str, header_n: int) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        header_label: str,
+        header_n: int,
+        columns: tuple[tuple[str, str, int], ...] | None = None,
+    ) -> None:
         self.database_path = database_path
         self.connection = sqlite3.connect(database_path)
         self.row_count = 0
-        self.variables = (
-            VariableMetadata("ROW_LABEL", "Characteristic"),
-            VariableMetadata("VALUE", f"{header_label}\n(N={header_n:,})"),
+        self.column_specs = columns or (("VALUE", f"{header_label}\n(N={header_n:,})", header_n),)
+        self.variables = (VariableMetadata("ROW_LABEL", "Characteristic"),) + tuple(
+            VariableMetadata(name, label) for name, label, _n in self.column_specs
         )
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=NORMAL")
         self.connection.execute(
-            'CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "ROW_LABEL" TEXT, "VALUE" TEXT)'
+            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+            + quote_identifier("ROW_LABEL") + " TEXT, "
+            + ', '.join(f'{quote_identifier(name)} TEXT' for name, _label, _n in self.column_specs)
+            + ")"
         )
         self.connection.execute(
             "CREATE TABLE baseline_characteristics_long ("
@@ -52,7 +61,7 @@ class BaselineCharacteristicsResultWriter:
             "CREATE TABLE baseline_characteristics_cell_map ("
             "result_row INTEGER NOT NULL, column_name TEXT NOT NULL, "
             "item_kind TEXT NOT NULL, variable TEXT NOT NULL, "
-            "level_json TEXT, statistic_key TEXT, "
+            "level_json TEXT, statistic_key TEXT, treatment_level_json TEXT, "
             "PRIMARY KEY (result_row, column_name))"
         )
 
@@ -65,9 +74,12 @@ class BaselineCharacteristicsResultWriter:
         item_label: str,
         row_label: str,
         display_value: str = "",
+        display_values: dict[str, str] | None = None,
         unit: str = "",
         level_json: str | None = None,
         statistic_key: str | None = None,
+        treatment_level_json: str | None = None,
+        treatment_levels: dict[str, str | None] | None = None,
         raw_value_1: float | None = None,
         raw_value_2: float | None = None,
         numerator: int | None = None,
@@ -76,9 +88,13 @@ class BaselineCharacteristicsResultWriter:
         drilldown: bool = False,
     ) -> int:
         self.row_count += 1
+        values = display_values or {self.column_specs[0][0]: display_value}
+        columns = ", ".join([quote_identifier("ROW_LABEL")] + [quote_identifier(name) for name, _label, _n in self.column_specs])
+        placeholders = ", ".join("?" for _ in range(len(self.column_specs) + 2))
         self.connection.execute(
-            'INSERT INTO dataset (_source_row, "ROW_LABEL", "VALUE") VALUES (?, ?, ?)',
-            (self.row_count, row_label, display_value),
+            f"INSERT INTO dataset (_source_row, {columns}) VALUES ({placeholders})",
+            (self.row_count, row_label)
+            + tuple(values.get(name, "") for name, _label, _n in self.column_specs),
         )
         self.connection.execute(
             "INSERT INTO baseline_characteristics_long VALUES "
@@ -101,17 +117,19 @@ class BaselineCharacteristicsResultWriter:
             ),
         )
         if drilldown:
-            self.connection.execute(
-                "INSERT INTO baseline_characteristics_cell_map VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    self.row_count,
-                    "VALUE",
-                    item_kind,
-                    variable,
-                    level_json,
-                    statistic_key,
-                ),
-            )
+            for column_name, _label, _n in self.column_specs:
+                self.connection.execute(
+                    "INSERT INTO baseline_characteristics_cell_map VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        self.row_count,
+                        column_name,
+                        item_kind,
+                        variable,
+                        level_json,
+                        statistic_key,
+                        (treatment_levels or {}).get(column_name, treatment_level_json),
+                    ),
+                )
         return self.row_count
 
     def finish(
@@ -137,10 +155,12 @@ class BaselineCharacteristicsResultWriter:
             self.variables,
             display_column_names=(
                 ("ROW_LABEL", "Characteristic"),
-                ("VALUE", self.variables[1].label),
+                *((name, label) for name, label, _n in self.column_specs),
             ),
             categorical_item_level_column="ROW_LABEL",
-            baseline_characteristics_drilldown_columns=("VALUE",),
+            baseline_characteristics_drilldown_columns=tuple(
+                name for name, _label, _n in self.column_specs
+            ),
         )
         return DatasetHandle(
             source.source_path.parent

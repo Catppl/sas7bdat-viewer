@@ -17,6 +17,7 @@ class BaselineCharacteristicsCell:
     variable: str
     level: object | None
     statistic_key: str | None
+    treatment_level: object | None = None
 
 
 def lookup_cell(
@@ -26,7 +27,7 @@ def lookup_cell(
         sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)
     ) as connection:
         row = connection.execute(
-            "SELECT item_kind, variable, level_json, statistic_key "
+            "SELECT item_kind, variable, level_json, statistic_key, treatment_level_json "
             "FROM baseline_characteristics_cell_map "
             "WHERE result_row = ? AND column_name = ?",
             (result_source_row, column_name),
@@ -38,6 +39,7 @@ def lookup_cell(
         row[1],
         json.loads(row[2]) if row[2] is not None else None,
         row[3],
+        json.loads(row[4]) if row[4] is not None else None,
     )
 
 
@@ -76,9 +78,19 @@ def build_cell_filter(
     if config.compiled_filter.sql:
         clauses.append(f"({config.compiled_filter.sql})")
         parameters.extend(config.compiled_filter.parameters)
+    if config.treatment_variable and cell.treatment_level is not None:
+        treatment = fields[config.treatment_variable.casefold()]
+        if cell.treatment_level is None:
+            clauses.append(_missing_sql(treatment.name, treatment.kind, missing=True))
+        else:
+            clauses.append(f"{quote_identifier(treatment.name)} = ?")
+            parameters.append(cell.treatment_level)
     if cell.item_kind == "categorical" and not denominator:
-        clauses.append(f"{quote_identifier(variable.name)} = ?")
-        parameters.append(cell.level)
+        if cell.level is None:
+            clauses.append(_missing_sql(variable.name, variable.kind, missing=True))
+        else:
+            clauses.append(f"{quote_identifier(variable.name)} = ?")
+            parameters.append(cell.level)
     elif cell.item_kind == "continuous":
         clauses.append(_missing_sql(variable.name, variable.kind, missing=False))
     return CompiledFilter(" AND ".join(clauses), tuple(parameters))
@@ -96,8 +108,14 @@ def build_cell_where_text(
     clauses: list[str] = []
     if config.filter_text.strip():
         clauses.append(f"({config.filter_text.strip()})")
+    if config.treatment_variable and cell.treatment_level is not None:
+        treatment = fields[config.treatment_variable.casefold()]
+        clauses.append(f"{treatment.name} = {_literal(cell.treatment_level, treatment.kind)}")
     if cell.item_kind == "categorical" and not denominator:
-        clauses.append(f"{variable.name} = {_literal(cell.level, variable.kind)}")
+        if cell.level is None:
+            clauses.append(f"missing({variable.name})")
+        else:
+            clauses.append(f"{variable.name} = {_literal(cell.level, variable.kind)}")
     elif cell.item_kind == "continuous":
         clauses.append(f"not missing({variable.name})")
     return " and ".join(clauses)

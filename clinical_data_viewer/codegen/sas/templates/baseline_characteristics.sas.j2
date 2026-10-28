@@ -35,7 +35,7 @@ quit;
 
 data {{ long_output }};
   length row_order item_order 8 item_kind $12 variable $32 item_label $256 unit $80
-         row_label $320 level_value $400 statistic_key $16
+         row_label $320 level_value display_level $400 statistic_key $16
          raw_value_1 raw_value_2 numerator denominator percent 8 display_value $80;
   stop;
 run;
@@ -44,7 +44,9 @@ run;
 {% if item.role == "categorical" %}
 data work._bc_cat_source_{{ item.order }};
   set work._bc_source;
+{% if not item.include_missing %}
   where not missing({{ item.variable }});
+{% endif %}
   length level_value $400 sort_rank 8;
   level_value=strip(vvalue({{ item.variable }}));
 {% if item.level_order == "custom" %}  sort_rank=1000000;
@@ -76,7 +78,9 @@ data work._bc_item_{{ item.order }};
   set work._bc_cat_{{ item.order }};
   row_order={{ item.order }}*100000+_n_; item_order={{ item.order }};
   item_kind="categorical"; variable={{ item.variable | sas_string }};
-  item_label={{ item.label | sas_string }}; row_label=cats("    ", level_value);
+  item_label={{ item.label | sas_string }}; display_level=level_value;
+{% if item.level_order == "custom" %}{% for level in item.custom_levels %}  if {{ item.variable }}={{ level.literal }} then display_level={{ level.display | sas_string }};
+{% endfor %}{% endif %}  row_label=cats("    ", display_level);
   display_value=cats(put(numerator,comma16.), " (",
                      put(round(percent,10**(-{{ item.percent_digits }})),16.{{ item.percent_digits }}), ")");
   output;
@@ -88,59 +92,42 @@ proc means data=work._bc_source noprint vardef=df qntldef=5;
          q1=q1 q3=q3 min=min max=max;
 run;
 
-/* Auto decimals are the maximum observed source precision, capped at four. */
-data work._bc_dec_{{ item.order }};
-  set work._bc_source(keep={{ item.variable }}) end=_last;
-  retain base_dec 0;
-  if not missing({{ item.variable }}) then do;
-    _value_dec=4;
-    do _dec=0 to 4;
-      if abs({{ item.variable }}-round({{ item.variable }},10**(-_dec)))
-         <= max(1e-12,abs({{ item.variable }})*1e-12) then do;
-        _value_dec=_dec; leave;
-      end;
-    end;
-    base_dec=max(base_dec,_value_dec);
-  end;
-  if _last then output;
-  keep base_dec;
-run;
+/* Maximum observed source precision is not used; decimals are user-specified. */
 
 data work._bc_item_{{ item.order }};
   length row_order item_order 8 item_kind $12 variable $32 item_label $256 unit $80
          row_label $320 level_value $400 statistic_key $16
          raw_value_1 raw_value_2 numerator denominator percent 8 display_value $80;
-  if _n_=1 then set work._bc_dec_{{ item.order }};
   set work._bc_stat_{{ item.order }};
   item_order={{ item.order }}; item_kind="continuous";
   variable={{ item.variable | sas_string }}; item_label={{ item.label | sas_string }};
-  unit={{ item.unit | sas_string }}; denominator=&_bc_header_n; numerator=n;
+  unit=""; denominator=&_bc_header_n; numerator=n;
   row_order={{ item.order }}*100000; row_label=item_label;
-  if not missing(unit) then row_label=cats(item_label," (",unit,")");
   display_value=""; output;
 
-  row_order+1; statistic_key="n"; row_label="    n";
+{% if "n" in item.statistics %}  row_order+1; statistic_key="n"; row_label="    n";
   raw_value_1=n; raw_value_2=.; display_value=strip(put(n,comma16.)); output;
+{% endif %}
 
-{% for key, label in (("mean", "Mean"), ("std", "SD"), ("median", "Median")) %}  row_order+1; statistic_key="{{ key }}"; row_label="    {{ label }}";
+{% for key, label in (("mean", "Mean"), ("std", "SD"), ("median", "Median")) %}{% if key in item.statistics %}  row_order+1; statistic_key="{{ key }}"; row_label="    {{ label }}";
   raw_value_1={{ key }}; raw_value_2=.;
-  _dec={% if item.statistic_decimals[key] is none %}base_dec{% else %}{{ item.statistic_decimals[key] }}{% endif %};
+  _dec={{ item.statistic_decimals[key] }};
   display_value=ifc(missing(raw_value_1),"-",strip(putn(round(raw_value_1,10**(-_dec)),cats("32.",_dec)))); output;
 
-{% endfor %}  row_order+1; statistic_key="q1_q3"; row_label="    Q1, Q3";
+{% endif %}{% endfor %}{% if "q1" in item.statistics %}  row_order+1; statistic_key="q1_q3"; row_label="    Q1, Q3";
   raw_value_1=q1; raw_value_2=q3;
-  _dec1={% if item.statistic_decimals.q1 is none %}base_dec{% else %}{{ item.statistic_decimals.q1 }}{% endif %};
-  _dec2={% if item.statistic_decimals.q3 is none %}base_dec{% else %}{{ item.statistic_decimals.q3 }}{% endif %};
+  _dec1={{ item.statistic_decimals.q1 }};
+  _dec2={{ item.statistic_decimals.q3 }};
   display_value=cats(ifc(missing(q1),"-",strip(putn(round(q1,10**(-_dec1)),cats("32.",_dec1)))),", ",
                      ifc(missing(q3),"-",strip(putn(round(q3,10**(-_dec2)),cats("32.",_dec2))))); output;
 
-  row_order+1; statistic_key="min_max"; row_label="    Min, Max";
+{% endif %}{% if "min" in item.statistics %}  row_order+1; statistic_key="min_max"; row_label="    Min, Max";
   raw_value_1=min; raw_value_2=max;
-  _dec1={% if item.statistic_decimals.min is none %}base_dec{% else %}{{ item.statistic_decimals.min }}{% endif %};
-  _dec2={% if item.statistic_decimals.max is none %}base_dec{% else %}{{ item.statistic_decimals.max }}{% endif %};
+  _dec1={{ item.statistic_decimals.min }};
+  _dec2={{ item.statistic_decimals.max }};
   display_value=cats(ifc(missing(min),"-",strip(putn(round(min,10**(-_dec1)),cats("32.",_dec1)))),", ",
                      ifc(missing(max),"-",strip(putn(round(max,10**(-_dec2)),cats("32.",_dec2))))); output;
-  keep row_order item_order item_kind variable item_label unit row_label level_value
+{% endif %}  keep row_order item_order item_kind variable item_label unit row_label level_value
        statistic_key raw_value_1 raw_value_2 numerator denominator percent display_value;
 run;
 {% endif %}

@@ -1732,8 +1732,11 @@ class MainWindow(QMainWindow):
 
     def show_baseline_characteristics_builder(self) -> None:
         self.analysis_controller.show_baseline_characteristics_builder()
-        self.analysis_dock.setMinimumWidth(360)
-        self.analysis_dock.resize(360, self.analysis_dock.height())
+        # The Builder actions are arranged in two rows so this shell can use a
+        # compact dock without forcing the data view to become narrow.
+        compact_width = 180
+        self.analysis_dock.setMinimumWidth(compact_width)
+        self.analysis_dock.resize(compact_width, self.analysis_dock.height())
         self.analysis_dock.show()
 
     def show_categorical_builder(self) -> None:
