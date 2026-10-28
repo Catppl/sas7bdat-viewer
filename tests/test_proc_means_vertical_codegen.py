@@ -63,8 +63,12 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("where not missing(AVAL)", code)
         self.assertIn("base_aval", code)
         self.assertIn("base_chg", code)
-        self.assertIn("disp_dec = min(4", code)
+        self.assertIn("data pm_decimals;", code)
+        self.assertIn("display_dec = min(4, base_dec + add_dec);", code)
+        self.assertIn("data pm_labels;", code)
         self.assertIn("vardef=df qntldef=5 alpha=0.05", code)
+        self.assertNotIn("data long_aval_", code)
+        self.assertNotIn("data long_chg_", code)
 
     def test_generator_rejects_merge_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -92,6 +96,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("coalesce(s.n, 0) as n", code)
         self.assertIn("by output_row group item statistic", code)
         self.assertIn("prefix=col", code)
+        self.assertIn("data pm_decimals;", code)
+        self.assertNotIn("data long_aval_", code)
         self.assertNotIn("resolved_hierarchy", code)
 
     def test_generator_renders_filter_ast(self) -> None:
@@ -110,6 +116,19 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         }
         code = SasProcMeansVerticalGenerator().generate(configuration)
         self.assertIn("where TRT01A = 'A';", code)
+
+    def test_single_analysis_uses_shared_values_labels_and_decimals_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = self._configuration(Path(temporary))
+        configuration["variables"]["analysis"] = ["AVAL"]
+        code = SasProcMeansVerticalGenerator().generate(configuration)
+
+        self.assertEqual(code.count("data values_aval;"), 1)
+        self.assertNotIn("data values_chg;", code)
+        self.assertEqual(code.count("data pm_labels;"), 1)
+        self.assertEqual(code.count("data pm_decimals;"), 1)
+        self.assertEqual(code.count("data pm_long;"), 1)
+        self.assertNotIn("data long_aval_", code)
 
 
 if __name__ == "__main__":

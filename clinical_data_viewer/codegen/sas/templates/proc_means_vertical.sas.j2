@@ -129,6 +129,29 @@ proc sql noprint;
 quit;
 
 {% for analysis in analysis %}
+{% if analysis.base_decimal is none %}
+/* Determine base decimals for {{ analysis.name }} from the current source */
+data dec_{{ analysis.token }};
+    set pm_src(keep={{ analysis.name | sas_name }});
+    if not missing({{ analysis.name | sas_name }});
+    base_dec = 0;
+    do dec = 0 to 4;
+        unit = 10 ** (-dec);
+        if abs({{ analysis.name | sas_name }} - round({{ analysis.name | sas_name }}, unit))
+           <= max(1E-12, abs({{ analysis.name | sas_name }}) * 1E-12) then do;
+            base_dec = dec;
+            leave;
+        end;
+    end;
+    keep base_dec;
+run;
+proc sql noprint;
+    select coalesce(max(base_dec), 0) into :base_{{ analysis.token }} trimmed
+    from dec_{{ analysis.token }};
+quit;
+{% else %}%let base_{{ analysis.token }} = {{ analysis.base_decimal }};
+{% endif %}
+
 /* Statistics for {{ analysis.name }} */
 proc means data=pm_src noprint{% if group_variables %} nway missing{% endif %}
     vardef=df qntldef=5 alpha={{ alpha }};
@@ -138,8 +161,7 @@ proc means data=pm_src noprint{% if group_variables %} nway missing{% endif %}
 {% if proc_statistics %}{% for key in proc_statistics %}        {{ key }}={{ key }}
 {% endfor %}        ;
 {% else %}        n=internal_n;
-{% endif %}
-run;
+{% endif %}run;
 
 /* Distinct subject count for {{ analysis.name }} */
 proc sql;
@@ -181,8 +203,7 @@ proc means data=pm_src noprint
 {% if proc_statistics %}{% for key in proc_statistics %}        {{ key }}={{ key }}
 {% endfor %}        ;
 {% else %}        n=internal_n;
-{% endif %}
-run;
+{% endif %}run;
 
 proc sql;
     create table total_{{ analysis.token }}_n as
@@ -199,55 +220,95 @@ data total_{{ analysis.token }}_row;
 run;
 {% endif %}
 
-{% if analysis.base_decimal is none %}
-/* Determine base decimals for {{ analysis.name }} from the current source */
-data dec_{{ analysis.token }};
-    set pm_src(keep={{ analysis.name | sas_name }});
-    if not missing({{ analysis.name | sas_name }});
-    base_dec = 0;
-    do dec = 0 to 4;
-        unit = 10 ** (-dec);
-        if abs({{ analysis.name | sas_name }} - round({{ analysis.name | sas_name }}, unit))
-           <= max(1E-12, abs({{ analysis.name | sas_name }}) * 1E-12) then do;
-            base_dec = dec;
-            leave;
-        end;
-    end;
-    keep base_dec;
-run;
-proc sql noprint;
-    select coalesce(max(base_dec), 0) into :base_{{ analysis.token }} trimmed
-    from dec_{{ analysis.token }};
-quit;
-{% else %}%let base_{{ analysis.token }} = {{ analysis.base_decimal }};
-{% endif %}
-
-{% for row in statistics %}
-data long_{{ analysis.token }}_{{ loop.index }};
+/* Put all statistics for this analysis variable into one dataset */
+data values_{{ analysis.token }};
     set out_{{ analysis.token }}{% if include_total %} total_{{ analysis.token }}_row{% endif %};
-    length item $200 stat $32 display $200;
-    item = {{ analysis.label | sas_string }};
-    stat = {{ row.label | sas_string }};
+    length analysis $32 key1 key2 $32 value1 value2 8;
+    analysis = {{ analysis.token | sas_string }};
+{% for row in statistics %}    stat_order = {{ loop.index }};
     row_ord = {{ (analysis.index - 1) * (statistics|length) + loop.index }};
-    disp_dec = min(4, &&base_{{ analysis.token }} + {{ offsets.get(row["keys"][0], 0) }});
-{% if row["keys"]|length == 1 and row["keys"][0] == "subjects" %}    display = strip(put(subject_n, 12.));
-{% elif row["keys"]|length == 1 and row["keys"][0] in ["n", "nmiss"] %}    display = strip(put({{ row["keys"][0] }}, 12.));
-{% elif row["keys"]|length == 1 %}    if missing({{ row["keys"][0] }}) then display = "—";
-    else display = strip(putn({{ row["keys"][0] }}, cats("32.", disp_dec)));
-{% else %}    if missing({{ row["keys"][0] }}) and missing({{ row["keys"][1] }}) then display = "—, —";
-    else display = catx(", ",
-        ifc(missing({{ row["keys"][0] }}), "—", strip(putn({{ row["keys"][0] }}, cats("32.", disp_dec)))),
-        ifc(missing({{ row["keys"][1] }}), "—", strip(putn({{ row["keys"][1] }}, cats("32.", disp_dec)))));
-{% endif %}    keep row_ord item stat grp_ord display;
+    key1 = {{ row["keys"][0] | sas_string }};
+{% if row["keys"]|length > 1 %}    key2 = {{ row["keys"][1] | sas_string }};
+{% else %}    key2 = "";
+{% endif %}{% if row["keys"][0] == "subjects" %}    value1 = subject_n;
+{% elif row["keys"][0] == "n" and "n" not in proc_statistics %}    value1 = internal_n;
+{% else %}    value1 = {{ row["keys"][0] }};
+{% endif %}{% if row["keys"]|length > 1 %}    value2 = {{ row["keys"][1] }};
+{% else %}    value2 = .;
+{% endif %}    output;
+{% endfor %}    keep analysis stat_order row_ord grp_ord grp_label big_n subject_n key1 key2 value1 value2;
 run;
 {% endfor %}
-{% endfor %}
 
-/* Build final vertical table */
-data pm_long;
+/* Centralized display labels for all analysis variables and statistics */
+data pm_labels;
+    length analysis $32 item $200 stat_label $40 key1 key2 $32;
+{% for analysis in analysis %}{% for row in statistics %}    analysis = {{ analysis.token | sas_string }};
+    stat_order = {{ loop.index }};
+    item = {{ analysis.label | sas_string }};
+    stat_label = {{ row.label | sas_string }};
+    key1 = {{ row["keys"][0] | sas_string }};
+{% if row["keys"]|length > 1 %}    key2 = {{ row["keys"][1] | sas_string }};
+{% else %}    key2 = "";
+{% endif %}    output;
+{% endfor %}{% endfor %}    keep analysis stat_order item stat_label key1 key2;
+run;
+
+/* Centralized decimal rules for all analysis variables and statistics */
+data pm_decimals;
+    length analysis $32 stat_key $32 base_dec add_dec display_dec 8;
+{% for analysis in analysis %}{% for row in statistics %}{% for key in row["keys"] %}    analysis = {{ analysis.token | sas_string }};
+    stat_key = {{ key | sas_string }};
+    base_dec = &base_{{ analysis.token }};
+    add_dec = {{ offsets.get(key, 0) }};
+    display_dec = min(4, base_dec + add_dec);
+    output;
+{% endfor %}{% endfor %}{% endfor %}    keep analysis stat_key base_dec add_dec display_dec;
+run;
+
+data pm_values;
     set
-{% for analysis in analysis %}{% for row in statistics %}        long_{{ analysis.token }}_{{ loop.index }}
-{% endfor %}{% endfor %};
+{% for analysis in analysis %}        values_{{ analysis.token }}
+{% endfor %};
+run;
+
+proc sql;
+    create table pm_display as
+    select v.*, l.item, l.stat_label,
+           d1.display_dec as dec1,
+           d2.display_dec as dec2
+    from pm_values as v
+    left join pm_labels as l
+        on v.analysis = l.analysis
+       and v.stat_order = l.stat_order
+    left join pm_decimals as d1
+        on v.analysis = d1.analysis
+       and v.key1 = d1.stat_key
+    left join pm_decimals as d2
+        on v.analysis = d2.analysis
+       and v.key2 = d2.stat_key;
+quit;
+
+/* Format every statistic in one display step */
+data pm_long;
+    length stat display $200;
+    set pm_display;
+    stat = stat_label;
+    if key2 = "" then do;
+        if key1 in ("subjects", "n", "nmiss") then
+            display = strip(put(value1, 12.));
+        else if missing(value1) then
+            display = "—";
+        else
+            display = strip(putn(value1, cats("32.", dec1)));
+    end;
+    else if missing(value1) and missing(value2) then
+        display = "—, —";
+    else
+        display = catx(", ",
+            ifc(missing(value1), "—", strip(putn(value1, cats("32.", dec1)))),
+            ifc(missing(value2), "—", strip(putn(value2, cats("32.", dec2)))));
+    keep row_ord item stat grp_ord display;
 run;
 
 proc sort data=pm_long;
@@ -280,10 +341,10 @@ quit;
 
 /* Clean up intermediate WORK tables */
 proc datasets library=work nolist;
-    delete pm_src pop_src pop0 pop_n pop_total grp0 grp grp_n pm_long
-{% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} out_{{ analysis.token }} total_{{ analysis.token }} total_{{ analysis.token }}_n total_{{ analysis.token }}_row dec_{{ analysis.token }}
-{% for row in statistics %}        long_{{ analysis.token }}_{{ loop.index }}
-{% endfor %}{% endfor %};
+    delete pm_src pop_src pop0 pop_n pop_total grp0 grp grp_n pm_labels pm_decimals pm_values pm_display pm_long
+{% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} out_{{ analysis.token }} values_{{ analysis.token }} dec_{{ analysis.token }}
+{% if include_total %}        total_{{ analysis.token }} total_{{ analysis.token }}_n total_{{ analysis.token }}_row
+{% endif %}{% endfor %};
 quit;
 
 libname {{ source.library }} clear;
