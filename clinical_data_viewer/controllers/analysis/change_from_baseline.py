@@ -10,12 +10,12 @@ from ...change_from_baseline import ChangeFromBaselineConfig, ChangeFromBaseline
 from ...change_from_baseline.configuration import (
     build_change_from_baseline_configuration,
 )
-from ...change_from_baseline.result_store import ChangeFromBaselineLongResultBuilder
 from ...change_from_baseline.drilldown import (
     CategoricalQueryBuilder,
     build_cell_filter,
     lookup_cell,
 )
+from ...change_from_baseline.result_store import ChangeFromBaselineLongResultBuilder
 from ...codegen.sas import SasChangeFromBaselineGenerator
 from ...dataset_utils import is_analysis_dataset
 from ...domain import DatasetHandle

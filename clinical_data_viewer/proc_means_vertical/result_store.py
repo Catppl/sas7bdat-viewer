@@ -26,7 +26,9 @@ class ProcMeansVerticalResultWriter:
             f"{quote_identifier(variable.name)} TEXT" for variable in variables
         )
         self.connection.execute(
-            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + definitions + ")"
+            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+            + definitions
+            + ")"
         )
         long_defs = ", ".join(
             f"{quote_identifier(variable.name)} "
@@ -48,7 +50,9 @@ class ProcMeansVerticalResultWriter:
 
     def add_row(self, values: tuple[object, ...]) -> int:
         self.row_count += 1
-        names = ", ".join(quote_identifier(variable.name) for variable in self.variables)
+        names = ", ".join(
+            quote_identifier(variable.name) for variable in self.variables
+        )
         placeholders = ", ".join("?" for _ in self.variables)
         self.connection.execute(
             f"INSERT INTO dataset (_source_row, {names}) VALUES (?, {placeholders})",
@@ -58,7 +62,9 @@ class ProcMeansVerticalResultWriter:
 
     def add_long(self, values: tuple[object, ...]) -> None:
         self.long_count += 1
-        names = ", ".join(quote_identifier(variable.name) for variable in self.long_variables)
+        names = ", ".join(
+            quote_identifier(variable.name) for variable in self.long_variables
+        )
         placeholders = ", ".join("?" for _ in self.long_variables)
         self.connection.execute(
             f"INSERT INTO proc_means_vertical_long (_source_row, {names}) VALUES (?, {placeholders})",
@@ -146,11 +152,19 @@ class ProcMeansVerticalLongResultBuilder:
     def run(self, result: DatasetHandle, source: DatasetHandle) -> DatasetHandle:
         directory = self.temp_manager.create_dataset_directory()
         database = directory / "dataset.sqlite"
-        with sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
-            columns = [row[1] for row in connection.execute("PRAGMA table_info(proc_means_vertical_long)")]
+        with sqlite3.connect(
+            result.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        ) as connection:
+            columns = [
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(proc_means_vertical_long)"
+                )
+            ]
             rows = connection.execute(
-                "SELECT " + ", ".join(quote_identifier(name) for name in columns[1:]) +
-                " FROM proc_means_vertical_long ORDER BY _source_row"
+                "SELECT "
+                + ", ".join(quote_identifier(name) for name in columns[1:])
+                + " FROM proc_means_vertical_long ORDER BY _source_row"
             ).fetchall()
         variables = (
             VariableMetadata("ITEM", "Item", "character", 200),
@@ -168,20 +182,33 @@ class ProcMeansVerticalLongResultBuilder:
                 f"{quote_identifier(variable.name)} {'REAL' if variable.kind == 'numeric' else 'TEXT'}"
                 for variable in variables
             )
-            target.execute("CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, " + definitions + ")")
+            target.execute(
+                "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+                + definitions
+                + ")"
+            )
             target.executemany(
-                "INSERT INTO dataset (" + ", ".join(quote_identifier(v.name) for v in variables) + ") VALUES (" + ", ".join("?" for _ in variables) + ")",
+                "INSERT INTO dataset ("
+                + ", ".join(quote_identifier(v.name) for v in variables)
+                + ") VALUES ("
+                + ", ".join("?" for _ in variables)
+                + ")",
                 rows,
             )
-            target.execute("CREATE TABLE cache_info (cached_rows INTEGER,total_rows INTEGER,complete INTEGER)")
-            target.execute("INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows)))
+            target.execute(
+                "CREATE TABLE cache_info (cached_rows INTEGER,total_rows INTEGER,complete INTEGER)"
+            )
+            target.execute(
+                "INSERT INTO cache_info VALUES (?, ?, 1)", (len(rows), len(rows))
+            )
             target.commit()
             target.close()
             target = None
             marker = directory / "proc-means-vertical-long-result.tmp"
             marker.touch()
             return DatasetHandle(
-                source.source_path.parent / f"PROC MEANS Vertical Long - {source.metadata.name}",
+                source.source_path.parent
+                / f"PROC MEANS Vertical Long - {source.metadata.name}",
                 marker,
                 database,
                 DatasetMetadata(

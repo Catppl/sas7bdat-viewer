@@ -765,9 +765,7 @@ class CategoricalEngine:
                     self._value_sort_key(level, item_variable),
                 )
             if item.level_sort_method == "custom":
-                rank = custom_ranks.get(
-                    self._custom_level_key(level, item_variable)
-                )
+                rank = custom_ranks.get(self._custom_level_key(level, item_variable))
                 if rank is not None:
                     return (0, rank)
                 return (1, self._value_sort_key(level, item_variable))
@@ -775,7 +773,9 @@ class CategoricalEngine:
 
         for context_key in context_keys:
             levels = [
-                level_key for current_context, level_key in rows if current_context == context_key
+                level_key
+                for current_context, level_key in rows
+                if current_context == context_key
             ]
             if item.level_sort_method == "runtime_value_descending":
                 nonmissing = [
@@ -788,13 +788,16 @@ class CategoricalEngine:
                     for level_key in levels
                     if _missing(json.loads(level_key), item_variable)
                 ]
-                levels = sorted(
-                    nonmissing,
-                    key=lambda level_key: self._value_sort_key(
-                        json.loads(level_key), item_variable
-                    ),
-                    reverse=True,
-                ) + missing
+                levels = (
+                    sorted(
+                        nonmissing,
+                        key=lambda level_key: self._value_sort_key(
+                            json.loads(level_key), item_variable
+                        ),
+                        reverse=True,
+                    )
+                    + missing
+                )
             elif item.level_sort_method == "frequency_descending":
                 nonmissing = [
                     level_key
@@ -814,7 +817,9 @@ class CategoricalEngine:
                     key=lambda level_key: -level_frequency(level_key, context_key),
                 )
             else:
-                levels.sort(key=lambda level_key: level_sort_key(level_key, context_key))
+                levels.sort(
+                    key=lambda level_key: level_sort_key(level_key, context_key)
+                )
             context = json.loads(context_key)
             context_text = ", ".join(
                 f"{name}={_display(context.get(name))}" for name in context_names
@@ -830,7 +835,9 @@ class CategoricalEngine:
                 long_cells: dict[str | None, tuple[int, int]] = {}
                 treatment_json: dict[str | None, str] = {}
                 for treatment_key in all_treatments:
-                    cell_frequency = rows[(context_key, level_key)].get(treatment_key, 0)
+                    cell_frequency = rows[(context_key, level_key)].get(
+                        treatment_key, 0
+                    )
                     denom = denominator.get((context_key, treatment_key), 0)
                     cells[treatment_key] = (
                         self._format_cell(cell_frequency, denom, config.percent_digits),

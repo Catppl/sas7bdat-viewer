@@ -63,7 +63,9 @@ def _drilldown_context(
         group_variables=selected_variables,
         row_group_variables=(),
     )
-    return drilldown_config, dict(zip(selected_variables, cell.group_values, strict=True))
+    return drilldown_config, dict(
+        zip(selected_variables, cell.group_values, strict=True)
+    )
 
 
 def build_cell_filter(

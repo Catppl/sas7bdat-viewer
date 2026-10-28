@@ -818,16 +818,16 @@ class CategoricalEngineTests(unittest.TestCase):
                 with closing(sqlite3.connect(result.database_path)) as connection:
                     return [
                         value[0].replace("\u00a0", "").strip()
-                        for value in connection.execute('SELECT "ITEM_LEVEL" FROM dataset')
+                        for value in connection.execute(
+                            'SELECT "ITEM_LEVEL" FROM dataset'
+                        )
                         if value[0].startswith("\u00a0")
                     ]
 
             self.assertEqual(levels("runtime_value_ascending"), ["A", "a", "B", "C"])
             self.assertEqual(levels("runtime_value_descending"), ["C", "B", "a", "A"])
             self.assertEqual(levels("frequency_descending"), ["C", "A", "a", "B"])
-            self.assertEqual(
-                levels("custom", ("b", "a", "c")), ["B", "A", "a", "C"]
-            )
+            self.assertEqual(levels("custom", ("b", "a", "c")), ["B", "A", "a", "C"])
 
     def test_propcase_changes_display_only_and_warns_on_collisions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

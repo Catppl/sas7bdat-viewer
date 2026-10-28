@@ -309,6 +309,5 @@ class CopyTableView(QTableView):
         return bool(
             variable_name
             and metadata is not None
-            and variable_name
-            in dict(metadata.change_from_baseline_statistic_keys)
+            and variable_name in dict(metadata.change_from_baseline_statistic_keys)
         )

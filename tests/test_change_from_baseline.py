@@ -11,12 +11,12 @@ from clinical_data_viewer.change_from_baseline import (
     ChangeFromBaselineConfig,
     ChangeFromBaselineEngine,
 )
-from clinical_data_viewer.change_from_baseline.result_store import (
-    ChangeFromBaselineLongResultBuilder,
-)
 from clinical_data_viewer.change_from_baseline.drilldown import (
     build_cell_filter,
     lookup_cell,
+)
+from clinical_data_viewer.change_from_baseline.result_store import (
+    ChangeFromBaselineLongResultBuilder,
 )
 from clinical_data_viewer.domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from clinical_data_viewer.filter_engine import FilterEngine

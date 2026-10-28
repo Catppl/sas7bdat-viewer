@@ -236,7 +236,9 @@ class CategoricalSasGeneratorTests(unittest.TestCase):
         self.assertNotIn("cats(", code)
         self.assertNotIn("__cde", code)
         self.assertNotIn("categorical_treatment_frequency_intermediate", code)
-        self.assertIn("/* Item labels: edit the display text in this block only. */", code)
+        self.assertIn(
+            "/* Item labels: edit the display text in this block only. */", code
+        )
         self.assertIn("value $cat_item_label", code)
         self.assertEqual(code.count("'Race category'"), 1)
         self.assertIn("item = put('RACE', $cat_item_label.);", code)

@@ -328,6 +328,10 @@ class UiSmokeTests(unittest.TestCase):
         from clinical_data_viewer.temp_manager import TempManager
         from clinical_data_viewer.ui.main_window import MainWindow
 
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
         application = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -351,7 +355,7 @@ class UiSmokeTests(unittest.TestCase):
                 True,
             )
             window = MainWindow(
-                AppSettings(),
+                TestSettings(),
                 TempManager(root / "viewer-temp"),
                 FilterHistory(root / "history.sqlite"),
             )
@@ -403,6 +407,10 @@ class UiSmokeTests(unittest.TestCase):
         from clinical_data_viewer.settings import AppSettings
         from clinical_data_viewer.temp_manager import TempManager
         from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
 
         application = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as directory:
@@ -460,7 +468,7 @@ class UiSmokeTests(unittest.TestCase):
             result = ProcMeansEngine(manager).run(source, config)
 
             window = MainWindow(
-                AppSettings(),
+                TestSettings(),
                 manager,
                 FilterHistory(root / "history.sqlite"),
             )
@@ -565,6 +573,10 @@ class UiSmokeTests(unittest.TestCase):
         from clinical_data_viewer.temp_manager import TempManager
         from clinical_data_viewer.ui.main_window import MainWindow
 
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
         application = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -577,8 +589,7 @@ class UiSmokeTests(unittest.TestCase):
                     '"USUBJID" TEXT, "TRT01A" TEXT, "AVAL" REAL)'
                 )
                 connection.executemany(
-                    'INSERT INTO dataset("USUBJID", "TRT01A", "AVAL") '
-                    "VALUES (?, ?, ?)",
+                    'INSERT INTO dataset("USUBJID", "TRT01A", "AVAL") VALUES (?, ?, ?)',
                     (("S1", "A", 1.0), ("S2", "B", 2.0)),
                 )
                 connection.commit()
@@ -614,7 +625,7 @@ class UiSmokeTests(unittest.TestCase):
             )
             result = ProcMeansVerticalEngine(manager).run(source, config)
             window = MainWindow(
-                AppSettings(),
+                TestSettings(),
                 manager,
                 FilterHistory(root / "history.sqlite"),
             )
@@ -646,9 +657,7 @@ class UiSmokeTests(unittest.TestCase):
                     failed(str(error), "")
 
             window.submit_analysis_task = submit
-            index = result_tab.model.index(
-                0, result_tab.visible_columns.index("COL1")
-            )
+            index = result_tab.model.index(0, result_tab.visible_columns.index("COL1"))
             window._load_page = lambda *_args: None
             result_tab.table.doubleClicked.emit(index)
 

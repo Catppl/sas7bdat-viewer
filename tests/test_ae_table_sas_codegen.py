@@ -172,7 +172,9 @@ class AeSasGeneratorTests(unittest.TestCase):
         self.assertIn("from pop0", code)
         self.assertIn("from ae0", code)
 
-        ae_length = code.index("length _trt _trt_key _soc _soc_key _pt _pt_key _subjid $200;")
+        ae_length = code.index(
+            "length _trt _trt_key _soc _soc_key _pt _pt_key _subjid $200;"
+        )
         ae_set = code.index("set analysis.adae;")
         pop_length = code.index("length _trt _trt_key _subjid $200;")
         pop_set = code.index("set pop.ADSL;")

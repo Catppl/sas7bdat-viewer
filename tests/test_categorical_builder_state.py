@@ -70,10 +70,7 @@ class CategoricalBuilderStateTests(unittest.TestCase):
             DatasetMetadata(
                 "ADAE",
                 1,
-                tuple(
-                    VariableMetadata(name)
-                    for name in ("USUBJID", "TRT01A", "RACE")
-                ),
+                tuple(VariableMetadata(name) for name in ("USUBJID", "TRT01A", "RACE")),
             ),
             "adae.sas7bdat",
         )
@@ -171,8 +168,7 @@ class CategoricalBuilderStateTests(unittest.TestCase):
                 "ADAE",
                 1,
                 tuple(
-                    VariableMetadata(name)
-                    for name in ("USUBJID", "TRT", "RACE", "SEX")
+                    VariableMetadata(name) for name in ("USUBJID", "TRT", "RACE", "SEX")
                 ),
             ),
             "adae.sas7bdat",

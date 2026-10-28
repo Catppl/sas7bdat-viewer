@@ -47,7 +47,9 @@ def _sas_filter(expression: dict[str, object] | None) -> str:
 def _reference(value: object, field: str) -> tuple[str, str]:
     text = str(value or "")
     parts = text.split(".")
-    if len(parts) != 2 or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+    if len(parts) != 2 or not all(
+        re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts
+    ):
         raise ValueError(f"{field} must be a SAS library.member reference.")
     return parts[0], parts[1]
 
@@ -72,30 +74,47 @@ class SasProcMeansVerticalGenerator:
 
     def _prepare(self, configuration: dict[str, object]) -> dict[str, object]:
         if configuration.get("type") != "proc_means_vertical":
-            raise ValueError("The configuration is not a vertical PROC MEANS configuration.")
+            raise ValueError(
+                "The configuration is not a vertical PROC MEANS configuration."
+            )
         if configuration.get("version") != 1:
-            raise ValueError("SAS generation requires vertical PROC MEANS configuration v1.")
+            raise ValueError(
+                "SAS generation requires vertical PROC MEANS configuration v1."
+            )
 
         input_block = configuration.get("input")
         if not isinstance(input_block, dict):
-            raise ValueError("input is required in the vertical PROC MEANS configuration.")
+            raise ValueError(  # noqa: TRY004 - public validation contract
+                "input is required in the vertical PROC MEANS configuration."
+            )
         if input_block.get("kind") == "merge":
             raise ValueError(
                 "SAS code generation for merged vertical PROC MEANS sources is not available yet."
             )
         input_format = str(input_block.get("format", "")).casefold()
         if input_format not in {"sas7bdat", "xpt"}:
-            raise ValueError(f"Unsupported input format for SAS generation: {input_format}")
+            raise ValueError(
+                f"Unsupported input format for SAS generation: {input_format}"
+            )
 
         variables = configuration.get("variable_metadata")
-        variable_metadata = variables if isinstance(variables, dict) else configuration.get("variables")
+        variable_metadata = (
+            variables if isinstance(variables, dict) else configuration.get("variables")
+        )
         if not isinstance(variable_metadata, dict):
-            raise ValueError("variable_metadata is required in the vertical PROC MEANS configuration.")
-        variable_lookup = {str(name).casefold(): metadata for name, metadata in variable_metadata.items()}
+            raise ValueError(  # noqa: TRY004 - public validation contract
+                "variable_metadata is required in the vertical PROC MEANS configuration."
+            )
+        variable_lookup = {
+            str(name).casefold(): metadata
+            for name, metadata in variable_metadata.items()
+        }
 
         variable_block = configuration.get("variables")
         if not isinstance(variable_block, dict):
-            raise ValueError("variables is required in the vertical PROC MEANS configuration.")
+            raise ValueError(  # noqa: TRY004 - public validation contract
+                "variables is required in the vertical PROC MEANS configuration."
+            )
         analysis_names = [str(name) for name in variable_block.get("analysis", [])]
         group_names = [str(name) for name in variable_block.get("group", [])]
         row_group_names = [str(name) for name in variable_block.get("row_group", [])]
@@ -109,14 +128,20 @@ class SasProcMeansVerticalGenerator:
         if missing:
             raise ValueError("Unknown variables: " + ", ".join(missing))
 
-        statistics = [str(value).casefold() for value in configuration.get("statistics", [])]
+        statistics = [
+            str(value).casefold() for value in configuration.get("statistics", [])
+        ]
         unknown = sorted(set(statistics) - set(_STATISTICS))
         if unknown:
-            raise ValueError("Unsupported vertical PROC MEANS statistics: " + ", ".join(unknown))
+            raise ValueError(
+                "Unsupported vertical PROC MEANS statistics: " + ", ".join(unknown)
+            )
 
         display = configuration.get("display")
         if not isinstance(display, dict):
-            raise ValueError("display is required in the vertical PROC MEANS configuration.")
+            raise ValueError(  # noqa: TRY004 - public validation contract
+                "display is required in the vertical PROC MEANS configuration."
+            )
         layout = str(display.get("layout", "vertical")).casefold()
         if layout == "columns":
             layout = "vertical"
@@ -127,27 +152,46 @@ class SasProcMeansVerticalGenerator:
         if layout != "rows" and row_group_names:
             raise ValueError("Row group variables require the Groups as Rows layout.")
         if display.get("rounding") != "half_up":
-            raise ValueError("Only half_up rounding is supported by the vertical SAS generator.")
+            raise ValueError(
+                "Only half_up rounding is supported by the vertical SAS generator."
+            )
         maximum_decimals = int(display.get("maximum_decimals", 4))
         if maximum_decimals != 4:
             raise ValueError("Vertical PROC MEANS maximum_decimals must be 4.")
-        base_decimals = {str(key).casefold(): value for key, value in dict(display.get("base_decimals", {})).items()}
-        offsets = {str(key).casefold(): int(value) for key, value in dict(display.get("statistic_decimals", {})).items()}
+        base_decimals = {
+            str(key).casefold(): value
+            for key, value in dict(display.get("base_decimals", {})).items()
+        }
+        offsets = {
+            str(key).casefold(): int(value)
+            for key, value in dict(display.get("statistic_decimals", {})).items()
+        }
 
         rows: list[dict[str, object]] = []
         consumed: set[str] = set()
-        labels = {str(key).casefold(): str(value) for key, value in dict(configuration.get("item", {}).get("labels", {})).items()}
+        labels = {
+            str(key).casefold(): str(value)
+            for key, value in dict(
+                configuration.get("item", {}).get("labels", {})
+            ).items()
+        }
         for analysis_name in analysis_names:
             token = _safe_token(analysis_name)
             metadata = variable_lookup[analysis_name.casefold()]
-            if not isinstance(metadata, dict) or str(metadata.get("type", "")).casefold() != "numeric":
+            if (
+                not isinstance(metadata, dict)
+                or str(metadata.get("type", "")).casefold() != "numeric"
+            ):
                 raise ValueError(f"Analysis Variable {analysis_name} must be numeric.")
             rows.append(
                 {
                     "index": len(rows) + 1,
                     "name": analysis_name,
                     "token": token,
-                    "label": labels.get(analysis_name.casefold(), str(metadata.get("label") or analysis_name)),
+                    "label": labels.get(
+                        analysis_name.casefold(),
+                        str(metadata.get("label") or analysis_name),
+                    ),
                     "base_decimal": base_decimals.get(analysis_name.casefold()),
                     "offsets": offsets,
                 }
@@ -164,7 +208,9 @@ class SasProcMeansVerticalGenerator:
                 statistic_rows.append({"label": "Min, Max", "keys": ["min", "max"]})
                 consumed.update({"min", "max"})
             else:
-                label = {"subjects": "N", "n": "n", "nmiss": "NMISS"}.get(statistic, statistic.title())
+                label = {"subjects": "N", "n": "n", "nmiss": "NMISS"}.get(
+                    statistic, statistic.title()
+                )
                 statistic_rows.append({"label": label, "keys": [statistic]})
                 consumed.add(statistic)
 
@@ -172,7 +218,9 @@ class SasProcMeansVerticalGenerator:
         for index, name in enumerate(group_names, start=1):
             metadata = variable_lookup[name.casefold()]
             kind = str(metadata.get("type", "character")).casefold()
-            groups.append({"name": name, "sas_name": sas_name(name), "kind": kind, "index": index})
+            groups.append(
+                {"name": name, "sas_name": sas_name(name), "kind": kind, "index": index}
+            )
         row_groups = []
         for index, name in enumerate(row_group_names, start=1):
             metadata = variable_lookup[name.casefold()]
@@ -184,23 +232,38 @@ class SasProcMeansVerticalGenerator:
         population = configuration.get("population")
         population = population if isinstance(population, dict) else {}
         population_input = population.get("input")
-        population_input = population_input if isinstance(population_input, dict) else input_block
+        population_input = (
+            population_input if isinstance(population_input, dict) else input_block
+        )
         population_format = str(population_input.get("format", input_format)).casefold()
         if population_format not in {"sas7bdat", "xpt"}:
-            raise ValueError(f"Unsupported population input format: {population_format}")
+            raise ValueError(
+                f"Unsupported population input format: {population_format}"
+            )
 
         targets = configuration.get("targets")
         target_sas = targets.get("sas") if isinstance(targets, dict) else None
         if not isinstance(target_sas, dict):
-            raise ValueError("targets.sas is required for vertical PROC MEANS SAS generation.")
+            raise ValueError(  # noqa: TRY004 - public validation contract
+                "targets.sas is required for vertical PROC MEANS SAS generation."
+            )
         source_library = str(target_sas.get("source_library") or "analysis")
-        source_member = str(target_sas.get("source_member") or input_block.get("dataset", "")).lower()
+        source_member = str(
+            target_sas.get("source_member") or input_block.get("dataset", "")
+        ).lower()
         population_library = str(target_sas.get("population_library") or source_library)
-        population_member = str(target_sas.get("population_member") or population_input.get("dataset", source_member)).lower()
+        population_member = str(
+            target_sas.get("population_member")
+            or population_input.get("dataset", source_member)
+        ).lower()
         output_dataset = str(target_sas.get("output_dataset") or "work.pm_vertical")
-        output_library, output_member = _reference(output_dataset, "targets.sas.output_dataset")
+        output_library, output_member = _reference(
+            output_dataset, "targets.sas.output_dataset"
+        )
         _reference(f"{source_library}.{source_member}", "targets.sas source")
-        _reference(f"{population_library}.{population_member}", "targets.sas population")
+        _reference(
+            f"{population_library}.{population_member}", "targets.sas population"
+        )
 
         calculation = configuration.get("calculation")
         calculation = calculation if isinstance(calculation, dict) else {}
@@ -209,9 +272,15 @@ class SasProcMeansVerticalGenerator:
             raise ValueError("Confidence must be between 0 and 1.")
 
         population_variables = population.get("variables")
-        population_variables = population_variables if isinstance(population_variables, dict) else variable_metadata
+        population_variables = (
+            population_variables
+            if isinstance(population_variables, dict)
+            else variable_metadata
+        )
         treatment_name = str(variable_block.get("treatment") or "")
-        population_treatment_name = str(variable_block.get("population_treatment") or treatment_name)
+        population_treatment_name = str(
+            variable_block.get("population_treatment") or treatment_name
+        )
         treatment_group_index = next(
             (
                 index
@@ -250,7 +319,9 @@ class SasProcMeansVerticalGenerator:
             "output_library": output_library,
             "output_member": output_member,
             "output_dataset": output_dataset,
-            "source_filter": _sas_filter(configuration.get("dataset_filter", {}).get("ast")),
+            "source_filter": _sas_filter(
+                configuration.get("dataset_filter", {}).get("ast")
+            ),
             "population_filter": _sas_filter(population.get("filter", {}).get("ast")),
             "analysis": rows,
             "analysis_count": len(rows),
@@ -265,11 +336,17 @@ class SasProcMeansVerticalGenerator:
             "offsets": offsets,
             "include_total": bool(configuration.get("total", {}).get("enabled", True)),
             "treatment": treatment_name,
-            "population_treatment": population_treatment_name if variable_block.get("population_treatment") else "",
+            "population_treatment": population_treatment_name
+            if variable_block.get("population_treatment")
+            else "",
             "treatment_group_index": treatment_group_index,
             "treatment_group": treatment_group,
-            "source_treatment_kind": str(source_treatment_meta.get("type", "character")).casefold(),
-            "population_treatment_kind": str(population_treatment_meta.get("type", "character")).casefold(),
+            "source_treatment_kind": str(
+                source_treatment_meta.get("type", "character")
+            ).casefold(),
+            "population_treatment_kind": str(
+                population_treatment_meta.get("type", "character")
+            ).casefold(),
             "subject": "USUBJID",
             "confidence": confidence,
             "alpha": round(1.0 - confidence, 12),
@@ -287,7 +364,9 @@ class SasProcMeansVerticalGenerator:
             )
             return self.environment.get_template(template_name).render(**context)
         except (OSError, TemplateError) as error:
-            raise ValueError(f"Unable to render the vertical PROC MEANS template: {error}") from error
+            raise ValueError(
+                f"Unable to render the vertical PROC MEANS template: {error}"
+            ) from error
 
 
 __all__ = ["SasProcMeansVerticalGenerator"]

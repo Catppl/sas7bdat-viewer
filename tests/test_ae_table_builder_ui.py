@@ -42,8 +42,7 @@ class AeTableBuilderUiTests(unittest.TestCase):
         application.processEvents()
 
         buttons = {
-            button.text(): button
-            for button in builder.findChildren(QPushButton)
+            button.text(): button for button in builder.findChildren(QPushButton)
         }
         for text in ("Clear", "SAS Code Generator…", "Run AE Table"):
             self.assertIn(text, buttons)

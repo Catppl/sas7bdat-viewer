@@ -14,10 +14,14 @@ def _input(handle: DatasetHandle | None) -> dict[str, object] | None:
         return None
     return {
         "kind": handle.kind,
-        "format": "merge" if handle.kind == "merge" else handle.source_path.suffix.lower().lstrip("."),
+        "format": "merge"
+        if handle.kind == "merge"
+        else handle.source_path.suffix.lower().lstrip("."),
         "dataset": handle.metadata.name,
         "source_path": None if handle.kind == "merge" else str(handle.source_path),
-        "source_directory": None if handle.kind == "merge" else str(handle.source_path.parent),
+        "source_directory": None
+        if handle.kind == "merge"
+        else str(handle.source_path.parent),
     }
 
 
@@ -50,7 +54,9 @@ def build_proc_means_vertical_configuration(
     config.validate(source.metadata, population.metadata if population else None)
     labels = {value.casefold(): label for value, label in config.item_labels}
     source_member = source.metadata.name.casefold()
-    population_member = population.metadata.name.casefold() if population else source_member
+    population_member = (
+        population.metadata.name.casefold() if population else source_member
+    )
     return {
         "type": "proc_means_vertical",
         "version": 1,
@@ -110,7 +116,9 @@ def write_proc_means_vertical_configuration(
     population: DatasetHandle | None,
 ) -> dict[str, object]:
     configuration = build_proc_means_vertical_configuration(source, config, population)
-    path.write_text(json.dumps(configuration, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(configuration, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     return configuration
 
 

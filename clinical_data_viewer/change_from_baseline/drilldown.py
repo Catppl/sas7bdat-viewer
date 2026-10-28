@@ -47,7 +47,9 @@ def lookup_cell(
     )
 
 
-def build_cell_filter(metadata, config, cell: ChangeFromBaselineCell, *, subjects=False):
+def build_cell_filter(
+    metadata, config, cell: ChangeFromBaselineCell, *, subjects=False
+):
     """Build the exact source universe used by a Change from Baseline cell."""
     clauses: list[tuple[str, tuple[object, ...]]] = []
     for compiled in (config.data_filter, config.postbaseline_filter):

@@ -456,9 +456,7 @@ class ChangeFromBaselineEngine:
                         column_name = group_column_names[group_index][0][
                             config.statistics.index(statistic)
                         ]
-                        cell_mappings.append(
-                            (column_name, treatment_value, statistic)
-                        )
+                        cell_mappings.append((column_name, treatment_value, statistic))
                         long_rows.append(
                             (
                                 self._item_label(raw_item, labels),

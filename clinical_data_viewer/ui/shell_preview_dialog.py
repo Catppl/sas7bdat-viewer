@@ -25,7 +25,11 @@ class ShellPreviewDialog(QDialog):
         self._pixmap = QPixmap()
 
         try:
-            payload = image_bytes if image_bytes is not None else load_change_from_baseline_shell_preview()
+            payload = (
+                image_bytes
+                if image_bytes is not None
+                else load_change_from_baseline_shell_preview()
+            )
             self._pixmap.loadFromData(payload)
         except (OSError, ValueError):
             pass

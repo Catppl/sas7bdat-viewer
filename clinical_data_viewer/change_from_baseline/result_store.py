@@ -131,7 +131,7 @@ def build_result_schema(
         decimal_base,
         decimal_offsets,
         tuple(statistic_columns),
-        tuple((*statistic_columns, *drilldown_columns)),
+        (*statistic_columns, *drilldown_columns),
     )
 
 

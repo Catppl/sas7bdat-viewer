@@ -126,7 +126,9 @@ class ProcMeansVerticalBuilder(QWidget):
         layout.addWidget(self.row_group_variables)
 
         layout.addWidget(QLabel("Analysis Treatment Variable"))
-        self.treatment_variable = VariableTokenEditor("Select the treatment group variable")
+        self.treatment_variable = VariableTokenEditor(
+            "Select the treatment group variable"
+        )
         self.treatment_variable.validation_error.connect(self.validation_error)
         layout.addWidget(self.treatment_variable)
 
@@ -138,7 +140,11 @@ class ProcMeansVerticalBuilder(QWidget):
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, key)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if key in {"n", "mean", "std", "median", "q1", "q3", "min", "max"} else Qt.Unchecked)
+            item.setCheckState(
+                Qt.Checked
+                if key in {"n", "mean", "std", "median", "q1", "q3", "min", "max"}
+                else Qt.Unchecked
+            )
             self.statistics.addItem(item)
         stats_layout.addWidget(self.statistics)
         buttons = QHBoxLayout()
@@ -165,25 +171,35 @@ class ProcMeansVerticalBuilder(QWidget):
         layout.addWidget(QLabel("Analysis Filter"))
         self.filter_editor = FilterTextEditor()
         self.filter_editor.setMaximumHeight(68)
-        self.filter_editor.setPlaceholderText('Optional WHERE condition, e.g. SAFFL = "Y"')
+        self.filter_editor.setPlaceholderText(
+            'Optional WHERE condition, e.g. SAFFL = "Y"'
+        )
         layout.addWidget(self.filter_editor)
 
         layout.addWidget(QLabel("Population Dataset (for header N)"))
         self.population_selector = AnalysisSourceSelector()
         self.population_selector.source_selected.connect(self.population_selected)
         layout.addWidget(self.population_selector)
-        self.population_label = QLabel("If not selected, current source data will be used with a warning.")
+        self.population_label = QLabel(
+            "If not selected, current source data will be used with a warning."
+        )
         self.population_label.setWordWrap(True)
         layout.addWidget(self.population_label)
 
         layout.addWidget(QLabel("Population Treatment Variable"))
-        self.population_treatment_variable = VariableTokenEditor("Select the population treatment variable")
-        self.population_treatment_variable.validation_error.connect(self.validation_error)
+        self.population_treatment_variable = VariableTokenEditor(
+            "Select the population treatment variable"
+        )
+        self.population_treatment_variable.validation_error.connect(
+            self.validation_error
+        )
         layout.addWidget(self.population_treatment_variable)
         layout.addWidget(QLabel("Population WHERE"))
         self.population_filter_editor = FilterTextEditor()
         self.population_filter_editor.setMaximumHeight(68)
-        self.population_filter_editor.setPlaceholderText('Optional WHERE condition, e.g. SAFFL = "Y"')
+        self.population_filter_editor.setPlaceholderText(
+            'Optional WHERE condition, e.g. SAFFL = "Y"'
+        )
         layout.addWidget(self.population_filter_editor)
 
         self.status = QLabel("")
@@ -224,7 +240,11 @@ class ProcMeansVerticalBuilder(QWidget):
         self._metadata = metadata
         self._source_text = source_text
         self._source_kind = source_kind
-        self.source_label.setText(f"Source: {source_text}" if metadata else "Select a fully loaded source dataset.")
+        self.source_label.setText(
+            f"Source: {source_text}"
+            if metadata
+            else "Select a fully loaded source dataset."
+        )
         for editor in (
             self.analysis_variables,
             self.group_variables,
@@ -238,7 +258,9 @@ class ProcMeansVerticalBuilder(QWidget):
 
     def _refresh_base_decimals(self) -> None:
         previous = {
-            self.base_decimal_table.item(row, 0).text().casefold(): self.base_decimal_table.cellWidget(row, 1).currentData()
+            self.base_decimal_table.item(row, 0)
+            .text()
+            .casefold(): self.base_decimal_table.cellWidget(row, 1).currentData()
             for row in range(self.base_decimal_table.rowCount())
             if self.base_decimal_table.item(row, 0) is not None
         }
@@ -255,12 +277,16 @@ class ProcMeansVerticalBuilder(QWidget):
             combo.setCurrentIndex(0 if old is None else old + 1)
             self.base_decimal_table.setCellWidget(row, 1, combo)
 
-    def set_population_dataset(self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = "") -> None:
+    def set_population_dataset(
+        self, metadata: DatasetMetadata | None, source_text: str, filter_text: str = ""
+    ) -> None:
         previous = bool(self._population_source_text)
         self._population_metadata = metadata
         self._population_source_text = source_text
         self.population_label.setText(
-            f"Population: {source_text}" if metadata else "If not selected, current source data will be used with a warning."
+            f"Population: {source_text}"
+            if metadata
+            else "If not selected, current source data will be used with a warning."
         )
         self.population_treatment_variable.set_metadata(metadata, preserve=previous)
         if metadata is not None and not previous:
@@ -290,7 +316,9 @@ class ProcMeansVerticalBuilder(QWidget):
         order = {key: position for position, key in enumerate(statistics)}
         items.sort(key=lambda item: order.get(item.data(Qt.UserRole), len(order)))
         for item in items:
-            item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in selected else Qt.Unchecked)
+            item.setCheckState(
+                Qt.Checked if item.data(Qt.UserRole) in selected else Qt.Unchecked
+            )
             self.statistics.addItem(item)
 
     def selection(self) -> ProcMeansVerticalBuilderSelection | None:
@@ -330,7 +358,9 @@ class ProcMeansVerticalBuilder(QWidget):
 
     def _update_layout_controls(self) -> None:
         rows = self.groups_as_rows.isChecked()
-        self.row_group_variables.setEnabled(rows and self._metadata is not None and not self._busy)
+        self.row_group_variables.setEnabled(
+            rows and self._metadata is not None and not self._busy
+        )
         codegen_available = (
             self._metadata is not None
             and not self._busy
@@ -404,4 +434,3 @@ class ProcMeansVerticalBuilder(QWidget):
         self.item_labels.setEnabled(enabled)
         self.include_total.setEnabled(enabled)
         self._update_layout_controls()
-

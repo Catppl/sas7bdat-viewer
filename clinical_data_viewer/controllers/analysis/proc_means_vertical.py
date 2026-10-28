@@ -87,7 +87,11 @@ class ProcMeansVerticalController(AnalysisModuleController):
         )
 
     def select_source(self, tab) -> None:
-        if not isinstance(tab, DatasetTab) or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+        if (
+            not isinstance(tab, DatasetTab)
+            or not is_analysis_dataset(tab.handle)
+            or not tab.cache_complete
+        ):
             return
         self._source = tab
         self._set_source_dataset(tab)
@@ -97,7 +101,11 @@ class ProcMeansVerticalController(AnalysisModuleController):
             self._population = None
             self._set_population_dataset(None)
             return
-        if not isinstance(tab, DatasetTab) or not is_analysis_dataset(tab.handle) or not tab.cache_complete:
+        if (
+            not isinstance(tab, DatasetTab)
+            or not is_analysis_dataset(tab.handle)
+            or not tab.cache_complete
+        ):
             return
         self._population = tab
         self._set_population_dataset(tab)
@@ -226,10 +234,14 @@ class ProcMeansVerticalController(AnalysisModuleController):
             if not line.strip():
                 continue
             if "=" not in line:
-                raise ValueError("Item labels must use one variable=label pair per line.")
+                raise ValueError(
+                    "Item labels must use one variable=label pair per line."
+                )
             value, label = (part.strip() for part in line.split("=", 1))
             if not value or not label or value.casefold() in seen:
-                raise ValueError("Item labels must contain unique variable=label pairs.")
+                raise ValueError(
+                    "Item labels must contain unique variable=label pairs."
+                )
             seen.add(value.casefold())
             labels.append((value, label))
         return tuple(labels)
@@ -243,7 +255,11 @@ class ProcMeansVerticalController(AnalysisModuleController):
                 "Open a fully loaded source dataset before running this Builder.",
             )
             return None
-        population = self._population if self._population and self._host.is_open_dataset_tab(self._population) else None
+        population = (
+            self._population
+            if self._population and self._host.is_open_dataset_tab(self._population)
+            else None
+        )
         if population is None:
             answer = QMessageBox.question(
                 self._parent_widget(),
@@ -255,7 +271,9 @@ class ProcMeansVerticalController(AnalysisModuleController):
             if answer != QMessageBox.Yes:
                 return None
         try:
-            source_filter = FilterEngine(source.handle.metadata.variables).compile(selection.filter_text)
+            source_filter = FilterEngine(source.handle.metadata.variables).compile(
+                selection.filter_text
+            )
             population_filter = FilterEngine(
                 (population or source).handle.metadata.variables
             ).compile(selection.population_filter_text)
@@ -277,9 +295,14 @@ class ProcMeansVerticalController(AnalysisModuleController):
                 selection.output_layout,
                 selection.row_group_variables,
             )
-            config.validate(source.handle.metadata, population.handle.metadata if population else None)
+            config.validate(
+                source.handle.metadata,
+                population.handle.metadata if population else None,
+            )
         except ValueError as error:
-            QMessageBox.warning(self._parent_widget(), "PROC MEANS Table Builder (Vertical)", str(error))
+            QMessageBox.warning(
+                self._parent_widget(), "PROC MEANS Table Builder (Vertical)", str(error)
+            )
             return None
         return source, population, config
 
@@ -289,25 +312,41 @@ class ProcMeansVerticalController(AnalysisModuleController):
             return
         source_tab, population_tab, config = context
         builder = self._panel.proc_means_vertical_builder
-        self._input_tabs = {source_tab} | ({population_tab} if population_tab else set())
-        builder.set_busy(True, "Calculating vertical PROC MEANS table in the background…")
+        self._input_tabs = {source_tab} | (
+            {population_tab} if population_tab else set()
+        )
+        builder.set_busy(
+            True, "Calculating vertical PROC MEANS table in the background…"
+        )
 
         def completed(handle: DatasetHandle) -> None:
             self._input_tabs.clear()
-            builder.set_busy(False, f"Created {handle.metadata.row_count:,} result rows.")
-            result_tab = self._host.create_analysis_result_tab(handle)
-            self._host.retain_analysis_directory(source_tab.handle.temporary_path.parent)
-            if population_tab:
-                self._host.retain_analysis_directory(population_tab.handle.temporary_path.parent)
-            self._results[result_tab] = ProcMeansVerticalResultContext(
-                source_tab.handle, population_tab.handle if population_tab else None, config
+            builder.set_busy(
+                False, f"Created {handle.metadata.row_count:,} result rows."
             )
-            self._host.show_analysis_result_tab(result_tab, "PROC MEANS Vertical Result")
+            result_tab = self._host.create_analysis_result_tab(handle)
+            self._host.retain_analysis_directory(
+                source_tab.handle.temporary_path.parent
+            )
+            if population_tab:
+                self._host.retain_analysis_directory(
+                    population_tab.handle.temporary_path.parent
+                )
+            self._results[result_tab] = ProcMeansVerticalResultContext(
+                source_tab.handle,
+                population_tab.handle if population_tab else None,
+                config,
+            )
+            self._host.show_analysis_result_tab(
+                result_tab, "PROC MEANS Vertical Result"
+            )
 
         def failed(message: str, details: str) -> None:
             self._input_tabs.clear()
             builder.set_busy(False, "Vertical PROC MEANS failed.")
-            self._host.show_analysis_error("PROC MEANS Table Builder (Vertical) Failed", message, details)
+            self._host.show_analysis_error(
+                "PROC MEANS Table Builder (Vertical) Failed", message, details
+            )
 
         self._host.submit_analysis_task(
             builder,

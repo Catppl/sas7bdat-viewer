@@ -274,9 +274,7 @@ class SasCategoricalGenerator:
                 "character_collation": "case_insensitive",
                 "numeric_order": "numeric",
                 "missing": (
-                    "last_unless_explicit_custom"
-                    if name == "levels"
-                    else "last"
+                    "last_unless_explicit_custom" if name == "levels" else "last"
                 ),
             }
             if any(block.get(key) != value for key, value in expected.items()):
@@ -645,9 +643,9 @@ class SasCategoricalGenerator:
                                 )
                             ),
                             "match": (
-                                "lowcase(level) = "
-                                f"{sas_string(str(value).casefold())}"
-                                if value is not None and variable_types[folded] == "character"
+                                f"lowcase(level) = {sas_string(str(value).casefold())}"
+                                if value is not None
+                                and variable_types[folded] == "character"
                                 else (
                                     "missing(level)"
                                     if value is None

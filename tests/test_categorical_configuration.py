@@ -295,7 +295,13 @@ class CategoricalConfigurationTests(unittest.TestCase):
             )
 
             custom = CategoricalConfig(
-                (CategoricalItem("RACE", level_order=("WHITE", "BLACK"), level_sort_method="custom"),),
+                (
+                    CategoricalItem(
+                        "RACE",
+                        level_order=("WHITE", "BLACK"),
+                        level_sort_method="custom",
+                    ),
+                ),
                 "TRT",
                 "USUBJID",
                 denominator=DenominatorConfig("nonmissing", "AVAL"),

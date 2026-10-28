@@ -19,7 +19,9 @@ def _missing(value: object, variable: VariableMetadata) -> bool:
 
 
 def _group_sort_key(values: tuple[object, ...]) -> tuple[tuple[int, str], ...]:
-    return tuple((0, "") if value is None else (1, str(value).casefold()) for value in values)
+    return tuple(
+        (0, "") if value is None else (1, str(value).casefold()) for value in values
+    )
 
 
 def _format_value(value: object, decimals: int) -> str:
@@ -33,7 +35,9 @@ def _format_value(value: object, decimals: int) -> str:
     return f"{rounded:,.{decimals}f}"
 
 
-def _statistic_rows(statistics: tuple[str, ...]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+def _statistic_rows(
+    statistics: tuple[str, ...],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
     rows: list[tuple[str, tuple[str, ...]]] = []
     consumed: set[str] = set()
     for statistic in statistics:
@@ -86,9 +90,13 @@ class ProcMeansVerticalEngine:
         target = population or source
         compiled = config.population_filter if population else config.compiled_filter
         treatment_name = (
-            config.population_treatment_variable if population else config.treatment_variable
+            config.population_treatment_variable
+            if population
+            else config.treatment_variable
         )
-        fields = {variable.name.casefold(): variable for variable in target.metadata.variables}
+        fields = {
+            variable.name.casefold(): variable for variable in target.metadata.variables
+        }
         treatment = fields.get(treatment_name.casefold()) if treatment_name else None
         subject = fields.get("usubjid")
         if subject is None:
@@ -99,7 +107,11 @@ class ProcMeansVerticalEngine:
         sql += f" FROM dataset{where}"
         counts: defaultdict[object, set[object]] = defaultdict(set)
         all_subjects: set[object] = set()
-        with closing(sqlite3.connect(target.database_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+        with closing(
+            sqlite3.connect(
+                target.database_path.resolve().as_uri() + "?mode=ro", uri=True
+            )
+        ) as connection:
             for row in connection.execute(sql, parameters):
                 subject_value = row[0]
                 if _missing(subject_value, subject):
@@ -115,7 +127,11 @@ class ProcMeansVerticalEngine:
                     )
                 counts[treatment_value].add(subject_value)
                 all_subjects.add(subject_value)
-        return {key: len(value) for key, value in counts.items()}, len(all_subjects), treatment
+        return (
+            {key: len(value) for key, value in counts.items()},
+            len(all_subjects),
+            treatment,
+        )
 
     def _run_rows(
         self,
@@ -125,13 +141,21 @@ class ProcMeansVerticalEngine:
         progress=None,
     ) -> DatasetHandle:
         """Build the same statistics with row groups instead of group columns."""
-        fields = {variable.name.casefold(): variable for variable in source.metadata.variables}
+        fields = {
+            variable.name.casefold(): variable for variable in source.metadata.variables
+        }
         analyses = tuple(fields[name.casefold()] for name in config.analysis_variables)
-        row_groups = tuple(fields[name.casefold()] for name in config.row_group_variables)
-        column_groups = tuple(fields[name.casefold()] for name in config.group_variables)
+        row_groups = tuple(
+            fields[name.casefold()] for name in config.row_group_variables
+        )
+        column_groups = tuple(
+            fields[name.casefold()] for name in config.group_variables
+        )
         selected = [*row_groups, *column_groups, *analyses]
         subject = fields.get("usubjid")
-        if subject and subject.name.casefold() not in {v.name.casefold() for v in selected}:
+        if subject and subject.name.casefold() not in {
+            v.name.casefold() for v in selected
+        }:
             selected.append(subject)
         where, parameters = self._where(config.compiled_filter)
         sql = "SELECT " + ", ".join(quote_identifier(v.name) for v in selected)
@@ -141,9 +165,15 @@ class ProcMeansVerticalEngine:
         ] = {analysis.name: {} for analysis in analyses}
         row_keys: set[tuple[object, ...]] = set()
         column_keys: set[tuple[object, ...]] = set()
-        decimal_bases: dict[tuple[str, tuple[object, ...], tuple[object, ...]], int] = {}
+        decimal_bases: dict[
+            tuple[str, tuple[object, ...], tuple[object, ...]], int
+        ] = {}
         decimal_row_totals: dict[tuple[str, tuple[object, ...]], int] = {}
-        with closing(sqlite3.connect(source.database_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+        with closing(
+            sqlite3.connect(
+                source.database_path.resolve().as_uri() + "?mode=ro", uri=True
+            )
+        ) as connection:
             for row in connection.execute(sql, parameters):
                 row_values = tuple(
                     None if _missing(row[index], variable) else row[index]
@@ -158,7 +188,11 @@ class ProcMeansVerticalEngine:
                 )
                 row_keys.add(row_values)
                 column_keys.add(column_values)
-                subject_value = row[len(row_groups) + len(column_groups) + len(analyses)] if subject else None
+                subject_value = (
+                    row[len(row_groups) + len(column_groups) + len(analyses)]
+                    if subject
+                    else None
+                )
                 for index, analysis in enumerate(analyses):
                     value = row[len(row_groups) + len(column_groups) + index]
                     key = (row_values, column_values)
@@ -174,30 +208,39 @@ class ProcMeansVerticalEngine:
                         bucket["subjects"].add(subject_value)
                     decimal_key = (analysis.name, row_values, column_values)
                     decimal_bases[decimal_key] = max(
-                        decimal_bases.get(decimal_key, 0), observed_decimal_places(numeric)
+                        decimal_bases.get(decimal_key, 0),
+                        observed_decimal_places(numeric),
                     )
                     total_key = (analysis.name, row_values)
                     decimal_row_totals[total_key] = max(
-                        decimal_row_totals.get(total_key, 0), observed_decimal_places(numeric)
+                        decimal_row_totals.get(total_key, 0),
+                        observed_decimal_places(numeric),
                     )
         row_keys_ordered = sorted(row_keys, key=_group_sort_key)
         column_keys_ordered = sorted(column_keys, key=_group_sort_key)
-        population_counts, total_population_n, _population_treatment = self._population_counts(
-            source, config, population
+        population_counts, total_population_n, _population_treatment = (
+            self._population_counts(source, config, population)
         )
-        treatment_index = next(
-            (
-                index
-                for index, name in enumerate(config.group_variables)
-                if name.casefold() == config.treatment_variable.casefold()
-            ),
-            None,
-        ) if config.treatment_variable else None
+        treatment_index = (
+            next(
+                (
+                    index
+                    for index, name in enumerate(config.group_variables)
+                    if name.casefold() == config.treatment_variable.casefold()
+                ),
+                None,
+            )
+            if config.treatment_variable
+            else None
+        )
 
         def label(values: tuple[object, ...]) -> str:
-            return " / ".join(
-                "(Missing)" if value is None else str(value) for value in values
-            ) or "All"
+            return (
+                " / ".join(
+                    "(Missing)" if value is None else str(value) for value in values
+                )
+                or "All"
+            )
 
         if column_groups:
             output_columns = list(column_keys_ordered)
@@ -225,12 +268,20 @@ class ProcMeansVerticalEngine:
             VariableMetadata("ITEM", "Item", "character", 200),
             VariableMetadata("STATISTIC", "Statistic", "character", 32),
         ]
-        display_names = [("GROUP", "Group"), ("ITEM", "Item"), ("STATISTIC", "Statistic")]
+        display_names = [
+            ("GROUP", "Group"),
+            ("ITEM", "Item"),
+            ("STATISTIC", "Statistic"),
+        ]
         value_columns: list[str] = []
         for index, column_label in enumerate(column_labels, start=1):
             name = "TOTAL" if total_column_flags[index - 1] else f"COL{index}"
-            n_text = "" if column_ns[index - 1] is None else f" (N={column_ns[index - 1]:,})"
-            column_variables.append(VariableMetadata(name, f"{column_label}{n_text}", "character", 200))
+            n_text = (
+                "" if column_ns[index - 1] is None else f" (N={column_ns[index - 1]:,})"
+            )
+            column_variables.append(
+                VariableMetadata(name, f"{column_label}{n_text}", "character", 200)
+            )
             display_names.append((name, f"{column_label}{n_text}"))
             value_columns.append(name)
 
@@ -244,22 +295,33 @@ class ProcMeansVerticalEngine:
             VariableMetadata("DISPLAY_VALUE", "Display Value", "character", 200),
         )
         directory = self.temp_manager.create_dataset_directory()
-        writer = ProcMeansVerticalResultWriter(directory / "dataset.sqlite", tuple(column_variables), long_variables)
-        labels_by_variable = {key.casefold(): value for key, value in config.item_labels}
-        configured_base_decimals = {key.casefold(): value for key, value in config.base_decimals}
+        writer = ProcMeansVerticalResultWriter(
+            directory / "dataset.sqlite", tuple(column_variables), long_variables
+        )
+        labels_by_variable = {
+            key.casefold(): value for key, value in config.item_labels
+        }
+        configured_base_decimals = {
+            key.casefold(): value for key, value in config.base_decimals
+        }
         decimal_offsets = dict(config.statistic_decimals)
         try:
             rows_definition = _statistic_rows(config.statistics)
             for row_values in row_keys_ordered:
                 row_label = label(row_values)
                 for analysis in analyses:
-                    item_label = labels_by_variable.get(analysis.name.casefold(), analysis.label or analysis.name)
+                    item_label = labels_by_variable.get(
+                        analysis.name.casefold(), analysis.label or analysis.name
+                    )
                     values_by_column: list[dict[str, object]] = []
                     for column_values in output_columns:
                         if column_values is None:
                             matching = [
                                 bucket
-                                for (candidate_row, _candidate_column), bucket in stats_by_analysis[analysis.name].items()
+                                for (
+                                    candidate_row,
+                                    _candidate_column,
+                                ), bucket in stats_by_analysis[analysis.name].items()
                                 if candidate_row == row_values
                             ]
                             values: list[float] = []
@@ -297,15 +359,23 @@ class ProcMeansVerticalEngine:
                         for index, statistics in enumerate(values_by_column):
                             column_values = output_columns[index]
                             if column_values is None:
-                                base_decimals = decimal_row_totals.get((analysis.name, row_values), 0)
+                                base_decimals = decimal_row_totals.get(
+                                    (analysis.name, row_values), 0
+                                )
                             else:
                                 base_decimals = decimal_bases.get(
                                     (analysis.name, row_values, column_values), 0
                                 )
-                            configured_base = configured_base_decimals.get(analysis.name.casefold())
+                            configured_base = configured_base_decimals.get(
+                                analysis.name.casefold()
+                            )
                             if configured_base is None:
                                 configured_base = base_decimals
-                            decimals = min(4, configured_base + decimal_offsets.get(statistic_keys[0], 0))
+                            decimals = min(
+                                4,
+                                configured_base
+                                + decimal_offsets.get(statistic_keys[0], 0),
+                            )
                             display_values.append(
                                 ", ".join(
                                     _format_value(statistics.get(key), decimals)
@@ -345,8 +415,12 @@ class ProcMeansVerticalEngine:
                                 mapped_values,
                             )
             configuration_path = directory / "proc_means_vertical_config.json"
-            write_proc_means_vertical_configuration(configuration_path, source, config, population)
-            return writer.finish(directory, source, configuration_path, tuple(display_names))
+            write_proc_means_vertical_configuration(
+                configuration_path, source, config, population
+            )
+            return writer.finish(
+                directory, source, configuration_path, tuple(display_names)
+            )
         except BaseException:
             writer.abort(self.temp_manager, directory)
             raise
@@ -361,12 +435,16 @@ class ProcMeansVerticalEngine:
         config.validate(source.metadata, population.metadata if population else None)
         if config.output_layout == "rows":
             return self._run_rows(source, config, population, progress)
-        fields = {variable.name.casefold(): variable for variable in source.metadata.variables}
+        fields = {
+            variable.name.casefold(): variable for variable in source.metadata.variables
+        }
         analyses = tuple(fields[name.casefold()] for name in config.analysis_variables)
         groups = tuple(fields[name.casefold()] for name in config.group_variables)
         selected = [*groups, *analyses]
         subject = fields.get("usubjid")
-        if subject and subject.name.casefold() not in {v.name.casefold() for v in selected}:
+        if subject and subject.name.casefold() not in {
+            v.name.casefold() for v in selected
+        }:
             selected.append(subject)
         where, parameters = self._where(config.compiled_filter)
         sql = "SELECT " + ", ".join(quote_identifier(v.name) for v in selected)
@@ -377,7 +455,11 @@ class ProcMeansVerticalEngine:
         group_keys: set[tuple[object, ...]] = set()
         decimal_bases: dict[tuple[str, tuple[object, ...]], int] = {}
         decimal_total_bases: dict[str, int] = {}
-        with closing(sqlite3.connect(source.database_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+        with closing(
+            sqlite3.connect(
+                source.database_path.resolve().as_uri() + "?mode=ro", uri=True
+            )
+        ) as connection:
             rows = connection.execute(sql, parameters)
             for row in rows:
                 group_values = tuple(
@@ -399,27 +481,39 @@ class ProcMeansVerticalEngine:
                         bucket["subjects"].add(subject_value)
                     decimal_key = (analysis.name, group_values)
                     decimal_bases[decimal_key] = max(
-                        decimal_bases.get(decimal_key, 0), observed_decimal_places(float(value))
+                        decimal_bases.get(decimal_key, 0),
+                        observed_decimal_places(float(value)),
                     )
                     decimal_total_bases[analysis.name] = max(
                         decimal_total_bases.get(analysis.name, 0),
                         observed_decimal_places(float(value)),
                     )
         group_keys_ordered = sorted(group_keys, key=_group_sort_key)
-        population_counts, total_population_n, _population_treatment = self._population_counts(
-            source, config, population
+        population_counts, total_population_n, _population_treatment = (
+            self._population_counts(source, config, population)
         )
-        treatment_index = next(
-            (index for index, name in enumerate(config.group_variables)
-             if name.casefold() == config.treatment_variable.casefold()),
-            None,
-        ) if config.treatment_variable else None
+        treatment_index = (
+            next(
+                (
+                    index
+                    for index, name in enumerate(config.group_variables)
+                    if name.casefold() == config.treatment_variable.casefold()
+                ),
+                None,
+            )
+            if config.treatment_variable
+            else None
+        )
         group_labels: list[str] = []
         group_ns: list[int | None] = []
         for group_values in group_keys_ordered:
-            label = " / ".join(
-                "(Missing)" if value is None else str(value) for value in group_values
-            ) or "All"
+            label = (
+                " / ".join(
+                    "(Missing)" if value is None else str(value)
+                    for value in group_values
+                )
+                or "All"
+            )
             if treatment_index is not None:
                 n_value = population_counts.get(group_values[treatment_index])
             else:
@@ -429,13 +523,24 @@ class ProcMeansVerticalEngine:
         if config.include_total:
             group_labels.append("Total")
             group_ns.append(total_population_n)
-        column_variables = [VariableMetadata("ITEM", "Item", "character", 200), VariableMetadata("STATISTIC", "Statistic", "character", 32)]
+        column_variables = [
+            VariableMetadata("ITEM", "Item", "character", 200),
+            VariableMetadata("STATISTIC", "Statistic", "character", 32),
+        ]
         display_names = [("ITEM", "Item"), ("STATISTIC", "Statistic")]
         value_columns: list[str] = []
         for index, label in enumerate(group_labels, start=1):
-            name = "TOTAL" if config.include_total and index == len(group_labels) else f"COL{index}"
-            n_text = "" if group_ns[index - 1] is None else f" (N={group_ns[index - 1]:,})"
-            column_variables.append(VariableMetadata(name, f"{label}{n_text}", "character", 200))
+            name = (
+                "TOTAL"
+                if config.include_total and index == len(group_labels)
+                else f"COL{index}"
+            )
+            n_text = (
+                "" if group_ns[index - 1] is None else f" (N={group_ns[index - 1]:,})"
+            )
+            column_variables.append(
+                VariableMetadata(name, f"{label}{n_text}", "character", 200)
+            )
             display_names.append((name, f"{label}{n_text}"))
             value_columns.append(name)
         long_variables = (
@@ -448,7 +553,9 @@ class ProcMeansVerticalEngine:
             VariableMetadata("DISPLAY_VALUE", "Display Value", "character", 200),
         )
         directory = self.temp_manager.create_dataset_directory()
-        writer = ProcMeansVerticalResultWriter(directory / "dataset.sqlite", tuple(column_variables), long_variables)
+        writer = ProcMeansVerticalResultWriter(
+            directory / "dataset.sqlite", tuple(column_variables), long_variables
+        )
         labels = {key.casefold(): value for key, value in config.item_labels}
         configured_base_decimals = {
             key.casefold(): value for key, value in config.base_decimals
@@ -457,13 +564,21 @@ class ProcMeansVerticalEngine:
         try:
             rows_definition = _statistic_rows(config.statistics)
             for analysis in analyses:
-                item_label = labels.get(analysis.name.casefold(), analysis.label or analysis.name)
+                item_label = labels.get(
+                    analysis.name.casefold(), analysis.label or analysis.name
+                )
                 values_by_group: list[dict[str, object]] = []
                 for group_values in group_keys_ordered:
-                    bucket = stats_by_analysis[analysis.name].get(group_values, {"values": [], "subjects": set(), "records": 0})
+                    bucket = stats_by_analysis[analysis.name].get(
+                        group_values, {"values": [], "subjects": set(), "records": 0}
+                    )
                     values_by_group.append(
                         calculate_value_statistics(
-                            bucket["values"], bucket["records"], len(bucket["subjects"]), config.confidence, set(config.statistics)
+                            bucket["values"],
+                            bucket["records"],
+                            len(bucket["subjects"]),
+                            config.confidence,
+                            set(config.statistics),
                         )
                     )
                 total_stats = None
@@ -475,7 +590,13 @@ class ProcMeansVerticalEngine:
                         all_values.extend(bucket["values"])
                         all_subjects.update(bucket["subjects"])
                         records += bucket["records"]
-                    total_stats = calculate_value_statistics(all_values, records, len(all_subjects), config.confidence, set(config.statistics))
+                    total_stats = calculate_value_statistics(
+                        all_values,
+                        records,
+                        len(all_subjects),
+                        config.confidence,
+                        set(config.statistics),
+                    )
                     values_by_group.append(total_stats)
                 for statistic_label, statistic_keys in rows_definition:
                     display_values: list[str] = []
@@ -495,12 +616,25 @@ class ProcMeansVerticalEngine:
                             4,
                             configured_base + decimal_offsets.get(statistic_keys[0], 0),
                         )
-                        formatted = [_format_value(statistics.get(key), decimals) for key in statistic_keys]
+                        formatted = [
+                            _format_value(statistics.get(key), decimals)
+                            for key in statistic_keys
+                        ]
                         display = ", ".join(formatted)
                         display_values.append(display)
                         group_label = group_labels[index]
                         first_key = statistic_keys[0]
-                        writer.add_long((item_label, statistic_label, group_label, statistics.get(first_key), statistics.get("n"), statistics.get("subjects"), display))
+                        writer.add_long(
+                            (
+                                item_label,
+                                statistic_label,
+                                group_label,
+                                statistics.get(first_key),
+                                statistics.get("n"),
+                                statistics.get("subjects"),
+                                display,
+                            )
+                        )
                     result_row = writer.add_row(
                         (item_label, statistic_label, *display_values)
                     )
@@ -519,8 +653,12 @@ class ProcMeansVerticalEngine:
                             group_values,
                         )
             configuration_path = directory / "proc_means_vertical_config.json"
-            write_proc_means_vertical_configuration(configuration_path, source, config, population)
-            return writer.finish(directory, source, configuration_path, tuple(display_names))
+            write_proc_means_vertical_configuration(
+                configuration_path, source, config, population
+            )
+            return writer.finish(
+                directory, source, configuration_path, tuple(display_names)
+            )
         except BaseException:
             writer.abort(self.temp_manager, directory)
             raise

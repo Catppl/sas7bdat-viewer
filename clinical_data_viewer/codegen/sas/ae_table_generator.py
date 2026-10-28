@@ -150,13 +150,12 @@ class SasAeTableGenerator:
         if missing_block.get("label") != "Uncoded":
             raise ValueError("Unsupported AE hierarchy missing policy.")
         legacy_policy = missing_block.get("policy")
-        soc_missing_policy = str(
-            missing_block.get("soc_policy", legacy_policy or "")
-        )
-        pt_missing_policy = str(
-            missing_block.get("pt_policy", legacy_policy or "")
-        )
-        if soc_missing_policy not in {"exclude", "uncoded"} or pt_missing_policy not in {
+        soc_missing_policy = str(missing_block.get("soc_policy", legacy_policy or ""))
+        pt_missing_policy = str(missing_block.get("pt_policy", legacy_policy or ""))
+        if soc_missing_policy not in {
+            "exclude",
+            "uncoded",
+        } or pt_missing_policy not in {
             "exclude",
             "uncoded",
         }:

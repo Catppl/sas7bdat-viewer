@@ -137,7 +137,9 @@ class ProcMeansVerticalTests(unittest.TestCase):
                 build_cell_where_text(source.metadata, config, cell),
             )
             assert result.configuration_path is not None
-            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
             self.assertEqual(configuration["display"]["layout"], "rows")
             self.assertEqual(configuration["variables"]["row_group"], ["TRT01A"])
 
@@ -274,7 +276,9 @@ class ProcMeansVerticalTests(unittest.TestCase):
                 build_cell_where_text(source.metadata, config, cell),
             )
 
-    def test_vertical_result_has_item_statistic_rows_and_population_n_labels(self) -> None:
+    def test_vertical_result_has_item_statistic_rows_and_population_n_labels(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = make_vertical_handle(
@@ -285,7 +289,11 @@ class ProcMeansVerticalTests(unittest.TestCase):
             population = make_vertical_handle(
                 root,
                 "ADSL",
-                (("S1", "A", None, None), ("S2", "A", None, None), ("S3", "B", None, None)),
+                (
+                    ("S1", "A", None, None),
+                    ("S2", "A", None, None),
+                    ("S3", "B", None, None),
+                ),
             )
             config = ProcMeansVerticalConfig(
                 ("AVAL", "CHG"),
@@ -310,7 +318,9 @@ class ProcMeansVerticalTests(unittest.TestCase):
                 ).fetchall()
             self.assertEqual(rows[0], ("Total Cholesterol", "n", "2", "1", "3"))
             self.assertIn(("Total Cholesterol", "Min, Max"), [row[:2] for row in rows])
-            labels = {variable.name: variable.label for variable in result.metadata.variables}
+            labels = {
+                variable.name: variable.label for variable in result.metadata.variables
+            }
             self.assertEqual(labels["COL1"], "A (N=2)")
             self.assertEqual(labels["COL2"], "B (N=1)")
             self.assertEqual(labels["TOTAL"], "Total (N=3)")
@@ -321,10 +331,14 @@ class ProcMeansVerticalTests(unittest.TestCase):
             self.assertEqual(long_rows[0], ("Total Cholesterol", "n", "A"))
             self.assertEqual(long_rows[-1], ("Change", "Min, Max", "Total"))
             assert result.configuration_path is not None
-            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
             self.assertEqual(configuration["type"], "proc_means_vertical")
             self.assertEqual(configuration["display"]["layout"], "vertical")
-            self.assertEqual(configuration["item"]["labels"]["aval"], "Total Cholesterol")
+            self.assertEqual(
+                configuration["item"]["labels"]["aval"], "Total Cholesterol"
+            )
 
     def test_population_missing_treatment_blocks_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -344,7 +358,10 @@ class ProcMeansVerticalTests(unittest.TestCase):
 
     def test_statistics_keep_user_order_when_pair_is_selected_in_reverse(self) -> None:
         self.assertEqual(
-            [label for label, _keys in _statistic_rows(("q3", "mean", "q1", "max", "min"))],
+            [
+                label
+                for label, _keys in _statistic_rows(("q3", "mean", "q1", "max", "min"))
+            ],
             ["Q1, Q3", "Mean", "Min, Max"],
         )
 
@@ -353,7 +370,13 @@ class ProcMeansVerticalTests(unittest.TestCase):
             root = Path(temporary)
             source = make_vertical_handle(root, "ADLB", (("S1", "A", 1.0, 1.0),))
             metadata = DatasetMetadata(
-                "NO_SUBJECT", 1, tuple(variable for variable in source.metadata.variables if variable.name != "USUBJID")
+                "NO_SUBJECT",
+                1,
+                tuple(
+                    variable
+                    for variable in source.metadata.variables
+                    if variable.name != "USUBJID"
+                ),
             )
             config = ProcMeansVerticalConfig(("AVAL",))
             with self.assertRaisesRegex(ValueError, "USUBJID"):
@@ -375,9 +398,7 @@ class ProcMeansVerticalTests(unittest.TestCase):
             source = make_vertical_handle(
                 Path(temporary), "ADLB", (("S1", "A", 1.0, 1.0),)
             )
-            config = ProcMeansVerticalConfig(
-                ("AVAL",), output_layout="rows"
-            )
+            config = ProcMeansVerticalConfig(("AVAL",), output_layout="rows")
             with self.assertRaisesRegex(ValueError, "Row Group Variable"):
                 config.validate(source.metadata)
 
@@ -386,9 +407,7 @@ class ProcMeansVerticalTests(unittest.TestCase):
             source = make_vertical_handle(
                 Path(temporary), "ADLB", (("S1", "A", 1.0, 1.0),)
             )
-            config = ProcMeansVerticalConfig(
-                ("AVAL",), row_group_variables=("TRT01A",)
-            )
+            config = ProcMeansVerticalConfig(("AVAL",), row_group_variables=("TRT01A",))
             with self.assertRaisesRegex(ValueError, "Groups as Rows"):
                 config.validate(source.metadata)
 
@@ -417,7 +436,9 @@ class ProcMeansVerticalTests(unittest.TestCase):
                 (),
                 True,
             )
-            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(source, config)
+            result = ProcMeansVerticalEngine(TempManager(root / "temp")).run(
+                source, config
+            )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 row = connection.execute(
                     'SELECT "COL1", "COL2", "TOTAL" FROM dataset'
@@ -457,7 +478,9 @@ class ProcMeansVerticalTests(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(row, ("1.79",))
             assert result.configuration_path is not None
-            configuration = json.loads(result.configuration_path.read_text(encoding="utf-8"))
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
             self.assertEqual(configuration["display"]["base_decimals"], {"AVAL": 1})
 
 
@@ -542,7 +565,9 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         self.assertIsNotNone(selection)
         assert selection is not None
         self.assertEqual(selection.base_decimals, (("AVAL", 2),))
-        buttons = {button.text(): button for button in builder.findChildren(QPushButton)}
+        buttons = {
+            button.text(): button for button in builder.findChildren(QPushButton)
+        }
         builder.statistics.setCurrentRow(1)
         buttons["Up"].click()
         self.assertEqual(builder.statistics.currentRow(), 0)
@@ -555,7 +580,11 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
         self.assertEqual(len(run_requests), 1)
         self.assertEqual(len(sas_requests), 1)
         builder.set_dataset(
-            DatasetMetadata("MERGE", 2, (VariableMetadata("USUBJID"), VariableMetadata("AVAL", kind="numeric"))),
+            DatasetMetadata(
+                "MERGE",
+                2,
+                (VariableMetadata("USUBJID"), VariableMetadata("AVAL", kind="numeric")),
+            ),
             "merge result",
             source_kind="merge",
         )
@@ -606,9 +635,7 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
             )
             requests: list[tuple[int, str, str]] = []
             tab.proc_means_vertical_drilldown_requested.connect(
-                lambda row, column, display: requests.append(
-                    (row, column, display)
-                )
+                lambda row, column, display: requests.append((row, column, display))
             )
             value_index = tab.model.index(0, tab.visible_columns.index("COL1"))
             tab.table.doubleClicked.emit(value_index)
@@ -625,5 +652,3 @@ class ProcMeansVerticalBuilderUiTests(unittest.TestCase):
             )
             tab.close()
             self.application.processEvents()
-
-

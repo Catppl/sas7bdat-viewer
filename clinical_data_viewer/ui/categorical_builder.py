@@ -242,9 +242,7 @@ class CategoricalItemEditor(QWidget):
     def _append_item(self, config: CategoricalItem) -> None:
         item = QTreeWidgetItem((config.variable, "", ""))
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-        item.setCheckState(
-            1, Qt.Checked if config.propcase_levels else Qt.Unchecked
-        )
+        item.setCheckState(1, Qt.Checked if config.propcase_levels else Qt.Unchecked)
         self.items.addTopLevelItem(item)
         combo = ClickOnlyComboBox()
         for label, method in (
@@ -349,9 +347,7 @@ class CategoricalItemEditor(QWidget):
         level_sort_method = self._current_level_sort_method(current)
         try:
             level_order = (
-                self._parse_custom_order(name)
-                if level_sort_method == "custom"
-                else ()
+                self._parse_custom_order(name) if level_sort_method == "custom" else ()
             )
         except ValueError as error:
             self.validation_error.emit(str(error))
@@ -375,7 +371,9 @@ class CategoricalItemEditor(QWidget):
 
     def _current_level_sort_method(self, current: QTreeWidgetItem) -> str:
         combo = self.items.itemWidget(current, 2)
-        return str(combo.currentData()) if combo is not None else "runtime_value_ascending"
+        return (
+            str(combo.currentData()) if combo is not None else "runtime_value_ascending"
+        )
 
     def _parse_custom_order(self, variable: str) -> tuple[object, ...]:
         text = self.custom_order_editor.text().strip()
