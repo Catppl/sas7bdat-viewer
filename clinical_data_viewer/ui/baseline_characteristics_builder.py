@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -33,7 +32,7 @@ from ..baseline_characteristics import (
 from ..domain import DatasetMetadata, VariableMetadata
 from .analysis_source_selector import AnalysisSourceSelector
 from .proc_means_builder import FilterTextEditor
-from .widgets import ClickOnlyComboBox, MouseOnlyComboBox
+from .widgets import ClickOnlyComboBox, MouseOnlyComboBox, MouseOnlySpinBox
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,10 +41,14 @@ class BaselineCharacteristicsBuilderSelection:
     filter_text: str
     header_label: str
     treatment_variable: str = ""
+    population_dataset: object | None = None
+    population_treatment_variable: str = ""
+    population_filter_text: str = ""
 
 
 class BaselineCharacteristicsBuilder(QWidget):
     source_selected = Signal(object)
+    population_selected = Signal(object)
     run_requested = Signal(object)
     sas_code_requested = Signal(object)
     shell_preview_requested = Signal()
@@ -56,11 +59,14 @@ class BaselineCharacteristicsBuilder(QWidget):
         super().__init__(parent)
         self.setObjectName("baselineCharacteristicsBuilder")
         self._metadata: DatasetMetadata | None = None
+        self._population_metadata: DatasetMetadata | None = None
         self._source_text = ""
+        self._population_source_text = ""
         self._source_kind = "sas"
         self._items: list[BaselineItem] = []
         self._busy = False
         self._filter_initialized = False
+        self._population_filter_initialized = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -82,6 +88,16 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.source_label.setWordWrap(True)
         layout.addWidget(self.source_label)
 
+        layout.addWidget(QLabel("Population Dataset (for N)"))
+        self.population_selector = AnalysisSourceSelector()
+        self.population_selector.source_selected.connect(self.population_selected)
+        layout.addWidget(self.population_selector)
+        self.population_label = QLabel(
+            "If not selected, the source dataset will be used for Population N after a warning."
+        )
+        self.population_label.setWordWrap(True)
+        layout.addWidget(self.population_label)
+
         form = QFormLayout()
         self.subject_id = QLineEdit("USUBJID")
         self.subject_id.setReadOnly(True)
@@ -94,6 +110,27 @@ class BaselineCharacteristicsBuilder(QWidget):
         form.addRow("Column Grouping Variable", self.treatment_variable)
         layout.addLayout(form)
 
+        population_form = QFormLayout()
+        self.population_treatment_variable = ClickOnlyComboBox()
+        self.population_treatment_variable.addItem(
+            "Use analysis treatment variable", ""
+        )
+        self.population_treatment_variable.currentIndexChanged.connect(
+            self._treatment_changed
+        )
+        population_form.addRow(
+            "Population Treatment Variable", self.population_treatment_variable
+        )
+        layout.addLayout(population_form)
+
+        layout.addWidget(QLabel("Population WHERE"))
+        self.population_filter_editor = FilterTextEditor()
+        self.population_filter_editor.setMaximumHeight(68)
+        self.population_filter_editor.setPlaceholderText(
+            'Optional WHERE condition, e.g. SAFFL = "Y"'
+        )
+        layout.addWidget(self.population_filter_editor)
+
         layout.addWidget(QLabel("Analysis Filter"))
         self.filter_editor = FilterTextEditor()
         self.filter_editor.setMaximumHeight(68)
@@ -104,6 +141,8 @@ class BaselineCharacteristicsBuilder(QWidget):
 
         item_box = QGroupBox("Items (mixed order is preserved)")
         item_layout = QVBoxLayout(item_box)
+        item_layout.setContentsMargins(4, 4, 4, 4)
+        item_layout.setSpacing(3)
         self.items = QTableWidget(0, 4)
         self.items.setHorizontalHeaderLabels(["Role", "Variable", "Storage", "Label"])
         self.items.verticalHeader().hide()
@@ -117,7 +156,7 @@ class BaselineCharacteristicsBuilder(QWidget):
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         self.items.itemSelectionChanged.connect(self._load_selected_editor)
         item_layout.addWidget(self.items)
-        item_buttons = QHBoxLayout()
+        item_buttons = QGridLayout()
         self.add_categorical_button = QPushButton("Add Categorical…")
         self.add_continuous_button = QPushButton("Add Continuous…")
         self.remove_button = QPushButton("Remove")
@@ -132,14 +171,17 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.remove_button.clicked.connect(self._remove_item)
         self.up_button.clicked.connect(lambda: self._move_item(-1))
         self.down_button.clicked.connect(lambda: self._move_item(1))
-        for button in (
+        item_action_buttons = (
             self.add_categorical_button,
             self.add_continuous_button,
             self.remove_button,
             self.up_button,
             self.down_button,
-        ):
-            item_buttons.addWidget(button)
+        )
+        for index, button in enumerate(item_action_buttons):
+            item_buttons.addWidget(button, index // 3, index % 3)
+        for column in range(3):
+            item_buttons.setColumnStretch(column, 1)
         item_layout.addLayout(item_buttons)
         layout.addWidget(item_box)
 
@@ -182,34 +224,52 @@ class BaselineCharacteristicsBuilder(QWidget):
     def _build_categorical_editor(self) -> QWidget:
         box = QGroupBox("Categorical Item Settings")
         form = QFormLayout(box)
+        form.setContentsMargins(4, 4, 4, 4)
+        form.setVerticalSpacing(2)
+        form.setHorizontalSpacing(4)
         self.categorical_label = QLineEdit()
-        self.categorical_sort = QComboBox()
+        self.categorical_sort = ClickOnlyComboBox()
         self.categorical_sort.addItem(
             "Runtime value ascending", "runtime_value_ascending"
         )
         self.categorical_sort.addItem("Custom", "custom")
+        self.categorical_include_missing = QCheckBox(
+            "Show Missing as Category (including zero counts)"
+        )
+        missing_note = QLabel(
+            "When selected, Missing is shown even when its count is 0; otherwise "
+            "missing values are excluded from the table."
+        )
+        missing_note.setWordWrap(True)
         self.categorical_order = QPlainTextEdit()
-        self.categorical_order.setMaximumHeight(68)
+        self.categorical_order.setMaximumHeight(52)
         self.categorical_order.setPlaceholderText(
             "One raw level=display label per line, e.g. F=Female\nM=Male\n''=Missing"
         )
-        self.percent_digits = QSpinBox()
+        self.percent_digits = MouseOnlySpinBox()
         self.percent_digits.setRange(0, 4)
         self.percent_digits.setValue(1)
         form.addRow("Label", self.categorical_label)
         form.addRow("Level order", self.categorical_sort)
+        form.addRow("Missing", self.categorical_include_missing)
+        form.addRow("", missing_note)
         form.addRow("Custom levels", self.categorical_order)
         form.addRow("Percent decimals", self.percent_digits)
         self.categorical_label.editingFinished.connect(self._save_selected_editor)
         self.categorical_sort.currentIndexChanged.connect(self._save_selected_editor)
         self.categorical_order.textChanged.connect(self._save_selected_editor)
+        self.categorical_include_missing.stateChanged.connect(self._save_selected_editor)
         self.percent_digits.valueChanged.connect(self._save_selected_editor)
         return box
 
     def _build_continuous_editor(self) -> QWidget:
         box = QGroupBox("Continuous Item Settings")
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(3)
         form = QFormLayout()
+        form.setVerticalSpacing(2)
+        form.setHorizontalSpacing(4)
         self.continuous_label = QLineEdit()
         form.addRow("Label", self.continuous_label)
         layout.addLayout(form)
@@ -249,6 +309,9 @@ class BaselineCharacteristicsBuilder(QWidget):
     def set_source_datasets(self, datasets, selected=None) -> None:
         self.source_selector.set_sources(datasets, selected)
 
+    def set_population_datasets(self, datasets, selected=None) -> None:
+        self.population_selector.set_sources(datasets, selected)
+
     def set_dataset(
         self,
         metadata: DatasetMetadata | None,
@@ -271,6 +334,26 @@ class BaselineCharacteristicsBuilder(QWidget):
         self._refresh_items()
         self._update_enabled()
 
+    def set_population_dataset(
+        self,
+        metadata: DatasetMetadata | None,
+        source_text: str,
+        filter_text: str = "",
+    ) -> None:
+        previous = bool(self._population_source_text)
+        self._population_metadata = metadata
+        self._population_source_text = source_text
+        self.population_label.setText(
+            f"Population: {source_text}"
+            if metadata
+            else "If not selected, the source dataset will be used for Population N after a warning."
+        )
+        self._refresh_treatment_variables()
+        if metadata is not None and not previous and not self._population_filter_initialized:
+            self.population_filter_editor.setText(filter_text)
+            self._population_filter_initialized = True
+        self._update_enabled()
+
     def _refresh_treatment_variables(self) -> None:
         selected = self.treatment_variable.currentData()
         self.treatment_variable.blockSignals(True)
@@ -285,6 +368,23 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.treatment_variable.setCurrentIndex(max(0, index))
         self.treatment_variable.blockSignals(False)
 
+        population_selected = self.population_treatment_variable.currentData()
+        self.population_treatment_variable.blockSignals(True)
+        self.population_treatment_variable.clear()
+        self.population_treatment_variable.addItem(
+            "Use analysis treatment variable", ""
+        )
+        if self._population_metadata is not None:
+            for variable in self._population_metadata.variables:
+                if variable.name.casefold() == "usubjid":
+                    continue
+                self.population_treatment_variable.addItem(variable.name, variable.name)
+        index = self.population_treatment_variable.findData(
+            population_selected or ""
+        )
+        self.population_treatment_variable.setCurrentIndex(max(0, index))
+        self.population_treatment_variable.blockSignals(False)
+
     def _treatment_changed(self, _index: int) -> None:
         self._update_enabled()
 
@@ -294,6 +394,9 @@ class BaselineCharacteristicsBuilder(QWidget):
 
     def current_filter_text(self) -> str:
         return self.filter_editor.toPlainText().strip()
+
+    def current_population_filter_text(self) -> str:
+        return self.population_filter_editor.toPlainText().strip()
 
     def _variable(self, name: str) -> VariableMetadata | None:
         if self._metadata is None:
@@ -397,6 +500,7 @@ class BaselineCharacteristicsBuilder(QWidget):
             self.categorical_label.blockSignals(True)
             self.categorical_sort.blockSignals(True)
             self.categorical_order.blockSignals(True)
+            self.categorical_include_missing.blockSignals(True)
             self.percent_digits.blockSignals(True)
             self.categorical_label.setText(item.label)
             self.categorical_sort.setCurrentIndex(
@@ -408,11 +512,13 @@ class BaselineCharacteristicsBuilder(QWidget):
                 raw = "''" if value is None else str(value)
                 lines.append(f"{raw}={labels.get(value, raw)}")
             self.categorical_order.setPlainText("\n".join(lines))
+            self.categorical_include_missing.setChecked(item.include_missing_level)
             self.percent_digits.setValue(item.percent_digits)
             for widget in (
                 self.categorical_label,
                 self.categorical_sort,
                 self.categorical_order,
+                self.categorical_include_missing,
                 self.percent_digits,
             ):
                 widget.blockSignals(False)
@@ -485,6 +591,7 @@ class BaselineCharacteristicsBuilder(QWidget):
                 tuple(values),
                 self.percent_digits.value(),
                 tuple(labels),
+                self.categorical_include_missing.isChecked(),
             )
         else:
             decimals = tuple(
@@ -526,6 +633,9 @@ class BaselineCharacteristicsBuilder(QWidget):
             self.current_filter_text(),
             self.header_label.text().strip(),
             str(self.treatment_variable.currentData() or ""),
+            self.population_selector.selected_source(),
+            str(self.population_treatment_variable.currentData() or ""),
+            self.current_population_filter_text(),
         )
 
     def _run(self) -> None:
@@ -552,7 +662,15 @@ class BaselineCharacteristicsBuilder(QWidget):
     def clear(self) -> None:
         self._items.clear()
         self.filter_editor.clear()
+        self.population_filter_editor.clear()
         self._filter_initialized = False
+        self._population_filter_initialized = False
+        self._population_metadata = None
+        self._population_source_text = ""
+        self.population_selector.set_selected(None)
+        self.population_label.setText(
+            "If not selected, the source dataset will be used for Population N after a warning."
+        )
         self.header_label.setText("Overall")
         self._refresh_treatment_variables()
         self._refresh_items()

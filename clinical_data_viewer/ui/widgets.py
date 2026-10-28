@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QSpinBox
 
 
 class ClickOnlyComboBox(QComboBox):
@@ -18,4 +18,14 @@ class MouseOnlyComboBox(ClickOnlyComboBox):
         event.ignore()
 
 
-__all__ = ["ClickOnlyComboBox", "MouseOnlyComboBox"]
+class MouseOnlySpinBox(QSpinBox):
+    """A spin box whose value can only be changed with an explicit click."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        event.ignore()
+
+
+__all__ = ["ClickOnlyComboBox", "MouseOnlyComboBox", "MouseOnlySpinBox"]

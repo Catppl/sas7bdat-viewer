@@ -79,21 +79,40 @@ class BaselineCharacteristicsEngine:
             return "", ()
         return f" WHERE {config.compiled_filter.sql}", config.compiled_filter.parameters
 
+    @staticmethod
+    def _population_where(
+        config: BaselineCharacteristicsConfig,
+    ) -> tuple[str, tuple[object, ...]]:
+        if not config.population_filter.sql:
+            return "", ()
+        return (
+            f" WHERE {config.population_filter.sql}",
+            config.population_filter.parameters,
+        )
+
     def run(
         self,
         source: DatasetHandle,
         config: BaselineCharacteristicsConfig,
         progress: ProgressCallback | None = None,
+        population: DatasetHandle | None = None,
     ) -> DatasetHandle:
         if not source.cache_complete:
             raise ValueError("The source dataset must finish loading first.")
-        config.validate(source.metadata)
+        config.validate(source.metadata, population.metadata if population else None)
         notify = progress or (lambda _message: None)
         fields = {
             variable.name.casefold(): variable for variable in source.metadata.variables
         }
         subject = fields[config.subject_id_variable.casefold()]
         where, parameters = self._where(config)
+        population_source = population or source
+        population_fields = {
+            variable.name.casefold(): variable
+            for variable in population_source.metadata.variables
+        }
+        population_subject = population_fields[config.subject_id_variable.casefold()]
+        population_where, population_parameters = self._population_where(config)
         uri = source.database_path.resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True)) as connection:
             missing_subjects = connection.execute(
@@ -115,15 +134,31 @@ class BaselineCharacteristicsEngine:
                 raise ValueError(
                     f'The filtered analysis universe must contain one row per {subject.name}; "{duplicate[0]}" occurs {duplicate[1]} times.'
                 )
+            population_treatment_name = (
+                config.population_treatment_variable or config.treatment_variable
+            )
             if config.treatment_variable:
                 treatment = fields[config.treatment_variable.casefold()]
                 treatment_column = quote_identifier(treatment.name)
-                group_rows = connection.execute(
-                    f"SELECT {treatment_column}, count(DISTINCT {quote_identifier(subject.name)}) "
-                    f"FROM dataset{where}{' AND ' if where else ' WHERE '}{_missing_sql(treatment, missing=False)} "
-                    f"GROUP BY {treatment_column} ORDER BY {treatment_column}",
-                    parameters,
-                ).fetchall()
+                population_treatment = population_fields[
+                    population_treatment_name.casefold()
+                ]
+                population_uri = (
+                    population_source.database_path.resolve().as_uri()
+                    + "?mode=ro"
+                )
+                with closing(
+                    sqlite3.connect(population_uri, uri=True)
+                ) as population_connection:
+                    population_treatment_column = quote_identifier(
+                        population_treatment.name
+                    )
+                    group_rows = population_connection.execute(
+                        f"SELECT {population_treatment_column}, count(DISTINCT {quote_identifier(population_subject.name)}) "
+                        f"FROM dataset{population_where}{' AND ' if population_where else ' WHERE '}{_missing_sql(population_treatment, missing=False)} "
+                        f"GROUP BY {population_treatment_column} ORDER BY {population_treatment_column}",
+                        population_parameters,
+                    ).fetchall()
                 groups = [
                     (
                         value,
@@ -136,12 +171,19 @@ class BaselineCharacteristicsEngine:
                 if not groups:
                     raise ValueError("The treatment variable has no nonmissing levels.")
             else:
-                header_n = int(
-                    connection.execute(
-                        f"SELECT count(DISTINCT {quote_identifier(subject.name)}) FROM dataset{where}",
-                        parameters,
-                    ).fetchone()[0]
+                population_uri = (
+                    population_source.database_path.resolve().as_uri()
+                    + "?mode=ro"
                 )
+                with closing(
+                    sqlite3.connect(population_uri, uri=True)
+                ) as population_connection:
+                    header_n = int(
+                        population_connection.execute(
+                            f"SELECT count(DISTINCT {quote_identifier(population_subject.name)}) FROM dataset{population_where}",
+                            population_parameters,
+                        ).fetchone()[0]
+                    )
                 groups = [(None, "VALUE", f"{config.header_label}\n(N={header_n:,})", header_n)]
 
         directory = self.temp_manager.create_dataset_directory()
@@ -172,7 +214,7 @@ class BaselineCharacteristicsEngine:
                         )
                     else:
                         assert isinstance(item, BaselineContinuousItem)
-                        self._write_continuous(
+                self._write_continuous(
                             connection,
                             writer,
                             config,
@@ -187,6 +229,7 @@ class BaselineCharacteristicsEngine:
                 configuration_path,
                 source,
                 config,
+                population=population,
                 runtime_header_n=sum(group[3] for group in groups),
             )
             notify(f"Finalizing Baseline Characteristics… {writer.row_count:,} rows")
@@ -218,7 +261,10 @@ class BaselineCharacteristicsEngine:
         custom_ranks = {_custom_key(value, variable): index for index, value in enumerate(item.level_order)}
         level_labels = {_custom_key(value, variable): label for value, label in item.level_labels}
         group_data: dict[str, dict[object, tuple[int, int]]] = {}
-        all_values: list[object] = []
+        include_missing = item.include_missing_level or any(
+            value is None for value in item.level_order
+        )
+        all_values: list[object] = [None] if include_missing else []
         for treatment_value, column, _column_label, group_n in groups:
             clauses = [base_where] if base_where else []
             params = list(parameters)
@@ -227,7 +273,6 @@ class BaselineCharacteristicsEngine:
                 clauses.append(f"{quote_identifier(treatment_name)} = ?")
                 params.append(treatment_value)
             nonmissing = _missing_sql(variable, missing=False)
-            include_missing = any(value is None for value in item.level_order)
             if not include_missing or item.level_sort_method != "custom":
                 clauses.append(nonmissing)
             condition = (

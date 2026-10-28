@@ -25,6 +25,7 @@ class BaselineCategoricalItem:
     level_order: tuple[object, ...] = ()
     percent_digits: int = 1
     level_labels: tuple[tuple[object, str], ...] = ()
+    include_missing_level: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +74,17 @@ class BaselineCharacteristicsConfig:
     header_label: str = "Overall"
     subject_id_variable: str = "USUBJID"
     treatment_variable: str = ""
+    population_treatment_variable: str = ""
+    population_filter: CompiledFilter = field(
+        default_factory=lambda: CompiledFilter("", ())
+    )
+    population_filter_text: str = ""
 
-    def validate(self, metadata: DatasetMetadata) -> None:
+    def validate(
+        self,
+        metadata: DatasetMetadata,
+        population_metadata: DatasetMetadata | None = None,
+    ) -> None:
         if not self.items:
             raise ValueError("Add at least one Categorical or Continuous Item.")
         if not self.header_label.strip():
@@ -176,6 +186,27 @@ class BaselineCharacteristicsConfig:
                 raise ValueError("Q1 and Q3 must be selected together.")
             if ("min" in statistics) != ("max" in statistics):
                 raise ValueError("Min and Max must be selected together.")
+
+        population = population_metadata or metadata
+        population_known = {
+            variable.name.casefold(): variable for variable in population.variables
+        }
+        population_subject = population_known.get(self.subject_id_variable.casefold())
+        if population_subject is None:
+            raise ValueError(
+                f'{self.subject_id_variable} is required in the Population Dataset.'
+            )
+        if self.population_treatment_variable.strip():
+            population_treatment = population_known.get(
+                self.population_treatment_variable.casefold()
+            )
+            if population_treatment is None:
+                raise ValueError(
+                    "Population Treatment Variable "
+                    f'"{self.population_treatment_variable}" does not exist.'
+                )
+            if population_treatment.name.casefold() == population_subject.name.casefold():
+                raise ValueError("Population Treatment Variable cannot be USUBJID.")
 
 
 __all__ = [

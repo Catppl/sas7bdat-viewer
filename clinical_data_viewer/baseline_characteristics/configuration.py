@@ -51,9 +51,10 @@ def build_baseline_characteristics_configuration(
     source: DatasetHandle,
     config: BaselineCharacteristicsConfig,
     *,
+    population: DatasetHandle | None = None,
     runtime_header_n: int | None = None,
 ) -> dict[str, object]:
-    config.validate(source.metadata)
+    config.validate(source.metadata, population.metadata if population else None)
     metadata = {
         variable.name.casefold(): variable for variable in source.metadata.variables
     }
@@ -74,7 +75,7 @@ def build_baseline_characteristics_configuration(
                     "role": "categorical",
                     "count": "distinct_subjects",
                     "denominator": "header_n",
-                    "missing": "exclude",
+                    "missing": "include" if item.include_missing_level else "exclude",
                     "level_order": {
                         "method": item.level_sort_method,
                         **(
@@ -112,7 +113,7 @@ def build_baseline_characteristics_configuration(
             )
 
     source_member = None if source.kind == "merge" else source.metadata.name.casefold()
-    return {
+    configuration = {
         "type": "baseline_characteristics",
         "version": 1,
         "input": _input(source),
@@ -121,6 +122,8 @@ def build_baseline_characteristics_configuration(
         "analysis_universe": {
             "subject_variable": config.subject_id_variable,
             "treatment_variable": config.treatment_variable or None,
+            "population_treatment_variable": config.population_treatment_variable
+            or None,
             "subject_missing": "error",
             "duplicate_subject_rows": "error",
             "runtime_header_n": runtime_header_n,
@@ -167,6 +170,13 @@ def build_baseline_characteristics_configuration(
             }
         },
     }
+    if population is not None:
+        configuration["population"] = {
+            "input": _input(population),
+            "variable_metadata": _variables(population),
+            "filter": _filter(population, config.population_filter_text),
+        }
+    return configuration
 
 
 def write_baseline_characteristics_configuration(
@@ -174,11 +184,13 @@ def write_baseline_characteristics_configuration(
     source: DatasetHandle,
     config: BaselineCharacteristicsConfig,
     *,
+    population: DatasetHandle | None = None,
     runtime_header_n: int | None = None,
 ) -> dict[str, object]:
     configuration = build_baseline_characteristics_configuration(
         source,
         config,
+        population=population,
         runtime_header_n=runtime_header_n,
     )
     path.write_text(

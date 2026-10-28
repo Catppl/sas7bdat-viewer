@@ -89,6 +89,9 @@ Variable storage type and analysis role are separate contracts:
 - Percentage is `level participant n / header N * 100`.
 - Missing categorical values are excluded by default. A Custom level mapping
   may explicitly include the missing value and its display label.
+- The Categorical settings include an explicit `Show Missing as Category`
+  checkbox. When checked, `Missing` is rendered even when its count is zero;
+  when unchecked, missing values are excluded.
 - Only levels represented in the filtered analysis universe are displayed.
 - The default level order is runtime raw-value ascending, with numeric values
   sorted numerically, character values case-insensitively, and missing last.

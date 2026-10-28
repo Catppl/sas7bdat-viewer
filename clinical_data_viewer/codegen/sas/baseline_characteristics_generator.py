@@ -176,7 +176,7 @@ class SasBaselineCharacteristicsGenerator:
                 "storage_type": kind,
                 "percent_digits": item.get("percent_digits", 1),
                 "statistic_decimals": item.get("statistic_decimals", {}),
-                "include_missing": False,
+                "include_missing": item.get("missing") == "include",
             }
             if role == "categorical":
                 if (
