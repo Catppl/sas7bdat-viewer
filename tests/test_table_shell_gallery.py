@@ -38,7 +38,7 @@ class TableShellGalleryTests(unittest.TestCase):
         )
         gallery.search.clear()
         gallery.category_buttons["Safety"].click()
-        self.assertEqual(gallery.visible_shell_keys(), ("ae_table",))
+        self.assertEqual(gallery.visible_shell_keys(), ("rule_based", "ae_table"))
         gallery.category_buttons["Categorical"].click()
         self.assertEqual(
             gallery.visible_shell_keys(),
@@ -112,6 +112,17 @@ class TableShellGalleryTests(unittest.TestCase):
         )
         open_button.click()
         self.assertEqual(requests, ["baseline_characteristics"])
+        gallery.close()
+        self.application.processEvents()
+
+    def test_rule_based_shell_uses_safety_preview(self) -> None:
+        from clinical_data_viewer.ui.table_shell_gallery import TableShellGalleryDialog
+
+        gallery = TableShellGalleryDialog()
+        card = next(card for card in gallery._cards if card.shell.key == "rule_based")
+        self.assertTrue(card.shell.preview_path.endswith("rule_based_safety.png"))
+        self.assertIn("Safety", card.shell.all_tags)
+        self.assertFalse(card.preview.pixmap().isNull())
         gallery.close()
         self.application.processEvents()
 

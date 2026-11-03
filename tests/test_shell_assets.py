@@ -35,6 +35,11 @@ SHELL_ASSETS = (
         "categorical_adsl.docx",
         "categorical_adsl.png",
     ),
+    (
+        "rule-based-safety-shell.docx",
+        "rule_based_safety.docx",
+        "rule_based_safety.png",
+    ),
 )
 
 

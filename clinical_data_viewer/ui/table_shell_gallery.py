@@ -85,7 +85,8 @@ TABLE_SHELLS = (
         "Rule-based Table",
         "Configurable clinical summary from row-level rules",
         "Summary",
-        tags=("Categorical",),
+        "clinical_data_viewer/assets/shells/rule_based_safety.png",
+        ("Categorical", "Safety"),
     ),
     TableShell(
         "ae_table",
