@@ -110,7 +110,9 @@ def build_cell_where_text(
         clauses.append(f"({config.filter_text.strip()})")
     if config.treatment_variable and cell.treatment_level is not None:
         treatment = fields[config.treatment_variable.casefold()]
-        clauses.append(f"{treatment.name} = {_literal(cell.treatment_level, treatment.kind)}")
+        clauses.append(
+            f"{treatment.name} = {_literal(cell.treatment_level, treatment.kind)}"
+        )
     if cell.item_kind == "categorical" and not denominator:
         if cell.level is None:
             clauses.append(f"missing({variable.name})")

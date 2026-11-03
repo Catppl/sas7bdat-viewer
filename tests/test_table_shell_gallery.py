@@ -16,6 +16,16 @@ class TableShellGalleryTests(unittest.TestCase):
 
         cls.application = QApplication.instance() or QApplication([])
 
+    def tearDown(self) -> None:
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QApplication
+
+        for widget in QApplication.topLevelWidgets():
+            widget.close()
+            widget.deleteLater()
+        self.application.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.application.processEvents()
+
     def test_gallery_has_only_table_builders_and_filters(self) -> None:
         from clinical_data_viewer.ui.table_shell_gallery import TableShellGalleryDialog
 

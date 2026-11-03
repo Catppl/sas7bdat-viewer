@@ -142,7 +142,14 @@ class BaselineCharacteristicsEngine:
                         parameters,
                     ).fetchone()[0]
                 )
-                groups = [(None, "VALUE", f"{config.header_label}\n(N={header_n:,})", header_n)]
+                groups = [
+                    (
+                        None,
+                        "VALUE",
+                        f"{config.header_label}\n(N={header_n:,})",
+                        header_n,
+                    )
+                ]
 
         directory = self.temp_manager.create_dataset_directory()
         writer = BaselineCharacteristicsResultWriter(
@@ -215,8 +222,13 @@ class BaselineCharacteristicsEngine:
         )
         where, parameters = self._where(config)
         base_where = where.removeprefix(" WHERE ")
-        custom_ranks = {_custom_key(value, variable): index for index, value in enumerate(item.level_order)}
-        level_labels = {_custom_key(value, variable): label for value, label in item.level_labels}
+        custom_ranks = {
+            _custom_key(value, variable): index
+            for index, value in enumerate(item.level_order)
+        }
+        level_labels = {
+            _custom_key(value, variable): label for value, label in item.level_labels
+        }
         group_data: dict[str, dict[object, tuple[int, int]]] = {}
         all_values: list[object] = []
         for treatment_value, column, _column_label, group_n in groups:
@@ -241,7 +253,9 @@ class BaselineCharacteristicsEngine:
                 tuple(params),
             ).fetchall()
             group_data[column] = {
-                (None if variable.kind == "character" and row[0] == "" else row[0]): int(row[1])
+                (
+                    None if variable.kind == "character" and row[0] == "" else row[0]
+                ): int(row[1])
                 for row in rows
             }
             for value, _count in rows:
@@ -263,21 +277,33 @@ class BaselineCharacteristicsEngine:
             first_denominator = None
             for treatment_value, column, _column_label, group_n in groups:
                 numerator = group_data[column].get(value, 0)
-                display_values[column] = _format_percent(numerator, group_n, item.percent_digits)
-                first_numerator = numerator if first_numerator is None else first_numerator
-                first_denominator = group_n if first_denominator is None else first_denominator
+                display_values[column] = _format_percent(
+                    numerator, group_n, item.percent_digits
+                )
+                first_numerator = (
+                    numerator if first_numerator is None else first_numerator
+                )
+                first_denominator = (
+                    group_n if first_denominator is None else first_denominator
+                )
             writer.add_row(
                 item_order=item_order,
                 item_kind="categorical",
                 variable=variable.name,
                 item_label=label,
-                row_label=INDENT + level_labels.get(_custom_key(value, variable), _display_level(value, variable)),
+                row_label=INDENT
+                + level_labels.get(
+                    _custom_key(value, variable), _display_level(value, variable)
+                ),
                 display_values=display_values,
                 level_json=json.dumps(value, ensure_ascii=False),
                 numerator=first_numerator,
                 denominator=first_denominator,
                 drilldown=True,
-                treatment_levels={column: json.dumps(treatment_value, ensure_ascii=False) for treatment_value, column, _label, _n in groups},
+                treatment_levels={
+                    column: json.dumps(treatment_value, ensure_ascii=False)
+                    for treatment_value, column, _label, _n in groups
+                },
             )
 
     def _write_continuous(
@@ -324,7 +350,9 @@ class BaselineCharacteristicsEngine:
             values = [float(value) for value, _subject in rows if value is not None]
             subjects = {_subject for value, _subject in rows if value is not None}
             group_stats[column] = (
-                calculate_value_statistics(values, group_n, len(subjects), 0.95, set(item.statistics)),
+                calculate_value_statistics(
+                    values, group_n, len(subjects), 0.95, set(item.statistics)
+                ),
                 group_n,
             )
 
@@ -372,11 +400,16 @@ class BaselineCharacteristicsEngine:
                 display_values=display_values,
                 statistic_key=statistic_key,
                 raw_value_1=first_raw_values[0] if first_raw_values else None,
-                raw_value_2=first_raw_values[1] if first_raw_values and len(first_raw_values) > 1 else None,
+                raw_value_2=first_raw_values[1]
+                if first_raw_values and len(first_raw_values) > 1
+                else None,
                 numerator=int(group_stats[groups[0][1]][0].get("n") or 0),
                 denominator=groups[0][3],
                 drilldown=True,
-                treatment_levels={column: json.dumps(treatment_value, ensure_ascii=False) for treatment_value, column, _label, _n in groups},
+                treatment_levels={
+                    column: json.dumps(treatment_value, ensure_ascii=False)
+                    for treatment_value, column, _label, _n in groups
+                },
             )
 
 

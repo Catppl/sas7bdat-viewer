@@ -127,7 +127,11 @@ class BaselineCharacteristicsTests(unittest.TestCase):
                 ).fetchall()
             self.assertEqual(
                 [row[0] for row in labels[1:]],
-                ["\u00a0" * 4 + "Female", "\u00a0" * 4 + "Male", "\u00a0" * 4 + "Missing"],
+                [
+                    "\u00a0" * 4 + "Female",
+                    "\u00a0" * 4 + "Male",
+                    "\u00a0" * 4 + "Missing",
+                ],
             )
 
     def test_selected_statistics_are_rendered_without_auto_decimals(self) -> None:

@@ -170,7 +170,12 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.run_button.clicked.connect(self._run)
         action_grid = QGridLayout()
         for index, button in enumerate(
-            (self.preview_button, self.sas_code_button, self.clear_button, self.run_button)
+            (
+                self.preview_button,
+                self.sas_code_button,
+                self.clear_button,
+                self.run_button,
+            )
         ):
             action_grid.addWidget(button, index // 2, index % 2)
         action_grid.setColumnStretch(0, 1)
@@ -230,7 +235,9 @@ class BaselineCharacteristicsBuilder(QWidget):
         for row, (key, label) in enumerate(labels):
             check = QCheckBox(label)
             check.setChecked(True)
-            check.stateChanged.connect(lambda _state, changed=key: self._statistic_changed(changed))
+            check.stateChanged.connect(
+                lambda _state, changed=key: self._statistic_changed(changed)
+            )
             self._statistic_checks[key] = check
             combo = MouseOnlyComboBox()
             for digits in range(5):
@@ -493,7 +500,9 @@ class BaselineCharacteristicsBuilder(QWidget):
                 if key != "n"
             )
             statistics = tuple(
-                key for key, check in self._statistic_checks.items() if check.isChecked()
+                key
+                for key, check in self._statistic_checks.items()
+                if check.isChecked()
             )
             self._items[row] = BaselineContinuousItem(
                 item.variable,

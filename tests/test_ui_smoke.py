@@ -1346,18 +1346,12 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(
                 window.variables_panel.search.placeholderText(), "Filter variables"
             )
-            tools_actions = [
-                action.text()
-                for action in window.menuBar().actions()[3].menu().actions()
-            ]
+            tools_actions = [action.text() for action in window.tools_menu.actions()]
             self.assertIn("Analysis", tools_actions)
             self.assertIn("PROC MEANS Builder", tools_actions)
             self.assertIn("Categorical Table Builder", tools_actions)
             self.assertIn("Listing Generator", tools_actions)
-            view_actions = [
-                action.text()
-                for action in window.menuBar().actions()[2].menu().actions()
-            ]
+            view_actions = [action.text() for action in window.view_menu.actions()]
             self.assertIn("Apply SAS Date/Time Formats", view_actions)
             self.assertFalse(window.sas_date_time_formats_action.isChecked())
             window.sas_date_time_formats_action.trigger()

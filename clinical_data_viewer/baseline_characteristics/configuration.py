@@ -141,7 +141,9 @@ def build_baseline_characteristics_configuration(
             "continuous_statistics": "fixed_shell_order",
         },
         "display": {
-            "layout": "treatment_columns" if config.treatment_variable else "single_summary_column",
+            "layout": "treatment_columns"
+            if config.treatment_variable
+            else "single_summary_column",
             "header_label": config.header_label,
             "rounding": "half_up",
             "maximum_decimals": 4,

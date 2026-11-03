@@ -205,14 +205,19 @@ class SasBaselineCharacteristicsGenerator:
                 prepared["custom_levels"] = [
                     {
                         "rank": rank,
-                        "display": str(labels_by_value.get(value) or ("Missing" if value is None else value)),
+                        "display": str(
+                            labels_by_value.get(value)
+                            or ("Missing" if value is None else value)
+                        ),
                         "literal": _literal(
                             value, kind, f"items[{position}].level_order.values[{rank}]"
                         ),
                     }
                     for rank, value in enumerate(custom_levels, start=1)
                 ]
-                prepared["include_missing"] = any(value is None for value in custom_levels)
+                prepared["include_missing"] = any(
+                    value is None for value in custom_levels
+                )
                 percent_digits = item.get("percent_digits")
                 if (
                     isinstance(percent_digits, bool)
@@ -223,11 +228,14 @@ class SasBaselineCharacteristicsGenerator:
                         f"Percent decimals for {name} must be between 0 and 4."
                     )
             else:
-                raw_statistics = item.get("statistics", [
-                    "n", "mean", "std", "median", "q1", "q3", "min", "max"
-                ])
+                raw_statistics = item.get(
+                    "statistics",
+                    ["n", "mean", "std", "median", "q1", "q3", "min", "max"],
+                )
                 if not isinstance(raw_statistics, list) or not raw_statistics:
-                    raise ValueError(f"Statistics for {name} must be a non-empty array.")
+                    raise ValueError(
+                        f"Statistics for {name} must be a non-empty array."
+                    )
                 if any(
                     statistic
                     not in {"n", "mean", "std", "median", "q1", "q3", "min", "max"}

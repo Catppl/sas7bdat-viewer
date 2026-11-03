@@ -167,11 +167,15 @@ class BaselineCharacteristicsConfig:
                 raise ValueError("Statistic decimals must be between 0 and 4.")
             statistics = tuple(item.statistics)
             if not statistics:
-                raise ValueError(f'Select at least one statistic for "{item.variable}".')
+                raise ValueError(
+                    f'Select at least one statistic for "{item.variable}".'
+                )
             if any(statistic not in CONTINUOUS_STATISTICS for statistic in statistics):
                 raise ValueError(f'Unsupported statistic for "{item.variable}".')
             if len(set(statistics)) != len(statistics):
-                raise ValueError(f'Statistics for "{item.variable}" contain duplicates.')
+                raise ValueError(
+                    f'Statistics for "{item.variable}" contain duplicates.'
+                )
             if ("q1" in statistics) != ("q3" in statistics):
                 raise ValueError("Q1 and Q3 must be selected together.")
             if ("min" in statistics) != ("max" in statistics):

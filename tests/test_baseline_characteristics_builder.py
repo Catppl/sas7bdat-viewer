@@ -16,6 +16,16 @@ class BaselineCharacteristicsBuilderTests(unittest.TestCase):
 
         cls.application = QApplication.instance() or QApplication([])
 
+    def tearDown(self) -> None:
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QApplication
+
+        for widget in QApplication.topLevelWidgets():
+            widget.close()
+            widget.deleteLater()
+        self.application.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.application.processEvents()
+
     def test_role_is_user_selected_while_storage_type_comes_from_metadata(self) -> None:
         from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
         from clinical_data_viewer.ui.baseline_characteristics_builder import (

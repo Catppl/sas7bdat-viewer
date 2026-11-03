@@ -37,7 +37,9 @@ class BaselineCharacteristicsResultWriter:
         self.database_path = database_path
         self.connection = sqlite3.connect(database_path)
         self.row_count = 0
-        self.column_specs = columns or (("VALUE", f"{header_label}\n(N={header_n:,})", header_n),)
+        self.column_specs = columns or (
+            ("VALUE", f"{header_label}\n(N={header_n:,})", header_n),
+        )
         self.variables = (VariableMetadata("ROW_LABEL", "Characteristic"),) + tuple(
             VariableMetadata(name, label) for name, label, _n in self.column_specs
         )
@@ -45,8 +47,12 @@ class BaselineCharacteristicsResultWriter:
         self.connection.execute("PRAGMA synchronous=NORMAL")
         self.connection.execute(
             "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
-            + quote_identifier("ROW_LABEL") + " TEXT, "
-            + ', '.join(f'{quote_identifier(name)} TEXT' for name, _label, _n in self.column_specs)
+            + quote_identifier("ROW_LABEL")
+            + " TEXT, "
+            + ", ".join(
+                f"{quote_identifier(name)} TEXT"
+                for name, _label, _n in self.column_specs
+            )
             + ")"
         )
         self.connection.execute(
@@ -89,7 +95,10 @@ class BaselineCharacteristicsResultWriter:
     ) -> int:
         self.row_count += 1
         values = display_values or {self.column_specs[0][0]: display_value}
-        columns = ", ".join([quote_identifier("ROW_LABEL")] + [quote_identifier(name) for name, _label, _n in self.column_specs])
+        columns = ", ".join(
+            [quote_identifier("ROW_LABEL")]
+            + [quote_identifier(name) for name, _label, _n in self.column_specs]
+        )
         placeholders = ", ".join("?" for _ in range(len(self.column_specs) + 2))
         self.connection.execute(
             f"INSERT INTO dataset (_source_row, {columns}) VALUES ({placeholders})",

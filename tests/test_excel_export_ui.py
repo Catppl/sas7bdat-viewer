@@ -85,7 +85,7 @@ class ExcelExportUiTests(unittest.TestCase):
             self.assertTrue(window.export_metadata_action.isEnabled())
             self.assertIn(
                 window.export_metadata_action,
-                window.menuBar().actions()[0].menu().actions(),
+                window.file_menu.actions(),
             )
             self.assertIn(
                 window.export_metadata_action,
