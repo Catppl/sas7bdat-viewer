@@ -31,6 +31,7 @@ from ..ui.listing_builder import ListingBuilderSelection
 from ..ui.proc_means_builder import ProcMeansBuilderSelection
 from ..ui.proc_means_vertical_builder import ProcMeansVerticalBuilderSelection
 from ..ui.rule_based_builder import RuleBasedBuilderSelection
+from ..ui.shift_table_builder import ShiftTableBuilderSelection
 from ..ui.table_shell_gallery import TableShellGalleryDialog
 from ..workers import Worker
 from .analysis import (
@@ -42,6 +43,7 @@ from .analysis import (
     ProcMeansController,
     ProcMeansVerticalController,
     RuleBasedController,
+    ShiftTableController,
 )
 from .analysis.ae_table import AeTableResultContext as _AeTableResultContext
 from .analysis.baseline_characteristics import (
@@ -129,6 +131,8 @@ class AnalysisControllerHost(Protocol):
 
     def show_baseline_characteristics_builder(self) -> None: ...
 
+    def show_shift_table_builder(self) -> None: ...
+
     def show_change_from_baseline_builder(self) -> None: ...
 
     def show_categorical_builder(self) -> None: ...
@@ -172,6 +176,7 @@ class AnalysisController(QObject):
         self.baseline_characteristics = BaselineCharacteristicsController(
             self, temp_manager, settings
         )
+        self.shift_table = ShiftTableController(self, temp_manager, settings)
         self.categorical = CategoricalController(self, temp_manager, settings)
         self.change_from_baseline = ChangeFromBaselineController(
             self, temp_manager, settings
@@ -263,6 +268,22 @@ class AnalysisController(QObject):
             )
         )
         baseline_builder.cleared.connect(self.baseline_characteristics.clear_source)
+
+        shift_builder = self._panel.shift_table_builder
+        shift_builder.run_requested.connect(self.shift_table.run)
+        shift_builder.sas_code_requested.connect(self.shift_table.generate_sas_code)
+        shift_builder.shell_preview_requested.connect(
+            self.shift_table.show_shell_preview
+        )
+        shift_builder.source_selected.connect(self.shift_table.select_source)
+        shift_builder.population_selected.connect(self.shift_table.select_population)
+        shift_builder.levels_requested.connect(self.shift_table.load_levels)
+        shift_builder.validation_error.connect(
+            lambda message: QMessageBox.warning(
+                self._parent_widget(), "Shift Table", message
+            )
+        )
+        shift_builder.cleared.connect(self.shift_table.clear_source)
 
         categorical_builder = self._panel.categorical_builder
         categorical_builder.run_requested.connect(self.categorical.run_categorical)
@@ -370,6 +391,8 @@ class AnalysisController(QObject):
             titles.append("Proc Means Vertical")
         if self.baseline_characteristics.source is tab:
             titles.append("Baseline Characteristics")
+        if self.shift_table.source is tab:
+            titles.append("Shift Table")
         if self.categorical_source is tab:
             titles.append("Categorical")
         if self.change_from_baseline_source is tab:
@@ -407,6 +430,11 @@ class AnalysisController(QObject):
                 "Baseline Characteristics Running",
                 f"Wait for Baseline Characteristics to finish before {action} this dataset.",
             )
+        if self.shift_table.is_input_tab(tab):
+            return TabCloseBlocker(
+                "Shift Table Running",
+                f"Wait for Shift Table to finish before {action} this dataset.",
+            )
         if self.categorical.is_input_tab(tab):
             return TabCloseBlocker(
                 "Categorical Table Running",
@@ -437,6 +465,9 @@ class AnalysisController(QObject):
         baseline = getattr(self, "baseline_characteristics", None)
         if baseline is not None:
             baseline.source_reload_started(tab)
+        shift_table = getattr(self, "shift_table", None)
+        if shift_table is not None:
+            shift_table.source_reload_started(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_started(tab)
@@ -450,6 +481,9 @@ class AnalysisController(QObject):
         baseline = getattr(self, "baseline_characteristics", None)
         if baseline is not None:
             baseline.source_reload_completed(tab)
+        shift_table = getattr(self, "shift_table", None)
+        if shift_table is not None:
+            shift_table.source_reload_completed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_completed(tab)
@@ -463,6 +497,9 @@ class AnalysisController(QObject):
         baseline = getattr(self, "baseline_characteristics", None)
         if baseline is not None:
             baseline.source_reload_failed(tab)
+        shift_table = getattr(self, "shift_table", None)
+        if shift_table is not None:
+            shift_table.source_reload_failed(tab)
         categorical = getattr(self, "categorical", None)
         if categorical is not None:
             categorical.source_reload_failed(tab)
@@ -485,6 +522,9 @@ class AnalysisController(QObject):
         if paths is not None:
             return paths
         paths = self.baseline_characteristics.take_result_release_paths(tab)
+        if paths is not None:
+            return paths
+        paths = self.shift_table.take_result_release_paths(tab)
         if paths is not None:
             return paths
         paths = self.categorical.take_result_release_paths(tab)
@@ -629,6 +669,7 @@ class AnalysisController(QObject):
         host_routes = {
             "proc_means_vertical": "show_proc_means_vertical_builder",
             "baseline_characteristics": "show_baseline_characteristics_builder",
+            "shift_table": "show_shift_table_builder",
             "change_from_baseline": "show_change_from_baseline_builder",
             "categorical": "show_categorical_builder",
             "rule_based": "show_rule_based_builder",
@@ -644,6 +685,9 @@ class AnalysisController(QObject):
         baseline = getattr(self, "baseline_characteristics", None)
         if baseline is not None:
             fallback_routes["baseline_characteristics"] = baseline.show_builder
+        shift_table = getattr(self, "shift_table", None)
+        if shift_table is not None:
+            fallback_routes["shift_table"] = shift_table.show_builder
         host_route = getattr(host, host_routes.get(key, ""), None)
         route = host_route if callable(host_route) else fallback_routes.get(key)
         if route is not None:
@@ -671,6 +715,31 @@ class AnalysisController(QObject):
 
     def show_baseline_characteristics_builder(self) -> None:
         self.baseline_characteristics.show_builder()
+
+    def show_shift_table_builder(self) -> None:
+        self.shift_table.show_builder()
+
+    def refresh_shift_table_sources(self, datasets=None) -> None:
+        self.shift_table.refresh_sources(datasets)
+
+    def run_shift_table(self, selection: ShiftTableBuilderSelection) -> None:
+        self.shift_table.run(selection)
+
+    def clear_shift_table_source(self) -> None:
+        self.shift_table.clear_source()
+
+    def open_shift_table_long_result(self) -> None:
+        self.shift_table.open_long_result()
+
+    def drilldown_shift_table(
+        self, tab: DatasetTab, view_row: int, column_name: str, display: str
+    ) -> None:
+        self.shift_table.drilldown(tab, view_row, column_name, display)
+
+    def drilldown_shift_table_header(
+        self, tab: DatasetTab, column_name: str
+    ) -> None:
+        self.shift_table.drilldown_header(tab, column_name)
 
     def refresh_baseline_characteristics_sources(self, datasets=None) -> None:
         self.baseline_characteristics.refresh_sources(datasets)

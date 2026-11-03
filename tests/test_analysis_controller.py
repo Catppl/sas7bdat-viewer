@@ -27,6 +27,7 @@ class AnalysisControllerTests(unittest.TestCase):
             ListingController,
             ProcMeansController,
             RuleBasedController,
+            ShiftTableController,
         )
 
         self.assertTrue(
@@ -38,6 +39,7 @@ class AnalysisControllerTests(unittest.TestCase):
                     AeTableController,
                     ProcMeansController,
                     CategoricalController,
+                    ShiftTableController,
                 )
             )
         )
@@ -58,6 +60,7 @@ class AnalysisControllerTests(unittest.TestCase):
                 "show_categorical_builder",
                 "show_rule_based_builder",
                 "show_ae_table_builder",
+                "show_shift_table_builder",
             )
         }
         controller = AnalysisController.__new__(AnalysisController)
@@ -69,6 +72,7 @@ class AnalysisControllerTests(unittest.TestCase):
         controller.categorical = Mock()
         controller.rule_based = Mock()
         controller.ae_table = Mock()
+        controller.shift_table = Mock()
 
         routes = {
             "proc_means_vertical": "show_proc_means_vertical_builder",
@@ -77,6 +81,7 @@ class AnalysisControllerTests(unittest.TestCase):
             "categorical": "show_categorical_builder",
             "rule_based": "show_rule_based_builder",
             "ae_table": "show_ae_table_builder",
+            "shift_table": "show_shift_table_builder",
         }
         for key, method_name in routes.items():
             controller._open_table_shell_builder(key)

@@ -19,6 +19,7 @@
   - [Drill-down Query Tab](#drill-down-query-tab)
   - [PROC MEANS 限制](#proc-means-限制)
 - [Categorical Table 模块](#categorical-table-模块)
+- [Shift Table Builder 模块](#shift-table-builder-模块)
 - [AE Table Builder 模块](#ae-table-builder-模块)
 - [Listing Generator 模块](#listing-generator-模块)
 - [Rule-based Table 模块](#rule-based-table-模块)
@@ -68,6 +69,7 @@
 - 数值列右键提供 `PROC MEANS (Simple)`；`Tools > PROC MEANS Builder` 支持多 Analysis/BY/CLASS、NWAY missing group、long-format 临时结果 Tab、配置 JSON，以及 SAS / R Code Generator。`Tools > PROC MEANS Table Builder (Vertical)` 可按 Analysis Variable 生成临床纵向表：每个分析变量独立输出 n/Mean/SD/Median/Q1,Q3/Min,Max 统计行，Treatment/Visit 等分组横向展开，并支持 Population N、独立 Population Treatment、总 N、Item label 集中维护、Base Decimal Places、Long Result 和 SAS Code Generator。两种 Builder 均使用当前完整筛选结果。
 - `Tools > Categorical Table Builder` 可生成分类变量 treatment `n (%)` 临时结果 Tab，支持 Population N（独立 ADSL treatment/WHERE）、Non-missing N 和 Baseline + Postbaseline n1 三种分母、Total、单元格 drill-down、配置 JSON v1 和 SAS Code Generator。
 - `Tools > Baseline Characteristics Builder` 在单个 `Overall (N=xx)` 列中混排分类与连续项目。角色由用户通过 Add Categorical / Add Continuous 明确选择，存储类型来自变量元数据；字符变量只能作为分类项，数值变量可作为分类项或连续项。
+- `Tools > Shift Table Builder` 按 Parameter、Visit 和 Treatment 生成 baseline grade 到 post-baseline grade 的受试者转移矩阵，支持 level 顺序/label、可选独立 Total、Population N、长表、cell/header drill-down、JSON v1 和 Jinja2 SAS Code Generator。
 - `Tools > Rule-based Table Builder` 可按多条 Item/Row Filter 生成 distinct `USUBJID` 的临床 `n (%)` 宽表，第一版支持 Population N、Non-missing N 和 Same-universe 三种独立分母，并可从 `View > Open Rule-based Long Result` 打开长表。
 - `Tools > AE Table Builder` 可按 SOC/PT 自动生成 Any AE、System Organ Class 和 Preferred Term 的 distinct `USUBJID` `n (%)` 宽表，同时保存长表、钻取结果和 `ae_table_config.json` v1。
 - `Tools > Listing Generator` 可按“可选 ADSL LEFT merge → Data Filter → derived columns → Sort → PROC REPORT”生成记录级 QC Listing；Python reference result 作为普通临时 Tab 打开，SAS 代码由 Jinja2 模板生成。
@@ -109,13 +111,21 @@ PROC MEANS 用于查看当前数据子集中的数值型变量统计结果。它
 
 ### Table Shell Gallery
 
-`Tools > Table Shell Gallery` 会以独立的大窗口展示当前可用的 table shell。卡片使用 shell 缩略图（尚未提供图片时显示统一占位图）；点击卡片可先预览，确认后再进入对应 Builder。当前 Gallery 包含纵向 PROC MEANS、Baseline Characteristics、Change from Baseline、Categorical、Rule-based 和 AE Table，不包含 Listing 或普通 PROC MEANS Builder。
+`Tools > Table Shell Gallery` 会以独立的大窗口展示当前可用的 table shell。卡片使用 shell 缩略图（尚未提供图片时显示统一占位图）；点击卡片可先预览，确认后再进入对应 Builder。当前 Gallery 包含纵向 PROC MEANS、Baseline Characteristics、Change from Baseline、Categorical、Rule-based、AE Table 和 Shift from Baseline，不包含 Listing 或普通 PROC MEANS Builder。
 
 ### Baseline Characteristics Builder
 
 `Tools > Baseline Characteristics Builder` 是独立的混合型 table-shell 模块。它要求筛选后的分析集每个非缺失 `USUBJID` 只有一行；缺失或重复 participant ID 会阻止运行。分类项按 distinct participant 计算 `n (%)`，缺失 level 不展示，支持 runtime raw-value 升序或自定义 raw-value 顺序；连续项固定输出 n、Mean、SD、Median、Q1/Q3、Min/Max，使用 sample SD 与 QNTLDEF=5。每项可设置显示 label，连续项还可设置 unit 以及各统计量的 Auto/0–4 小数。
 
 结果包含默认临床宽表、可从 `View > Open Baseline Characteristics Long Result` 打开的权威长表、`baseline_characteristics_config.json` v1 和 raw-value cell mapping。双击分类单元格可查看 numerator 或 denominator participants；双击连续单元格可查看该变量非缺失的 source rows。物理 SAS source 可以通过 Jinja2 生成 SAS；Merge source 只能运行 Python reference engine，SAS Code Generator 禁用。Shell Preview 与 Gallery 使用 `docs/baseline-characteristics-shell.docx` 的 packaged DOCX/PNG，shell 不显示 footnote。
+
+## Shift Table Builder 模块
+
+从 `Tools > Shift Table Builder` 或 Gallery 的 `Shift from Baseline` 卡片打开。选择分析数据集、Subject、Parameter、Visit、Treatment、Baseline Grade、Post-baseline Grade 和 Analysis Flag；再分别加载 Parameter、Visit、Treatment、Grade level，并用 Up/Down 维护实际出表顺序和 display label。Parameter 和 Visit 都按用户顺序纵向形成独立矩阵，Treatment 第一版只横向展开。
+
+每个 cell 使用 distinct Subject `n (%)`。分母是当前 Parameter × Visit × Treatment 中 baseline/post grade 都非缺失的 distinct subjects；行 Total、列 Total、grand Total 和可选 Treatment Total 均独立重算，不能相加得到。Population Dataset 可独立选择并按 treatment 计算表头 N；未选择时会询问是否用分析数据集。缺失 grade 不作为 v1 的行/列，结果会显示排除摘要。Subject × Parameter × Visit × Treatment 有多条记录时会警告；确认继续后不会自动取最大值或第一条，因此同一 subject 可能进入多个 cell。
+
+Run 生成临时 wide result、权威 long result 和 `shift_table_config.json`。双击或右键结果 cell 可查看对应分析记录；双击 treatment header 可查看 Population N 来源。`SAS Code Generator…` 只支持物理 SAS7BDAT source，读取同一 JSON contract 并通过 Jinja2 生成 `work.shift_table` 与 `work.shift_table_long`；Viewer 不执行 SAS。可编辑 shell 源位于 `docs/shift-table-shell.docx`，Gallery 使用 packaged DOCX/PNG。
 
 ### 打开方式
 
@@ -809,6 +819,7 @@ clinical_data_viewer/
   listing/             Listing 配置、表达式 AST、Python engine 与记录级结果
   proc_means/          PROC MEANS Builder 配置、分组统计、drill-down、long result 与 JSON
   proc_means_vertical/ 纵向 PROC MEANS Table Builder、Population N、结果与 JSON
+  shift_table/         Shift from Baseline 配置、Python engine、drill-down、wide/long 结果与 JSON
   rule_based/          Rule-based 配置、Python engine、drill-down、wide/long 结果与 JSON
   compare_engine/      分组流式读取、加权成本、Hungarian 匹配与逐变量比较
   merge_datasets/      Merge 配置、join engine、来源追踪与临时结果

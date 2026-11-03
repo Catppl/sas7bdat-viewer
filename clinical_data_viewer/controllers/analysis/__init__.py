@@ -17,6 +17,7 @@ from .proc_means_vertical import (
     ProcMeansVerticalResultContext,
 )
 from .rule_based import RuleBasedController, RuleBasedResultContext
+from .shift_table import ShiftTableController, ShiftTableResultContext
 
 __all__ = [
     "AeTableController",
@@ -35,4 +36,6 @@ __all__ = [
     "ProcMeansVerticalResultContext",
     "RuleBasedController",
     "RuleBasedResultContext",
+    "ShiftTableController",
+    "ShiftTableResultContext",
 ]

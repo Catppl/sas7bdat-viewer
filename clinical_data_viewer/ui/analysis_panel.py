@@ -26,6 +26,7 @@ from .listing_builder import ListingBuilder
 from .proc_means_builder import ProcMeansBuilder
 from .proc_means_vertical_builder import ProcMeansVerticalBuilder
 from .rule_based_builder import RuleBasedBuilder
+from .shift_table_builder import ShiftTableBuilder
 
 
 class AnalysisPanel(QWidget):
@@ -47,6 +48,7 @@ class AnalysisPanel(QWidget):
         self._create_builder_tab()
         self._create_proc_means_vertical_tab()
         self._create_baseline_characteristics_tab()
+        self._create_shift_table_tab()
         self._create_categorical_tab()
         self._create_rule_based_tab()
         self._create_ae_table_tab()
@@ -87,6 +89,9 @@ class AnalysisPanel(QWidget):
 
     def _create_baseline_characteristics_tab(self) -> None:
         self.baseline_characteristics_builder = BaselineCharacteristicsBuilder()
+
+    def _create_shift_table_tab(self) -> None:
+        self.shift_table_builder = ShiftTableBuilder()
 
     def _create_comparison_tab(self) -> None:
         self.comparison_page = QWidget()
@@ -146,6 +151,9 @@ class AnalysisPanel(QWidget):
             self.baseline_characteristics_builder,
             "Baseline Characteristics",
         )
+
+    def show_shift_table_tab(self) -> None:
+        self._activate(self.shift_table_builder, "Shift Table")
 
     def show_categorical_tab(self) -> None:
         self._activate(self.categorical_builder, "Categorical Table")

@@ -17,6 +17,7 @@ A compact, read-only Windows desktop viewer for clinical `.sas7bdat` and SAS Tra
   - [Statistics and precision](#statistics-and-precision)
   - [Configuration JSON and code generators](#configuration-json-and-code-generators)
 - [Categorical Table module](#categorical-table-module)
+- [Shift Table Builder module](#shift-table-builder-module)
 - [AE Table Builder module](#ae-table-builder-module)
 - [Listing Generator module](#listing-generator-module)
 - [Rule-based Table module](#rule-based-table-module)
@@ -88,13 +89,21 @@ The project declares `requires-python >=3.11`; it does not pin a specific patch 
 
 ### Table Shell Gallery
 
-`Tools > Table Shell Gallery` opens a large standalone browser for the available table shells. Cards show shell thumbnails (or one shared placeholder when an image is not available); click a card to preview it, then confirm before opening its Builder. The current Gallery includes vertical PROC MEANS, Baseline Characteristics, Change from Baseline, Categorical, Rule-based, and AE Table, but not Listing or the regular PROC MEANS Builder.
+`Tools > Table Shell Gallery` opens a large standalone browser for the available table shells. Cards show shell thumbnails (or one shared placeholder when an image is not available); click a card to preview it, then confirm before opening its Builder. The current Gallery includes vertical PROC MEANS, Baseline Characteristics, Change from Baseline, Categorical, Rule-based, AE Table, and Shift from Baseline, but not Listing or the regular PROC MEANS Builder.
 
 ### Baseline Characteristics Builder
 
 `Tools > Baseline Characteristics Builder` is an independent mixed-item table-shell module with one editable `Overall (N=xx)` summary column. The user explicitly chooses Categorical or Continuous when adding an item, while physical character/numeric storage type always comes from dataset metadata. Character variables are categorical-only; numeric variables may use either role. The filtered source must contain exactly one row per nonmissing `USUBJID`.
 
 Categorical items count distinct participants, exclude missing levels, and support runtime raw-value or custom raw-value ordering. Continuous items have the fixed n, Mean, SD, Median, Q1/Q3, and Min/Max shell order with sample SD and QNTLDEF=5, plus per-statistic Auto/0–4 decimals. A run produces the clinical wide result, an authoritative long result, JSON v1, and raw cell mapping. Categorical drill-down offers numerator and denominator participants; continuous drill-down opens nonmissing source rows. Physical SAS sources support Jinja2 SAS generation; Merge sources do not. The packaged shell preview has no footnote.
+
+## Shift Table Builder module
+
+Open `Tools > Shift Table Builder` or the Gallery's `Shift from Baseline` card. Select the analysis dataset and the Subject, Parameter, Visit, Treatment, Baseline Grade, Post-baseline Grade, and Analysis Flag variables. Load and reorder the Parameter, Visit, Treatment, and Grade levels; their editable display labels and user-defined order drive the output. Parameter and Visit create vertical matrix sections, while v1 expands Treatment across columns only.
+
+Each cell is distinct-subject `n (%)`. Its denominator is the distinct subjects with both grades present in the current Parameter × Visit × Treatment universe. Row, column, grand, and optional overall Treatment totals are independently recomputed. A separate Population Dataset may supply treatment header N; if it is omitted, the Builder asks before using the analysis dataset. Missing grades are excluded with a visible summary. Duplicate Subject × Parameter × Visit × Treatment records produce a warning and are never silently reduced to maximum, first, or last.
+
+Run creates a temporary wide result, an authoritative long result, and `shift_table_config.json`. Double-click or right-click a result cell to drill down to analysis rows; double-click a treatment header to inspect Population N. `SAS Code Generator…` supports physical SAS7BDAT sources and renders `work.shift_table` plus `work.shift_table_long` from the same JSON contract through Jinja2; the Viewer does not execute SAS. The editable shell source is `docs/shift-table-shell.docx`, with packaged DOCX/PNG assets used by the Gallery.
 
 ### Common operations
 
@@ -432,6 +441,7 @@ clinical_data_viewer/
   listing/             Listing configuration, expression AST, Python engine, and record-level results
   proc_means/          PROC MEANS Builder configuration, grouped statistics, drill-down, long result, and JSON
   proc_means_vertical/ vertical PROC MEANS table, Population N, results, and JSON
+  shift_table/         Shift from Baseline configuration, Python engine, drill-down, wide/long results, and JSON
   rule_based/          Rule-based configuration, engine, drill-down, wide/long results, and JSON
   compare_engine/      streaming groups, weighted Hungarian matching, and variable comparison
   merge_datasets/      Merge configuration, join engine, source tracing, and temporary results

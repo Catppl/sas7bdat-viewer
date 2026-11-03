@@ -96,6 +96,14 @@ TABLE_SHELLS = (
         "clinical_data_viewer/assets/shells/ae_soc_pt.png",
         ("Categorical",),
     ),
+    TableShell(
+        "shift_table",
+        "Shift from Baseline",
+        "Grade shifts from baseline by visit and treatment",
+        "Safety",
+        "clinical_data_viewer/assets/shells/shift_table.png",
+        ("Categorical",),
+    ),
 )
 
 

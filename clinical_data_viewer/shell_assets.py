@@ -4,6 +4,7 @@ from importlib.resources import files
 
 _CHANGE_FROM_BASELINE_PREVIEW = "change_from_baseline_horizontal.png"
 _BASELINE_CHARACTERISTICS_PREVIEW = "baseline_characteristics.png"
+_SHIFT_TABLE_PREVIEW = "shift_table.png"
 
 
 def load_change_from_baseline_shell_preview() -> bytes:
@@ -27,7 +28,20 @@ def load_baseline_characteristics_shell_preview() -> bytes:
     return payload
 
 
+def load_shift_table_shell_preview() -> bytes:
+    """Return the packaged PNG used by the Shift Table preview."""
+
+    resource = files("clinical_data_viewer.assets.shells").joinpath(
+        _SHIFT_TABLE_PREVIEW
+    )
+    payload = resource.read_bytes()
+    if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("The packaged Shift Table preview is not a PNG.")
+    return payload
+
+
 __all__ = [
     "load_baseline_characteristics_shell_preview",
     "load_change_from_baseline_shell_preview",
+    "load_shift_table_shell_preview",
 ]

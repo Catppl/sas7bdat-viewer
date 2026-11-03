@@ -29,20 +29,34 @@ class TableShellGalleryTests(unittest.TestCase):
                 "categorical",
                 "rule_based",
                 "ae_table",
+                "shift_table",
             ),
         )
         gallery.search.setText("baseline")
         self.assertEqual(
             gallery.visible_shell_keys(),
-            ("baseline_characteristics", "change_from_baseline"),
+            (
+                "baseline_characteristics",
+                "change_from_baseline",
+                "shift_table",
+            ),
         )
         gallery.search.clear()
         gallery.category_buttons["Safety"].click()
-        self.assertEqual(gallery.visible_shell_keys(), ("rule_based", "ae_table"))
+        self.assertEqual(
+            gallery.visible_shell_keys(),
+            ("rule_based", "ae_table", "shift_table"),
+        )
         gallery.category_buttons["Categorical"].click()
         self.assertEqual(
             gallery.visible_shell_keys(),
-            ("baseline_characteristics", "categorical", "rule_based", "ae_table"),
+            (
+                "baseline_characteristics",
+                "categorical",
+                "rule_based",
+                "ae_table",
+                "shift_table",
+            ),
         )
         gallery.category_buttons["Continuous"].click()
         self.assertEqual(
@@ -53,6 +67,37 @@ class TableShellGalleryTests(unittest.TestCase):
                 "change_from_baseline",
             ),
         )
+        gallery.close()
+        self.application.processEvents()
+
+    def test_shift_shell_preview_opens_shift_builder(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QPushButton
+
+        from clinical_data_viewer.ui.table_shell_gallery import (
+            TableShellGalleryDialog,
+        )
+
+        gallery = TableShellGalleryDialog()
+        requests: list[str] = []
+        gallery.builder_requested.connect(requests.append)
+        card = next(
+            card for card in gallery._cards if card.shell.key == "shift_table"
+        )
+        self.assertIn("Safety", card.shell.all_tags)
+        self.assertIn("Categorical", card.shell.all_tags)
+        self.assertFalse(card.preview.pixmap().isNull())
+
+        QTest.mouseClick(card, Qt.LeftButton)
+        assert gallery._preview_dialog is not None
+        open_button = next(
+            button
+            for button in gallery._preview_dialog.findChildren(QPushButton)
+            if button.text() == "Open Builder"
+        )
+        open_button.click()
+        self.assertEqual(requests, ["shift_table"])
         gallery.close()
         self.application.processEvents()
 

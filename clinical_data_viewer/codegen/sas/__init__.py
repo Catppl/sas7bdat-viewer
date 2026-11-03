@@ -6,6 +6,7 @@ from .generator import SasProcMeansGenerator
 from .listing_generator import SasListingGenerator
 from .proc_means_vertical_generator import SasProcMeansVerticalGenerator
 from .rule_based_generator import SasRuleBasedGenerator
+from .shift_table_generator import SasShiftTableGenerator
 
 __all__ = [
     "SasAeTableGenerator",
@@ -16,4 +17,5 @@ __all__ = [
     "SasProcMeansGenerator",
     "SasProcMeansVerticalGenerator",
     "SasRuleBasedGenerator",
+    "SasShiftTableGenerator",
 ]

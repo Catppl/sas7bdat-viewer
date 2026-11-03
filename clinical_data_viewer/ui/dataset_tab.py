@@ -195,6 +195,8 @@ class DatasetTab(QWidget):
     rule_based_drilldown_requested = Signal(int, str, str)
     ae_table_drilldown_requested = Signal(int, str, str)
     change_from_baseline_drilldown_requested = Signal(int, str, str)
+    shift_table_drilldown_requested = Signal(int, str, str)
+    shift_table_header_drilldown_requested = Signal(str)
 
     def __init__(
         self,
@@ -295,6 +297,9 @@ class DatasetTab(QWidget):
         self.filter_header.setMinimumSectionSize(40)
         self.filter_header.setSortIndicatorShown(False)
         self.filter_header.sectionClicked.connect(self._header_clicked)
+        self.filter_header.sectionDoubleClicked.connect(
+            self._header_double_clicked
+        )
         self.filter_header.filter_requested.connect(self._request_column_filter)
         self.filter_header.setContextMenuPolicy(Qt.CustomContextMenu)
         self.filter_header.customContextMenuRequested.connect(
@@ -489,6 +494,12 @@ class DatasetTab(QWidget):
                     index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
                 )
             return
+        if self.handle.kind == "shift_table":
+            if column_name in metadata.shift_table_drilldown_columns:
+                self.shift_table_drilldown_requested.emit(
+                    index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
+                )
+            return
         if self.handle.kind == "categorical":
             self.categorical_drilldown_requested.emit(
                 index.row(), column_name, str(index.data(Qt.DisplayRole) or "")
@@ -527,6 +538,15 @@ class DatasetTab(QWidget):
             or column_name in metadata.warning_columns
         ):
             self.source_navigation_requested.emit(index.row(), column_name)
+
+    def _header_double_clicked(self, section: int) -> None:
+        if self.handle.kind != "shift_table":
+            return
+        if not 0 <= section < len(self.visible_columns):
+            return
+        column_name = self.visible_columns[section]
+        if column_name in self.handle.metadata.shift_table_drilldown_columns:
+            self.shift_table_header_drilldown_requested.emit(column_name)
 
     def apply_filter(
         self, compiled: CompiledFilter, where_text: str, *, add_history: bool

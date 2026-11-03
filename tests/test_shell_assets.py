@@ -40,6 +40,11 @@ SHELL_ASSETS = (
         "rule_based_safety.docx",
         "rule_based_safety.png",
     ),
+    (
+        "shift-table-shell.docx",
+        "shift_table.docx",
+        "shift_table.png",
+    ),
 )
 
 
@@ -66,6 +71,13 @@ class ShellAssetInventoryTests(unittest.TestCase):
             load_baseline_characteristics_shell_preview().startswith(
                 b"\x89PNG\r\n\x1a\n"
             )
+        )
+
+    def test_shift_table_preview_loader_reads_packaged_png(self) -> None:
+        from clinical_data_viewer.shell_assets import load_shift_table_shell_preview
+
+        self.assertTrue(
+            load_shift_table_shell_preview().startswith(b"\x89PNG\r\n\x1a\n")
         )
 
 

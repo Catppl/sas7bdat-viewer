@@ -6,6 +6,10 @@ from ..proc_means_vertical.configuration import (
     build_proc_means_vertical_configuration,
     write_proc_means_vertical_configuration,
 )
+from ..shift_table.configuration import (
+    build_shift_table_configuration,
+    write_shift_table_configuration,
+)
 from .configuration import (
     build_proc_means_configuration,
     proc_means_configuration_json,
@@ -16,8 +20,10 @@ __all__ = [
     "build_baseline_characteristics_configuration",
     "build_proc_means_configuration",
     "build_proc_means_vertical_configuration",
+    "build_shift_table_configuration",
     "proc_means_configuration_json",
     "write_baseline_characteristics_configuration",
     "write_proc_means_configuration",
     "write_proc_means_vertical_configuration",
+    "write_shift_table_configuration",
 ]
