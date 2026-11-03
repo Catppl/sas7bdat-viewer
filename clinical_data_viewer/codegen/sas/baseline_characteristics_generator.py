@@ -44,6 +44,30 @@ def _literal(value: object, kind: str, label: str) -> str:
     return repr(value)
 
 
+def _work_prefix(member: str) -> str:
+    """Return a short, readable WORK prefix derived from the source member."""
+    prefix = re.sub(r"[^A-Za-z0-9_]", "_", member).lower().strip("_")
+    if not prefix:
+        prefix = "source"
+    if prefix[0].isdigit():
+        prefix = f"src_{prefix}"
+    return prefix[:24]
+
+
+def _sas_double_string(value: object) -> str:
+    """Render a SAS double-quoted literal, preserving macro references."""
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _sas_round_increment(value: object) -> str:
+    """Render a readable SAS ROUND increment for a decimal-place count."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 4:
+        raise ValueError("SAS round increment requires an integer from 0 through 4.")
+    if value == 0:
+        return "1"
+    return "0." + ("0" * (value - 1)) + "1"
+
+
 class SasBaselineCharacteristicsGenerator:
     """Render SAS from the Baseline Characteristics JSON v1 contract."""
 
@@ -61,6 +85,8 @@ class SasBaselineCharacteristicsGenerator:
         )
         self.environment.filters["sas_name"] = sas_name
         self.environment.filters["sas_string"] = sas_string
+        self.environment.filters["sas_double_string"] = _sas_double_string
+        self.environment.filters["sas_round_increment"] = _sas_round_increment
 
     def _prepare(self, configuration: Mapping[str, object]) -> dict[str, object]:
         if configuration.get("type") != "baseline_characteristics":
@@ -94,8 +120,10 @@ class SasBaselineCharacteristicsGenerator:
         if source.get("kind") != "sas":
             raise ValueError("input.kind must be 'sas'.")
         source_format = str(source.get("format") or "").casefold()
-        if source_format not in {"sas7bdat", "xpt"}:
-            raise ValueError(f"Unsupported input format: {source_format}.")
+        if source_format != "sas7bdat":
+            raise ValueError(
+                "Baseline Characteristics SAS generation requires a sas7bdat source."
+            )
         if not source.get("source_path"):
             raise ValueError("input.source_path is required.")
         if source_format == "sas7bdat" and not source.get("source_directory"):
@@ -169,8 +197,10 @@ class SasBaselineCharacteristicsGenerator:
             if population_input.get("kind") != "sas":
                 raise ValueError("population.input.kind must be 'sas'.")
             population_format = str(population_input.get("format") or "").casefold()
-            if population_format not in {"sas7bdat", "xpt"}:
-                raise ValueError(f"Unsupported population input format: {population_format}.")
+            if population_format != "sas7bdat":
+                raise ValueError(
+                    "Baseline Characteristics SAS generation requires a sas7bdat population source."
+                )
             if not population_input.get("source_path"):
                 raise ValueError("population.input.source_path is required.")
             if population_format == "sas7bdat" and not population_input.get(
@@ -268,6 +298,7 @@ class SasBaselineCharacteristicsGenerator:
                 population_counts.append(
                     {
                         "macro": f"n{index}",
+                        "label": str(value),
                         "population_literal": _literal(
                             value,
                             str(
@@ -355,7 +386,9 @@ class SasBaselineCharacteristicsGenerator:
                     }
                     for rank, value in enumerate(custom_levels, start=1)
                 ]
-                prepared["include_missing"] = any(value is None for value in custom_levels)
+                prepared["include_missing"] = prepared["include_missing"] or any(
+                    value is None for value in custom_levels
+                )
                 percent_digits = item.get("percent_digits")
                 if (
                     isinstance(percent_digits, bool)
@@ -440,6 +473,7 @@ class SasBaselineCharacteristicsGenerator:
                 "source_directory": str(source.get("source_directory") or ""),
                 "library": source_library,
                 "member": sas_name(source_member),
+                "work_prefix": _work_prefix(source_member),
             },
             "subject": sas_name(subject),
             "where_expression": where_expression,
@@ -467,6 +501,23 @@ class SasBaselineCharacteristicsGenerator:
             "population_counts": population_counts,
             "total_n_macro": "nt" if treatment_requested else "n1",
             "include_total": include_total,
+            "treatment_labels": [
+                {
+                    "column": f"TRT_{index}",
+                    "text": f"{count['label']} (N=&{count['macro']})",
+                }
+                for index, count in enumerate(population_counts, start=1)
+            ]
+            + (
+                [
+                    {
+                        "column": f"TRT_{len(population_counts) + 1}",
+                        "text": f"Total (N=&{('nt' if treatment_requested else 'n1')})",
+                    }
+                ]
+                if include_total
+                else []
+            ),
             "items": items,
             "header_label": str(display.get("header_label") or "Overall"),
             "output": output,

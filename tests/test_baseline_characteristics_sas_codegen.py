@@ -56,9 +56,22 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("where saffl = 'y'", folded)
         self.assertIn("count(distinct", folded)
         self.assertIn("proc means", folded)
+        self.assertIn("put(n,3.)", folded)
         self.assertIn("vardef=df qntldef=5", folded)
         self.assertIn("if sex='f' then sort_rank=1", folded)
-        self.assertIn("maximum observed source precision", folded)
+        self.assertIn("if ^missing(sex);", folded)
+        self.assertNotIn("if missing(sex) then", folded)
+        self.assertNotIn("vvalue(", folded)
+        self.assertNotIn("putn(", folded)
+        self.assertIn("put(round(raw_value_1,0.1),8.1)", folded)
+        self.assertNotIn("10**(-", folded)
+        self.assertIn('if missing(raw_value_1) then row_value="-";', folded)
+        self.assertNotIn("display_value", folded)
+        self.assertNotIn("ifc(missing(raw_value_1)", folded)
+        self.assertNotIn("  _value_1=", folded)
+        self.assertIn("cnt1", folded)
+        self.assertNotIn("then delete;", folded)
+        self.assertNotIn("libname ", folded)
         self.assertIn("work.baseline_characteristics_long", folded)
         self.assertIn("work.baseline_characteristics", folded)
         self.assertNotIn("delete baseline_characteristics", folded)
@@ -103,7 +116,14 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         )
         filter_text = 'SAFFL = "Y"'
         config = BaselineCharacteristicsConfig(
-            (BaselineContinuousItem("AGE", "Age", statistics=("n", "mean")),),
+            (
+                BaselineContinuousItem(
+                    "AGE",
+                    "Age",
+                    statistic_decimals=(("mean", 1),),
+                    statistics=("n", "mean"),
+                ),
+            ),
             FilterEngine(variables).compile(filter_text),
             filter_text,
             treatment_variable="TRT",
@@ -122,14 +142,20 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("into :n2 trimmed", folded)
         self.assertIn("count(distinct usubjid)", folded)
         self.assertIn("into :nt trimmed", folded)
-        self.assertIn("%do _i=1 %to &_bc_ntrt", folded)
-        self.assertIn("as trt_&_i", folded)
-        self.assertIn("population n follows the same n1, n2", folded)
+        self.assertIn('trt_1="placebo (n=&n1)"', folded)
+        self.assertIn('trt_2="drug a (n=&n2)"', folded)
+        self.assertIn('trt_3="total (n=&nt)"', folded)
+        self.assertIn("if ^missing(trt);", folded)
+        self.assertNotIn("data _null_;", folded)
+        self.assertNotIn("vvalue(", folded)
+        self.assertNotIn("putn(", folded)
+        self.assertIn("put(round(mean,0.1),8.1)", folded)
+        self.assertNotIn("_bc_", folded)
         self.assertIn("big_n=&n1", folded)
         self.assertIn("big_n=&n2", folded)
-        self.assertIn('"__total__"', folded)
-        self.assertIn("_bc_stat_total_1", folded)
-        self.assertIn("_bc_stat_all_1", folded)
+        self.assertIn('"total"', folded)
+        self.assertIn("adsl_stat_total_1", folded)
+        self.assertIn("adsl_stat_all_1", folded)
         self.assertIn('"total"', folded)
         self.assertIn("from analysis.adsl", folded)
         self.assertNotIn("_bc_population", folded)
@@ -173,6 +199,68 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         code = SasBaselineCharacteristicsGenerator().generate(configuration)
         self.assertIn("from analysis.adsl where saffl = 'y';", code.casefold())
         self.assertNotIn("_bc_population", code.casefold())
+
+    def test_rejects_xpt_source(self) -> None:
+        configuration = self.configuration()
+        configuration["input"]["format"] = "xpt"
+        with self.assertRaisesRegex(ValueError, "requires a sas7bdat source"):
+            SasBaselineCharacteristicsGenerator().generate(configuration)
+
+    def test_numeric_categorical_item_uses_put_without_vvalue(self) -> None:
+        variables = (
+            VariableMetadata("USUBJID", "Subject"),
+            VariableMetadata("SAFFL", "Safety flag"),
+            VariableMetadata("GRADE", "Grade", "numeric"),
+        )
+        root = Path(self.temporary.name)
+        source = root / "adsl.sas7bdat"
+        source.touch()
+        handle = DatasetHandle(
+            source,
+            root / "copy.sas7bdat",
+            root / "dataset.sqlite",
+            DatasetMetadata("ADSL", 3, variables),
+        )
+        filter_text = 'SAFFL = "Y"'
+        config = BaselineCharacteristicsConfig(
+            (BaselineCategoricalItem("GRADE", "Grade"),),
+            FilterEngine(variables).compile(filter_text),
+            filter_text,
+        )
+        code = SasBaselineCharacteristicsGenerator().generate(
+            build_baseline_characteristics_configuration(handle, config)
+        )
+        folded = code.casefold()
+        self.assertIn("level_value=strip(put(grade,best32.));", folded)
+        self.assertNotIn("vvalue(", folded)
+
+    def test_include_missing_item_uses_missing_branch(self) -> None:
+        variables = (
+            VariableMetadata("USUBJID", "Subject"),
+            VariableMetadata("SAFFL", "Safety flag"),
+            VariableMetadata("SEX", "Sex"),
+        )
+        root = Path(self.temporary.name)
+        source = root / "adsl.sas7bdat"
+        source.touch()
+        handle = DatasetHandle(
+            source,
+            root / "copy.sas7bdat",
+            root / "dataset.sqlite",
+            DatasetMetadata("ADSL", 3, variables),
+        )
+        filter_text = 'SAFFL = "Y"'
+        config = BaselineCharacteristicsConfig(
+            (BaselineCategoricalItem("SEX", "Sex", include_missing_level=True),),
+            FilterEngine(variables).compile(filter_text),
+            filter_text,
+        )
+        code = SasBaselineCharacteristicsGenerator().generate(
+            build_baseline_characteristics_configuration(handle, config)
+        )
+        folded = code.casefold()
+        self.assertIn('if missing(sex) then level_value="missing";', folded)
+        self.assertNotIn("if ^missing(sex);", folded)
 
 
 if __name__ == "__main__":
