@@ -115,6 +115,38 @@ class BaselineCharacteristicsBuilderTests(unittest.TestCase):
         self.assertEqual(selection.population_treatment_variable, "TRT01A")
         self.assertEqual(selection.population_filter_text, 'SAFFL = "Y"')
 
+    def test_include_total_is_available_only_with_treatment_grouping(self) -> None:
+        from clinical_data_viewer.domain import DatasetMetadata, VariableMetadata
+        from clinical_data_viewer.ui.baseline_characteristics_builder import (
+            BaselineCharacteristicsBuilder,
+        )
+
+        builder = BaselineCharacteristicsBuilder()
+        builder.set_dataset(
+            DatasetMetadata(
+                "ADSL",
+                1,
+                (
+                    VariableMetadata("USUBJID"),
+                    VariableMetadata("TRT"),
+                    VariableMetadata("SEX"),
+                ),
+            ),
+            "adsl.sas7bdat",
+        )
+        self.assertFalse(builder.include_total.isEnabled())
+        builder.treatment_variable.setCurrentIndex(
+            builder.treatment_variable.findData("TRT")
+        )
+        self.assertTrue(builder.include_total.isEnabled())
+        builder.include_total.setChecked(True)
+        builder.add_item("categorical", "SEX")
+        self.assertTrue(builder.selection().include_total)
+        self.assertTrue(builder.sas_code_button.isEnabled())
+        builder.treatment_variable.setCurrentIndex(0)
+        self.assertFalse(builder.include_total.isEnabled())
+        self.assertFalse(builder.include_total.isChecked())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,7 @@ class BaselineCharacteristicsCell:
     level: object | None
     statistic_key: str | None
     treatment_level: object | None = None
+    treatment_is_total: bool = False
 
 
 def lookup_cell(
@@ -27,7 +28,7 @@ def lookup_cell(
         sqlite3.connect(result.database_path.resolve().as_uri() + "?mode=ro", uri=True)
     ) as connection:
         row = connection.execute(
-            "SELECT item_kind, variable, level_json, statistic_key, treatment_level_json "
+            "SELECT item_kind, variable, level_json, statistic_key, treatment_level_json, treatment_is_total "
             "FROM baseline_characteristics_cell_map "
             "WHERE result_row = ? AND column_name = ?",
             (result_source_row, column_name),
@@ -40,6 +41,7 @@ def lookup_cell(
         json.loads(row[2]) if row[2] is not None else None,
         row[3],
         json.loads(row[4]) if row[4] is not None else None,
+        bool(row[5]),
     )
 
 
@@ -78,7 +80,10 @@ def build_cell_filter(
     if config.compiled_filter.sql:
         clauses.append(f"({config.compiled_filter.sql})")
         parameters.extend(config.compiled_filter.parameters)
-    if config.treatment_variable and cell.treatment_level is not None:
+    if config.treatment_variable and cell.treatment_is_total:
+        treatment = fields[config.treatment_variable.casefold()]
+        clauses.append(_missing_sql(treatment.name, treatment.kind, missing=False))
+    elif config.treatment_variable and cell.treatment_level is not None:
         treatment = fields[config.treatment_variable.casefold()]
         if cell.treatment_level is None:
             clauses.append(_missing_sql(treatment.name, treatment.kind, missing=True))
@@ -108,7 +113,10 @@ def build_cell_where_text(
     clauses: list[str] = []
     if config.filter_text.strip():
         clauses.append(f"({config.filter_text.strip()})")
-    if config.treatment_variable and cell.treatment_level is not None:
+    if config.treatment_variable and cell.treatment_is_total:
+        treatment = fields[config.treatment_variable.casefold()]
+        clauses.append(f"not missing({treatment.name})")
+    elif config.treatment_variable and cell.treatment_level is not None:
         treatment = fields[config.treatment_variable.casefold()]
         clauses.append(f"{treatment.name} = {_literal(cell.treatment_level, treatment.kind)}")
     if cell.item_kind == "categorical" and not denominator:

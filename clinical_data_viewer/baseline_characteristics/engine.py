@@ -196,17 +196,39 @@ class BaselineCharacteristicsEngine:
                         f"GROUP BY {population_treatment_column} ORDER BY {population_treatment_column}",
                         population_parameters,
                     ).fetchall()
-                groups = [
-                    (
-                        value,
-                        f"TRT_{index}",
-                        f"{_display_level(value, treatment)}\n(N={int(count):,})",
-                        int(count),
-                    )
-                    for index, (value, count) in enumerate(group_rows, start=1)
-                ]
-                if not groups:
-                    raise ValueError("The treatment variable has no nonmissing levels.")
+                    groups = [
+                        (
+                            value,
+                            f"TRT_{index}",
+                            f"{_display_level(value, treatment)}\n(N={int(count):,})",
+                            int(count),
+                        )
+                        for index, (value, count) in enumerate(group_rows, start=1)
+                    ]
+                    if not groups:
+                        raise ValueError(
+                            "The treatment variable has no nonmissing levels."
+                        )
+                    if config.include_total:
+                        total_condition = population_where
+                        total_condition += (
+                            " AND " if total_condition else " WHERE "
+                        ) + _missing_sql(population_treatment, missing=False)
+                        total_n = int(
+                            population_connection.execute(
+                                f"SELECT count(DISTINCT {quote_identifier(population_subject.name)}) "
+                                f"FROM dataset{total_condition}",
+                                population_parameters,
+                            ).fetchone()[0]
+                        )
+                        groups.append(
+                            (
+                                None,
+                                "TOTAL",
+                                f"Total\n(N={total_n:,})",
+                                total_n,
+                            )
+                        )
             else:
                 population_uri = (
                     population_source.database_path.resolve().as_uri()
@@ -248,6 +270,7 @@ class BaselineCharacteristicsEngine:
                             label,
                             item_order,
                             groups,
+                            treatment if config.treatment_variable else None,
                         )
                     else:
                         assert isinstance(item, BaselineContinuousItem)
@@ -260,6 +283,7 @@ class BaselineCharacteristicsEngine:
                             label,
                             item_order,
                             groups,
+                            treatment if config.treatment_variable else None,
                         )
             configuration_path = directory / "baseline_characteristics_config.json"
             write_baseline_characteristics_configuration(
@@ -285,6 +309,7 @@ class BaselineCharacteristicsEngine:
         label: str,
         item_order: int,
         groups: list[tuple[object | None, str, str, int]],
+        treatment_variable: VariableMetadata | None,
     ) -> None:
         writer.add_row(
             item_order=item_order,
@@ -305,7 +330,9 @@ class BaselineCharacteristicsEngine:
         for treatment_value, column, _column_label, group_n in groups:
             clauses = [base_where] if base_where else []
             params = list(parameters)
-            if config.treatment_variable:
+            if config.treatment_variable and column == "TOTAL" and treatment_variable:
+                clauses.append(_missing_sql(treatment_variable, missing=False))
+            elif config.treatment_variable:
                 treatment_name = config.treatment_variable
                 clauses.append(f"{quote_identifier(treatment_name)} = ?")
                 params.append(treatment_value)
@@ -359,7 +386,15 @@ class BaselineCharacteristicsEngine:
                 numerator=first_numerator,
                 denominator=first_denominator,
                 drilldown=True,
-                treatment_levels={column: json.dumps(treatment_value, ensure_ascii=False) for treatment_value, column, _label, _n in groups},
+                treatment_levels={
+                    column: (
+                        None
+                        if column == "TOTAL"
+                        else json.dumps(treatment_value, ensure_ascii=False)
+                    )
+                    for treatment_value, column, _label, _n in groups
+                },
+                treatment_total_columns={"TOTAL"} if config.include_total else set(),
             )
 
     def _write_continuous(
@@ -372,6 +407,7 @@ class BaselineCharacteristicsEngine:
         label: str,
         item_order: int,
         groups: list[tuple[object | None, str, str, int]],
+        treatment_variable: VariableMetadata | None,
     ) -> None:
         # ``unit`` remains accepted for backwards-compatible JSON/model inputs;
         # the Builder no longer exposes a separate Unit field.
@@ -391,7 +427,9 @@ class BaselineCharacteristicsEngine:
         for treatment_value, column, _column_label, group_n in groups:
             clauses = [base_where] if base_where else []
             params = list(parameters)
-            if config.treatment_variable:
+            if config.treatment_variable and column == "TOTAL" and treatment_variable:
+                clauses.append(_missing_sql(treatment_variable, missing=False))
+            elif config.treatment_variable:
                 clauses.append(f"{quote_identifier(config.treatment_variable)} = ?")
                 params.append(treatment_value)
             condition = (
@@ -458,7 +496,15 @@ class BaselineCharacteristicsEngine:
                 numerator=int(group_stats[groups[0][1]][0].get("n") or 0),
                 denominator=groups[0][3],
                 drilldown=True,
-                treatment_levels={column: json.dumps(treatment_value, ensure_ascii=False) for treatment_value, column, _label, _n in groups},
+                treatment_levels={
+                    column: (
+                        None
+                        if column == "TOTAL"
+                        else json.dumps(treatment_value, ensure_ascii=False)
+                    )
+                    for treatment_value, column, _label, _n in groups
+                },
+                treatment_total_columns={"TOTAL"} if config.include_total else set(),
             )
 
 

@@ -41,6 +41,7 @@ class BaselineCharacteristicsBuilderSelection:
     filter_text: str
     header_label: str
     treatment_variable: str = ""
+    include_total: bool = False
     population_dataset: object | None = None
     population_treatment_variable: str = ""
     population_filter_text: str = ""
@@ -105,9 +106,14 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.treatment_variable = ClickOnlyComboBox()
         self.treatment_variable.addItem("Overall (no treatment)", "")
         self.treatment_variable.currentIndexChanged.connect(self._treatment_changed)
+        self.include_total = QCheckBox("Include Total Column")
+        self.include_total.setToolTip(
+            "Append a Total column after the treatment columns."
+        )
         form.addRow("Participant ID", self.subject_id)
         form.addRow("Summary Column Header", self.header_label)
         form.addRow("Column Grouping Variable", self.treatment_variable)
+        form.addRow("", self.include_total)
         layout.addLayout(form)
 
         population_form = QFormLayout()
@@ -367,6 +373,9 @@ class BaselineCharacteristicsBuilder(QWidget):
         index = self.treatment_variable.findData(selected or "")
         self.treatment_variable.setCurrentIndex(max(0, index))
         self.treatment_variable.blockSignals(False)
+        if not self.treatment_variable.currentData():
+            self.include_total.setChecked(False)
+        self.include_total.setEnabled(bool(self.treatment_variable.currentData()))
 
         population_selected = self.population_treatment_variable.currentData()
         self.population_treatment_variable.blockSignals(True)
@@ -386,6 +395,9 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.population_treatment_variable.blockSignals(False)
 
     def _treatment_changed(self, _index: int) -> None:
+        if not self.treatment_variable.currentData():
+            self.include_total.setChecked(False)
+        self.include_total.setEnabled(bool(self.treatment_variable.currentData()))
         self._update_enabled()
 
     def inherit_current_filter(self, filter_text: str) -> None:
@@ -633,6 +645,7 @@ class BaselineCharacteristicsBuilder(QWidget):
             self.current_filter_text(),
             self.header_label.text().strip(),
             str(self.treatment_variable.currentData() or ""),
+            self.include_total.isChecked(),
             self.population_selector.selected_source(),
             str(self.population_treatment_variable.currentData() or ""),
             self.current_population_filter_text(),
@@ -672,6 +685,7 @@ class BaselineCharacteristicsBuilder(QWidget):
             "If not selected, the source dataset will be used for Population N after a warning."
         )
         self.header_label.setText("Overall")
+        self.include_total.setChecked(False)
         self._refresh_treatment_variables()
         self._refresh_items()
         self.cleared.emit()
@@ -692,7 +706,6 @@ class BaselineCharacteristicsBuilder(QWidget):
         self.sas_code_button.setEnabled(
             has_source
             and self._source_kind == "sas"
-            and not bool(self.treatment_variable.currentData())
             and bool(self._items)
             and not self._busy
         )

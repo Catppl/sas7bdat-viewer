@@ -125,6 +125,11 @@ class SasBaselineCharacteristicsGenerator:
         if subject is None:
             raise ValueError(f"Subject variable does not exist: {subject_requested}.")
         treatment_requested = str(universe.get("treatment_variable") or "")
+        include_total = universe.get("include_total", False)
+        if not isinstance(include_total, bool):
+            raise ValueError(  # noqa: TRY004 - invalid contract is reported uniformly
+                "analysis_universe.include_total must be boolean."
+            )
         population_treatment_requested = str(
             universe.get("population_treatment_variable") or ""
         )
@@ -225,6 +230,10 @@ class SasBaselineCharacteristicsGenerator:
             raise ValueError(
                 "Population treatment variable does not exist in population input: "
                 f"{population_treatment_requested or treatment_requested}."
+            )
+        if include_total and not treatment_requested:
+            raise ValueError(
+                "analysis_universe.include_total requires a treatment variable."
             )
         if treatment_requested:
             source_kind = variable_types[treatment_name.casefold()]
@@ -457,6 +466,7 @@ class SasBaselineCharacteristicsGenerator:
             },
             "population_counts": population_counts,
             "total_n_macro": "nt" if treatment_requested else "n1",
+            "include_total": include_total,
             "items": items,
             "header_label": str(display.get("header_label") or "Overall"),
             "output": output,

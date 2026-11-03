@@ -122,6 +122,7 @@ def build_baseline_characteristics_configuration(
         "analysis_universe": {
             "subject_variable": config.subject_id_variable,
             "treatment_variable": config.treatment_variable or None,
+            "include_total": config.include_total,
             "population_treatment_variable": config.population_treatment_variable
             or None,
             "subject_missing": "error",

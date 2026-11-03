@@ -224,6 +224,7 @@ class BaselineCharacteristicsController(AnalysisModuleController):
                 selection.filter_text,
                 selection.header_label,
                 treatment_variable=selection.treatment_variable,
+                include_total=selection.include_total,
                 population_treatment_variable=selection.population_treatment_variable,
                 population_filter=population_filter,
                 population_filter_text=selection.population_filter_text,

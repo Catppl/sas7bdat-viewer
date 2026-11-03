@@ -38,8 +38,11 @@ not change.
   produced for each nonmissing treatment level with that level's participant N.
 - The editable column heading defaults to `Overall` for the single-column
   layout. Treatment column labels are the raw treatment levels plus their N.
-- No separate Total column is produced unless a future approved contract adds
-  one explicitly.
+- When a treatment/grouping variable is selected, the Builder can append an
+  optional `Total` column after all treatment columns. Its N is calculated
+  independently from the Population Dataset, restricted to nonmissing
+  treatment values, and its cell statistics use all analysis records with a
+  nonmissing treatment value; treatment Ns are never summed to produce Total.
 
 ### Population N
 
@@ -154,7 +157,8 @@ Variable storage type and analysis role are separate contracts:
 - The first column contains item headings, indented categorical levels, and
   indented continuous statistic labels.
 - The second and later columns contain treatment headers with `N=xx` and result
-  values; the no-treatment layout contains the editable Overall header.
+  values. When enabled, `Total` is the final column. The no-treatment layout
+  contains the editable Overall header.
 - Item headings are visually distinct from child rows without introducing a
   full table grid.
 - Categorical values display as `n (percent)`.

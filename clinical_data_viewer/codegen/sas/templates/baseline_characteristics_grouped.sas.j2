@@ -37,9 +37,14 @@ data work._bc_trt;
 {% endif %}  
   _bc_trt_label=_bc_trt_key;
   output;
-{% endfor %}run;
+{% endfor %}{% if include_total %}  trt_order={{ population_counts|length + 1 }};
+  big_n=&{{ total_n_macro }};
+  _bc_trt_key="__TOTAL__";
+  _bc_trt_label="Total";
+  output;
+{% endif %}run;
 
-%let _bc_ntrt={{ population_counts|length }};
+%let _bc_ntrt={{ population_counts|length + (1 if include_total else 0) }};
 
 data _null_;
   set work._bc_trt;
@@ -95,6 +100,12 @@ proc sql;
          count(distinct {{ subject }}) as numerator
   from work._bc_cat_source_{{ item.order }}
   group by _bc_trt_key, level_value;
+{% if include_total %}  insert into work._bc_cat_freq_{{ item.order }}
+  select "__TOTAL__", level_value,
+         count(distinct {{ subject }}) as numerator
+  from work._bc_cat_source_{{ item.order }}
+  group by level_value;
+{% endif %}
   create table work._bc_cat_levels_{{ item.order }} as
   select level_value, min(sort_rank) as sort_rank
   from work._bc_cat_source_{{ item.order }}
@@ -148,13 +159,29 @@ proc means data=work._bc_source noprint vardef=df qntldef=5;
   output out=work._bc_stat_{{ item.order }}(drop=_type_ _freq_)
     n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
 run;
+{% if include_total %}proc means data=work._bc_source noprint vardef=df qntldef=5;
+  var {{ item.variable }};
+  output out=work._bc_stat_total_{{ item.order }}(drop=_type_ _freq_)
+    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
+run;
+
+data work._bc_stat_total_{{ item.order }};
+  length _bc_trt_key $200;
+  set work._bc_stat_total_{{ item.order }};
+  _bc_trt_key="__TOTAL__";
+run;
+
+data work._bc_stat_all_{{ item.order }};
+  set work._bc_stat_{{ item.order }} work._bc_stat_total_{{ item.order }};
+run;
+{% endif %}
 
 proc sql;
   create table work._bc_cont_{{ item.order }} as
   select t.trt_order, t._bc_trt_label as trt_label, t.big_n,
          s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
   from work._bc_trt as t
-  left join work._bc_stat_{{ item.order }} as s
+  left join work._bc_stat_{% if include_total %}all_{% endif %}{{ item.order }} as s
     on t._bc_trt_key=s._bc_trt_key
   order by t.trt_order;
 quit;

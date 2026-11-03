@@ -74,6 +74,7 @@ class BaselineCharacteristicsConfig:
     header_label: str = "Overall"
     subject_id_variable: str = "USUBJID"
     treatment_variable: str = ""
+    include_total: bool = False
     population_treatment_variable: str = ""
     population_filter: CompiledFilter = field(
         default_factory=lambda: CompiledFilter("", ())
@@ -101,6 +102,10 @@ class BaselineCharacteristicsConfig:
                 )
             if treatment.name.casefold() == subject.name.casefold():
                 raise ValueError("Treatment Variable cannot be USUBJID.")
+        elif self.include_total:
+            raise ValueError(
+                "Include Total Column requires a Column Grouping Variable."
+            )
 
         seen: set[str] = set()
         for item in self.items:

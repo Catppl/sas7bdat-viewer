@@ -107,6 +107,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
             FilterEngine(variables).compile(filter_text),
             filter_text,
             treatment_variable="TRT",
+            include_total=True,
             population_treatment_variable="TRT",
             population_filter=FilterEngine(variables).compile(filter_text),
             population_filter_text=filter_text,
@@ -126,6 +127,10 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("population n follows the same n1, n2", folded)
         self.assertIn("big_n=&n1", folded)
         self.assertIn("big_n=&n2", folded)
+        self.assertIn('"__total__"', folded)
+        self.assertIn("_bc_stat_total_1", folded)
+        self.assertIn("_bc_stat_all_1", folded)
+        self.assertIn('"total"', folded)
         self.assertIn("from analysis.adsl", folded)
         self.assertNotIn("_bc_population", folded)
         self.assertNotIn("treatment columns is not available", folded)

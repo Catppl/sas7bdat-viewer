@@ -62,6 +62,7 @@ class BaselineCharacteristicsResultWriter:
             "result_row INTEGER NOT NULL, column_name TEXT NOT NULL, "
             "item_kind TEXT NOT NULL, variable TEXT NOT NULL, "
             "level_json TEXT, statistic_key TEXT, treatment_level_json TEXT, "
+            "treatment_is_total INTEGER NOT NULL DEFAULT 0, "
             "PRIMARY KEY (result_row, column_name))"
         )
 
@@ -80,6 +81,7 @@ class BaselineCharacteristicsResultWriter:
         statistic_key: str | None = None,
         treatment_level_json: str | None = None,
         treatment_levels: dict[str, str | None] | None = None,
+        treatment_total_columns: set[str] | None = None,
         raw_value_1: float | None = None,
         raw_value_2: float | None = None,
         numerator: int | None = None,
@@ -119,7 +121,7 @@ class BaselineCharacteristicsResultWriter:
         if drilldown:
             for column_name, _label, _n in self.column_specs:
                 self.connection.execute(
-                    "INSERT INTO baseline_characteristics_cell_map VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO baseline_characteristics_cell_map VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         self.row_count,
                         column_name,
@@ -128,6 +130,7 @@ class BaselineCharacteristicsResultWriter:
                         level_json,
                         statistic_key,
                         (treatment_levels or {}).get(column_name, treatment_level_json),
+                        int(column_name in (treatment_total_columns or set())),
                     ),
                 )
         return self.row_count

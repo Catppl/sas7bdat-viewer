@@ -281,6 +281,71 @@ class BaselineCharacteristicsTests(unittest.TestCase):
                 'TRT = "A" and SEX = "F"',
             )
 
+    def test_treatment_variable_can_append_a_recomputed_total_column(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "source" / "dataset.sqlite"
+            database.parent.mkdir()
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute(
+                    "CREATE TABLE dataset ("
+                    "_source_row INTEGER PRIMARY KEY, USUBJID TEXT, TRT TEXT, SEX TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO dataset (USUBJID, TRT, SEX) VALUES (?, ?, ?)",
+                    (("S1", "A", "F"), ("S2", "A", "M"), ("S3", "B", "F")),
+                )
+                connection.commit()
+            source_path = root / "adsl.sas7bdat"
+            source_path.touch()
+            source = DatasetHandle(
+                source_path,
+                root / "source-copy.sas7bdat",
+                database,
+                DatasetMetadata(
+                    "ADSL",
+                    3,
+                    (
+                        VariableMetadata("USUBJID"),
+                        VariableMetadata("TRT"),
+                        VariableMetadata("SEX"),
+                    ),
+                ),
+                3,
+                True,
+            )
+            config = BaselineCharacteristicsConfig(
+                (BaselineCategoricalItem("SEX", "Sex"),),
+                treatment_variable="TRT",
+                include_total=True,
+            )
+            result = BaselineCharacteristicsEngine(TempManager(root / "temp")).run(
+                source, config
+            )
+            self.assertEqual(
+                [variable.name for variable in result.metadata.variables],
+                ["ROW_LABEL", "TRT_1", "TRT_2", "TOTAL"],
+            )
+            self.assertEqual(result.metadata.variables[-1].label, "Total\n(N=3)")
+            assert result.configuration_path is not None
+            configuration = json.loads(
+                result.configuration_path.read_text(encoding="utf-8")
+            )
+            self.assertTrue(configuration["analysis_universe"]["include_total"])
+            with closing(sqlite3.connect(result.database_path)) as connection:
+                female = connection.execute(
+                    'SELECT _source_row, "TOTAL" FROM dataset WHERE "ROW_LABEL" = ?',
+                    ("\u00a0" * 4 + "F",),
+                ).fetchone()
+            self.assertEqual(female[1], "2 (66.7)")
+            cell = lookup_cell(result, female[0], "TOTAL")
+            assert cell is not None
+            self.assertTrue(cell.treatment_is_total)
+            self.assertEqual(
+                build_cell_where_text(source.metadata, config, cell),
+                'not missing(TRT) and SEX = "F"',
+            )
+
     def test_mixed_items_keep_configured_order_and_statistics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
