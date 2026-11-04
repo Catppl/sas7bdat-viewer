@@ -90,12 +90,13 @@ proc means data=&work_prefix._source noprint nway missing
   class trt_key;
   var &var.;
   output out=&work_prefix._stat_&order.
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
+    n=n     mean=mean     std=std     median=median     q1=q1     q3=q3     min=min     max=max;
 run;
+
 proc means data=&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
   output out=&work_prefix._stat_total_raw_&order.
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
+    n=n     mean=mean     std=std     median=median     q1=q1     q3=q3     min=min     max=max;
 run;
 
 data &work_prefix._stat_total_&order.;
@@ -111,9 +112,17 @@ run;
 proc sql;
   create table &work_prefix._cont_&order. as
   select t.trt_order, t.trt_label, t.big_n
-         , s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
+         , s.n
+         , s.mean
+         , s.std
+         , s.median
+         , s.q1
+         , s.q3
+         , s.min
+         , s.max
   from &work_prefix._trt as t
   left join &work_prefix._stat_all_&order. as s
+
     on t.trt_key=s.trt_key
   order by t.trt_order;
 quit;
@@ -187,82 +196,138 @@ run;
 
 %mend baseline_continuous;
 
-/* Categorical item: Sex */
-data adsl_cat_source_1;
+%macro baseline_categorical(
+    var=,
+    order=,
+    label=,
+    work_prefix=,
+    subject=,
+    storage_type=character,
+    include_missing=0,
+    include_total=0,
+    level_order=runtime_value_ascending,
+    percent_digits=1,
+    round_increment=0.1,
+    custom_sort=,
+    custom_display=
+);
+data &work_prefix._cat_source_&order.;
   length level_value $200 sort_rank 8;
-  set adsl_source;
-  if missing(SEX) then level_value="Missing";
-  else level_value=strip(SEX);
+  set &work_prefix._source;
+%if &include_missing.=0 %then %do;
+  if ^missing(&var.);
+%if &storage_type.=numeric %then %do;
+  level_value=strip(put(&var.,best32.));
+%end;
+%else %do;
+  level_value=strip(&var.);
+%end;
+%end;
+%else %do;
+  if missing(&var.) then level_value="Missing";
+  else do;
+%if &storage_type.=numeric %then %do;
+    level_value=strip(put(&var.,best32.));
+%end;
+%else %do;
+    level_value=strip(&var.);
+%end;
+  end;
+%end;
+%if &level_order.=custom %then %do;
   sort_rank=1000000;
-  if SEX='F' then sort_rank=1;
-  if SEX='M' then sort_rank=2;
-  if SEX='' then sort_rank=3;
+  %unquote(&custom_sort.)
+%end;
+%else %do;
+  sort_rank=0;
+%end;
 run;
 
 proc sql;
-  create table adsl_cat_freq_1 as
-  select trt_key, level_value, count(distinct USUBJID) as numerator
-  from adsl_cat_source_1
+  create table &work_prefix._cat_freq_&order. as
+  select trt_key, level_value, count(distinct &subject.) as numerator
+  from &work_prefix._cat_source_&order.
   group by trt_key, level_value;
-  insert into adsl_cat_freq_1
-  select "TOTAL", level_value, count(distinct USUBJID) as numerator
-  from adsl_cat_source_1
+%if &include_total.=1 %then %do;
+  insert into &work_prefix._cat_freq_&order.
+  select "TOTAL", level_value, count(distinct &subject.) as numerator
+  from &work_prefix._cat_source_&order.
   group by level_value;
-  create table adsl_cat_levels_1 as
+%end;
+  create table &work_prefix._cat_levels_&order. as
   select level_value, min(sort_rank) as sort_rank
-  from adsl_cat_source_1
+  from &work_prefix._cat_source_&order.
   group by level_value;
 quit;
 
-proc sort data=adsl_cat_levels_1;
+proc sort data=&work_prefix._cat_levels_&order.;
   by sort_rank level_value;
 run;
 
-data adsl_cat_levels_1;
-  set adsl_cat_levels_1;
+data &work_prefix._cat_levels_&order.;
+  set &work_prefix._cat_levels_&order.;
   level_order=_n_;
 run;
 
 proc sql;
-  create table adsl_cat_1 as
+  create table &work_prefix._cat_&order. as
   select t.trt_order, t.trt_label, t.big_n,
          l.level_order, l.level_value,
          coalesce(f.numerator,0) as numerator
-  from adsl_trt as t
-  cross join adsl_cat_levels_1 as l
-  left join adsl_cat_freq_1 as f
+  from &work_prefix._trt as t
+  cross join &work_prefix._cat_levels_&order. as l
+  left join &work_prefix._cat_freq_&order. as f
     on t.trt_key=f.trt_key
    and l.level_value=f.level_value
   order by t.trt_order, l.level_order;
 quit;
 
-data adsl_item_1;
+data &work_prefix._item_&order.;
   length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200 display_level $200 cnt1 cnt2 $200;
-  set adsl_cat_1;
+  set &work_prefix._cat_&order.;
   if _n_=1 then do;
-    row_order=1*1000;
-    item_order=1;
-    row_label='Sex';
+    row_order=&order.*1000;
+    item_order=&order.;
+    row_label=&label.;
     row_value="";
     trt_order=1;
     trt_label="";
     output;
 
   end;
-  row_order=1*1000+level_order;
-  item_order=1;
+  row_order=&order.*1000+level_order;
+  item_order=&order.;
   display_level=level_value;
-  if level_value='F' then display_level='Female';
-  if level_value='M' then display_level='Male';
-  if level_value="Missing" then display_level='Missing';
+%if &level_order.=custom and %length(%superq(custom_display)) > 0 %then %do;
+  %unquote(&custom_display.)
+%end;
   row_label=cats("    ",display_level);
   row_value=cats(put(numerator,comma16.)," (",
-                     put(round(100*numerator/big_n,0.1),
-                         16.1),")");
+                     put(round(100*numerator/big_n,&round_increment.),
+                         16.&percent_digits.),")");
   output;
 
 run;
+
+%mend baseline_categorical;
+
+/* Categorical item: Sex */
+%baseline_categorical(
+    var=SEX,
+    order=1,
+    label=%str('Sex'),
+    work_prefix=adsl,
+    subject=USUBJID,
+    storage_type=character,
+    include_missing=1,
+    include_total=1,
+    level_order=custom,
+    percent_digits=1,
+    round_increment=0.1,
+    custom_sort=%str(if SEX='F' then sort_rank=1; if SEX='M' then sort_rank=2; if SEX='' then sort_rank=3; ),
+    custom_display=%str(if level_value='F' then display_level='Female'; if level_value='M' then display_level='Male'; if level_value="Missing" then display_level='Missing'; )
+);
 
 /* Continuous item: Age (years) */
 %baseline_continuous(
@@ -288,8 +353,8 @@ run;
     mean_decimals=1,
     std_decimals=1,
     median_decimals=1,
-    q1_decimals=0,
-    q3_decimals=0,
+    q1_decimals=1,
+    q3_decimals=1,
     min_decimals=0,
     max_decimals=0
 );

@@ -66,11 +66,13 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
             "set &work_prefix._stat_&order.;\n  if _n_=1 then do;",
             folded,
         )
-        self.assertIn("set adsl_cat_1;\n  if _n_=1 then do;", folded)
+        self.assertIn("%macro baseline_categorical(", folded)
+        self.assertIn("%baseline_categorical(", folded)
+        self.assertIn("set &work_prefix._cat_&order.;", folded)
+        self.assertNotIn("data adsl_cat_source_1;", folded)
         self.assertIn("vardef=df qntldef=5", folded)
         self.assertIn("if sex='f' then sort_rank=1", folded)
-        self.assertIn("if ^missing(sex);", folded)
-        self.assertNotIn("if missing(sex) then", folded)
+        self.assertIn("include_missing=0", folded)
         self.assertNotIn("vvalue(", folded)
         self.assertNotIn("putn(", folded)
         self.assertIn("put(raw_value_1,8.&mean_decimals.)", folded)
@@ -182,7 +184,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertNotIn("include_n=", folded)
         self.assertIn("%macro baseline_continuous(", folded)
         self.assertIn("%baseline_continuous(", folded)
-        self.assertNotIn("include_total=", folded)
+        self.assertIn("include_total=", folded)
         self.assertIn(
             "set &work_prefix._cont_&order.;\n  if _n_=1 then do;",
             folded,
@@ -284,7 +286,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
             build_baseline_characteristics_configuration(handle, config)
         )
         folded = code.casefold()
-        self.assertIn("level_value=strip(put(grade,best32.));", folded)
+        self.assertIn("level_value=strip(put(&var.,best32.));", folded)
         self.assertNotIn("vvalue(", folded)
 
     def test_include_missing_item_uses_missing_branch(self) -> None:
@@ -312,8 +314,8 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
             build_baseline_characteristics_configuration(handle, config)
         )
         folded = code.casefold()
-        self.assertIn('if missing(sex) then level_value="missing";', folded)
-        self.assertNotIn("if ^missing(sex);", folded)
+        self.assertIn('if missing(&var.) then level_value="missing";', folded)
+        self.assertIn("include_missing=1", folded)
 
     def test_grouped_custom_levels_emit_user_labels(self) -> None:
         variables = (
@@ -355,6 +357,8 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
 
         code = SasBaselineCharacteristicsGenerator().generate(configuration)
 
+        self.assertIn("%macro baseline_categorical(", code)
+        self.assertIn("%baseline_categorical(", code)
         self.assertIn("display_level=level_value;", code)
         self.assertIn("if level_value='F' then display_level='Female';", code)
         self.assertIn("if level_value='M' then display_level='Male';", code)
