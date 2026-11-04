@@ -57,6 +57,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("proc transpose", code)
         self.assertNotRegex(code, r"\n{3,}")
         self.assertIn("work.proc_means_res", code)
+        self.assertNotIn("$32", code)
+        self.assertNotIn("$40", code)
         self.assertIn("trt_ord", code)
         self.assertEqual(code.count("%proc_means_vertical("), 2)
         self.assertIn("order=1", code)

@@ -143,7 +143,7 @@ run;
 /* Put all statistics for this analysis variable into one dataset */
 data values_&token.;
     set out_&token. total_&token._row;
-    length analysis $32 key1 key2 $32 value1 value2 8 row_value $200;
+    length analysis key1 key2 row_value $200 value1 value2 8;
     analysis = "&token.";
     stat_order = 1;
     row_ord = %eval((&order. - 1) * 7 + 1);
@@ -221,7 +221,7 @@ run;
 
 /* Centralized display labels for this analysis variable */
 data labels_&token.;
-    length analysis $32 item $200 stat_label $40 key1 key2 $32;
+    length analysis item stat_label key1 key2 $200;
     stat_order = 1;
     analysis = "&token.";
     item = &label.;

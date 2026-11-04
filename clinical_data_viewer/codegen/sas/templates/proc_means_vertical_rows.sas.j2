@@ -230,7 +230,7 @@ quit;
 /* Put all statistics for this analysis variable into one dataset */
 data values_&token.;
     set out_&token.{% if include_total %} out_total_&token.{% endif %};
-    length analysis $32 group $200 key1 key2 $32 value1 value2 8 row_value $200;
+    length analysis group key1 key2 row_value $200 value1 value2 8;
     analysis = "&token.";
 {% for row in statistics %}    stat_order = {{ loop.index }};
     output_row = (row_ord - 1) * {{ analysis_count * (statistics|length) }} + %eval((&order. - 1) * {{ statistics|length }} + {{ loop.index }});
@@ -263,7 +263,7 @@ run;
 
 /* Centralized display labels for this analysis variable */
 data labels_&token.;
-    length analysis $32 item $200 stat_label $40 key1 key2 $32;
+    length analysis item stat_label key1 key2 $200;
 {% for row in statistics %}    stat_order = {{ loop.index }};
     analysis = "&token.";
     item = &label.;
