@@ -1,0 +1,207 @@
+{
+  "type": "baseline_characteristics",
+  "version": 1,
+  "input": {
+    "kind": "sas",
+    "format": "sas7bdat",
+    "dataset": "ADSL",
+    "source_path": "/data/analysis/adam/adsl.sas7bdat",
+    "source_directory": "/data/analysis/adam"
+  },
+  "variable_metadata": {
+    "USUBJID": {
+      "type": "character",
+      "label": "Subject Identifier",
+      "length": 40,
+      "format": ""
+    },
+    "TRT01A": {
+      "type": "character",
+      "label": "Treatment",
+      "length": 40,
+      "format": ""
+    },
+    "SEX": {
+      "type": "character",
+      "label": "Sex",
+      "length": 1,
+      "format": ""
+    },
+    "AGE": {
+      "type": "numeric",
+      "label": "Age",
+      "length": 8,
+      "format": ""
+    },
+    "BMI": {
+      "type": "numeric",
+      "label": "Body Mass Index",
+      "length": 8,
+      "format": ""
+    },
+    "SAFFL": {
+      "type": "character",
+      "label": "Safety Population Flag",
+      "length": 1,
+      "format": ""
+    }
+  },
+  "dataset_filter": {
+    "language": "sas_like",
+    "text": "SAFFL = \"Y\"",
+    "ast": {
+      "type": "comparison",
+      "variable": "SAFFL",
+      "operator": "=",
+      "prefix": false,
+      "operand": {
+        "type": "literal",
+        "value": "Y"
+      }
+    }
+  },
+  "analysis_universe": {
+    "subject_variable": "USUBJID",
+    "treatment_variable": "TRT01A",
+    "include_total": true,
+    "population_treatment_variable": "TRT01A",
+    "subject_missing": "error",
+    "duplicate_subject_rows": "error",
+    "runtime_header_n": null
+  },
+  "items": [
+    {
+      "order": 1,
+      "variable": "SEX",
+      "storage_type": "character",
+      "role": "categorical",
+      "count": "distinct_subjects",
+      "denominator": "header_n",
+      "label": "Sex",
+      "missing": "include",
+      "level_order": {
+        "method": "custom",
+        "values": [
+          "F",
+          "M",
+          null
+        ],
+        "labels": [
+          {
+            "value": "F",
+            "label": "Female"
+          },
+          {
+            "value": "M",
+            "label": "Male"
+          },
+          {
+            "value": null,
+            "label": "Missing"
+          }
+        ]
+      },
+      "percent_digits": 1
+    },
+    {
+      "order": 2,
+      "variable": "AGE",
+      "storage_type": "numeric",
+      "role": "continuous",
+      "label": "Age (years)",
+      "unit": "",
+      "statistics": [
+        "n",
+        "mean",
+        "std",
+        "median",
+        "q1",
+        "q3",
+        "min",
+        "max"
+      ],
+      "statistic_decimals": {
+        "mean": 1,
+        "std": 1,
+        "median": 1,
+        "q1": 1,
+        "q3": 1,
+        "min": 0,
+        "max": 0
+      },
+      "missing": "exclude_from_statistics"
+    },
+    {
+      "order": 3,
+      "variable": "BMI",
+      "storage_type": "numeric",
+      "role": "continuous",
+      "label": "Body Mass Index (kg/m2)",
+      "unit": "",
+      "statistics": [
+        "n",
+        "mean",
+        "std",
+        "median"
+      ],
+      "statistic_decimals": {
+        "mean": 1,
+        "std": 1,
+        "median": 1
+      },
+      "missing": "exclude_from_statistics"
+    }
+  ],
+  "calculation": {
+    "reference_engine": "python_baseline_characteristics_v1",
+    "categorical_count": "distinct_subjects",
+    "categorical_denominator": "header_n",
+    "continuous_n": "distinct_subjects_with_nonmissing_value",
+    "continuous_statistics": "raw_nonmissing_values",
+    "standard_deviation": "sample_n_minus_1",
+    "quantiles": "qntldef5"
+  },
+  "sorting": {
+    "items": "configured_order",
+    "categorical_levels": "configured_per_item",
+    "continuous_statistics": "fixed_shell_order"
+  },
+  "display": {
+    "layout": "treatment_columns",
+    "header_label": "Baseline Characteristics",
+    "rounding": "half_up",
+    "maximum_decimals": 4,
+    "missing_statistic": "-",
+    "zero_denominator": "0 (-)",
+    "footnote": false
+  },
+  "drilldown": {
+    "categorical": [
+      "numerator_subjects",
+      "denominator_subjects"
+    ],
+    "continuous": "nonmissing_source_rows"
+  },
+  "output": {
+    "layout": "wide_and_long",
+    "wide_columns": [
+      "ROW_LABEL",
+      "VALUE"
+    ],
+    "long_dataset": "baseline_characteristics_long"
+  },
+  "targets": {
+    "sas": {
+      "source_library": "analysis",
+      "source_member": "adsl",
+      "output_dataset": "work.baseline_characteristics_test",
+      "long_output_dataset": "work.baseline_characteristics_long_test"
+    }
+  },
+  "_runtime": {
+    "population_levels": [
+      "Placebo",
+      "Drug A"
+    ]
+  }
+}

@@ -119,14 +119,18 @@ quit;
 
 data work.{{ source.work_prefix }}_item_{{ item.order }};
   length row_order item_order 8 row_label $320 row_value $80
-         trt_order 8 trt_label $200 cnt1 cnt2 $32;
+         trt_order 8 trt_label $200 display_level $400 cnt1 cnt2 $32;
   row_order={{ item.order }}*100000; item_order={{ item.order }};
   row_label={{ item.label | sas_string }}; row_value="";
   trt_order=1; trt_label=""; output;
   set work.{{ source.work_prefix }}_cat_{{ item.order }};
   row_order={{ item.order }}*100000+level_order;
   item_order={{ item.order }};
-  row_label=cats("    ",level_value);
+  display_level=level_value;
+{% if item.level_order == "custom" %}{% for level in item.custom_levels %}{% if item.storage_type == "numeric" %}  if level_value=strip(put({{ level.literal }},best32.)) then display_level={{ level.display | sas_string }};
+{% elif level.literal == "''" %}  if level_value="Missing" then display_level={{ level.display | sas_string }};
+{% else %}  if level_value={{ level.literal }} then display_level={{ level.display | sas_string }};
+{% endif %}{% endfor %}{% endif %}  row_label=cats("    ",display_level);
   row_value=cats(put(numerator,comma16.)," (",
                      put(round(100*numerator/big_n,{{ item.percent_digits | sas_round_increment }}),
                          16.{{ item.percent_digits }}),")");

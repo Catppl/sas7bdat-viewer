@@ -262,6 +262,54 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn('if missing(sex) then level_value="missing";', folded)
         self.assertNotIn("if ^missing(sex);", folded)
 
+    def test_grouped_custom_levels_emit_user_labels(self) -> None:
+        variables = (
+            VariableMetadata("USUBJID", "Subject"),
+            VariableMetadata("SAFFL", "Safety flag"),
+            VariableMetadata("TRT", "Treatment"),
+            VariableMetadata("SEX", "Sex"),
+        )
+        root = Path(self.temporary.name)
+        source_path = root / "adsl.sas7bdat"
+        source_path.touch()
+        source = DatasetHandle(
+            source_path,
+            root / "copy.sas7bdat",
+            root / "dataset.sqlite",
+            DatasetMetadata("ADSL", 3, variables),
+        )
+        filter_text = 'SAFFL = "Y"'
+        config = BaselineCharacteristicsConfig(
+            (
+                BaselineCategoricalItem(
+                    "SEX",
+                    "Sex",
+                    "custom",
+                    ("F", "M", None),
+                    1,
+                    (("F", "Female"), ("M", "Male"), (None, "Missing")),
+                    True,
+                ),
+            ),
+            FilterEngine(variables).compile(filter_text),
+            filter_text,
+            treatment_variable="TRT",
+            include_total=True,
+            population_treatment_variable="TRT",
+        )
+        configuration = build_baseline_characteristics_configuration(source, config)
+        configuration["_runtime"] = {"population_levels": ["Placebo", "Drug A"]}
+
+        code = SasBaselineCharacteristicsGenerator().generate(configuration)
+
+        self.assertIn("display_level=level_value;", code)
+        self.assertIn("if level_value='F' then display_level='Female';", code)
+        self.assertIn("if level_value='M' then display_level='Male';", code)
+        self.assertIn(
+            'if level_value="Missing" then display_level=\'Missing\';',
+            code,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
