@@ -142,12 +142,20 @@
         "n",
         "mean",
         "std",
-        "median"
+        "median",
+        "q1",
+        "q3",
+        "min",
+        "max"
       ],
       "statistic_decimals": {
         "mean": 1,
         "std": 1,
-        "median": 1
+        "median": 1,
+        "q1": 1,
+        "q3": 1,
+        "min": 0,
+        "max": 0
       },
       "missing": "exclude_from_statistics"
     }

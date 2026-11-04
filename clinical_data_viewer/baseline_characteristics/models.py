@@ -108,6 +108,7 @@ class BaselineCharacteristicsConfig:
             )
 
         seen: set[str] = set()
+        continuous_statistics: tuple[str, ...] | None = None
         for item in self.items:
             folded = item.variable.casefold()
             variable = known.get(folded)
@@ -191,6 +192,13 @@ class BaselineCharacteristicsConfig:
                 raise ValueError("Q1 and Q3 must be selected together.")
             if ("min" in statistics) != ("max" in statistics):
                 raise ValueError("Min and Max must be selected together.")
+            if continuous_statistics is None:
+                continuous_statistics = statistics
+            elif set(statistics) != set(continuous_statistics):
+                raise ValueError(
+                    "All continuous items in a Baseline Characteristics table "
+                    "must use the same statistics."
+                )
 
         population = population_metadata or metadata
         population_known = {

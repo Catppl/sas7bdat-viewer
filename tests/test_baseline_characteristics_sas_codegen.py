@@ -59,12 +59,14 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("proc means", folded)
         self.assertIn("put(n,best.)", folded)
         self.assertNotIn("(drop=_type_ _freq_)", folded)
+        self.assertIn("mean=mean", folded)
+        self.assertNotIn("set work.adsl_item_2_all", folded)
+        self.assertNotIn("include_n=", folded)
         self.assertIn(
-            "n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max",
+            "set work.&work_prefix._stat_&order.;\n  if _n_=1 then do;",
             folded,
         )
-        self.assertIn("set work.adsl_item_2_all", folded)
-        self.assertNotIn("include_n=", folded)
+        self.assertIn("set work.adsl_cat_1;\n  if _n_=1 then do;", folded)
         self.assertIn("vardef=df qntldef=5", folded)
         self.assertIn("if sex='f' then sort_rank=1", folded)
         self.assertIn("if ^missing(sex);", folded)
@@ -169,16 +171,16 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertNotIn("if ^missing(trt);", folded)
         self.assertIn("noprint nway missing", folded)
         self.assertNotIn("(drop=_type_ _freq_)", folded)
-        self.assertIn(
-            "n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max",
-            folded,
-        )
-        self.assertIn("set work.adsl_item_1_all", folded)
-        self.assertNotIn("include_n=", folded)
         self.assertIn("n=n", folded)
+        self.assertNotIn("set work.adsl_item_1_all", folded)
+        self.assertNotIn("include_n=", folded)
         self.assertIn("%macro baseline_continuous(", folded)
         self.assertIn("%baseline_continuous(", folded)
         self.assertNotIn("include_total=", folded)
+        self.assertIn(
+            "set work.&work_prefix._cont_&order.;\n  if _n_=1 then do;",
+            folded,
+        )
         self.assertIn("select usubjid into :duplicate_subject_ids separated by ', '", folded)
         self.assertIn("duplicate usubjid values: &duplicate_subject_ids.", folded)
         for legacy_length in ("$12", "$16", "$32", "$80", "$256", "$320", "$400"):

@@ -436,6 +436,22 @@ class BaselineCharacteristicsTests(unittest.TestCase):
                 source.metadata
             )
 
+    def test_continuous_items_share_one_statistic_selection(self) -> None:
+        source = DatasetHandle(
+            Path("adsl.sas7bdat"),
+            Path("copy.sas7bdat"),
+            Path("dataset.sqlite"),
+            DatasetMetadata("ADSL", 0, VARIABLES),
+        )
+        config = BaselineCharacteristicsConfig(
+            (
+                BaselineContinuousItem("AGE", statistics=("n", "mean")),
+                BaselineContinuousItem("WEIGHTBL", statistics=("n", "mean", "std")),
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "same statistics"):
+            config.validate(source.metadata)
+
     def test_configuration_preserves_role_storage_and_filter_ast(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

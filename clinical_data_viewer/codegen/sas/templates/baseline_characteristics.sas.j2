@@ -57,54 +57,97 @@ quit;
 );
 proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_raw_&order.
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
+  output out=work.&work_prefix._stat_&order.
+{% for statistic in continuous_statistics %}    {{ statistic }}={{ statistic }}{% if not loop.last %} {% endif %}{% endfor %};
 run;
 
-data work.&work_prefix._stat_&order.;
-  set work.&work_prefix._stat_raw_&order.;
-run;
-
-data work.&work_prefix._item_&order._all;
+data work.&work_prefix._item_&order.;
   length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
          row_label $200 level_value $200 statistic_key $200
          raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200;
   set work.&work_prefix._stat_&order.;
-  item_order=&order.; item_kind="continuous";
-  variable="&var."; item_label=&label.; unit=&unit.; denominator=&&&n_macro.;
-  numerator=n; row_order=&order.*100000; row_label=item_label;
-  row_value=""; output;
-  row_order+1; statistic_key="n"; row_label="    n";
-  raw_value_1=n; raw_value_2=.; row_value=strip(put(n,best.)); output;
-  row_order+1; statistic_key="mean"; row_label="    Mean";
-  raw_value_1=mean; raw_value_2=.;
+  if _n_=1 then do;
+    item_order=&order.;
+    item_kind="continuous";
+    variable="&var.";
+    item_label=&label.;
+    unit=&unit.;
+    denominator=&&&n_macro.;
+    numerator=n;
+    row_order=&order.*100000;
+    row_label=item_label;
+    row_value="";
+    statistic_key="";
+    output;
+
+  end;
+  item_order=&order.;
+  item_kind="continuous";
+  variable="&var.";
+  item_label=&label.;
+  unit=&unit.;
+  denominator=&&&n_macro.;
+  numerator=n;
+{% if "n" in continuous_statistics %}  row_order+1;
+  statistic_key="n";
+  row_label="    n";
+  raw_value_1=n;
+  raw_value_2=.;
+  row_value=strip(put(n,best.));
+  output;
+
+{% endif %}{% if "mean" in continuous_statistics %}  row_order+1;
+  statistic_key="mean";
+  row_label="    Mean";
+  raw_value_1=mean;
+  raw_value_2=.;
   row_value=strip(put(raw_value_1,8.&mean_decimals.));
   if missing(raw_value_1) then row_value="-";
   output;
-  row_order+1; statistic_key="std"; row_label="    SD";
-  raw_value_1=std; raw_value_2=.;
+
+{% endif %}{% if "std" in continuous_statistics %}  row_order+1;
+  statistic_key="std";
+  row_label="    SD";
+  raw_value_1=std;
+  raw_value_2=.;
   row_value=strip(put(raw_value_1,8.&std_decimals.));
   if missing(raw_value_1) then row_value="-";
   output;
-  row_order+1; statistic_key="median"; row_label="    Median";
-  raw_value_1=median; raw_value_2=.;
+
+{% endif %}{% if "median" in continuous_statistics %}  row_order+1;
+  statistic_key="median";
+  row_label="    Median";
+  raw_value_1=median;
+  raw_value_2=.;
   row_value=strip(put(raw_value_1,8.&median_decimals.));
   if missing(raw_value_1) then row_value="-";
   output;
-  row_order+1; statistic_key="q1_q3"; row_label="    Q1, Q3";
-  raw_value_1=q1; raw_value_2=q3;
+
+{% endif %}{% if "q1" in continuous_statistics %}  row_order+1;
+  statistic_key="q1_q3";
+  row_label="    Q1, Q3";
+  raw_value_1=q1;
+  raw_value_2=q3;
   cnt1=strip(put(q1,8.&q1_decimals.));
   cnt2=strip(put(q3,8.&q3_decimals.));
   if missing(q1) then cnt1="-";
   if missing(q3) then cnt2="-";
-  row_value=cats(cnt1,", ",cnt2); output;
-  row_order+1; statistic_key="min_max"; row_label="    Min, Max";
-  raw_value_1=min; raw_value_2=max;
+  row_value=cats(cnt1,", ",cnt2);
+  output;
+
+{% endif %}{% if "min" in continuous_statistics %}  row_order+1;
+  statistic_key="min_max";
+  row_label="    Min, Max";
+  raw_value_1=min;
+  raw_value_2=max;
   cnt1=strip(put(min,8.&min_decimals.));
   cnt2=strip(put(max,8.&max_decimals.));
   if missing(min) then cnt1="-";
   if missing(max) then cnt2="-";
-  row_value=cats(cnt1,", ",cnt2); output;
+  row_value=cats(cnt1,", ",cnt2);
+  output;
+
+{% endif %}
   keep row_order item_order item_kind variable item_label unit row_label level_value
        statistic_key raw_value_1 raw_value_2 numerator denominator percent row_value;
 run;
@@ -144,22 +187,31 @@ data work.{{ source.work_prefix }}_item_{{ item.order }};
   length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
          row_label $200 level_value $200 statistic_key $200
          raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200;
-  if _n_=1 then do;
-    row_order={{ item.order }}*100000; item_order={{ item.order }};
-    item_kind="categorical"; variable={{ item.variable | sas_string }};
-    item_label={{ item.label | sas_string }};
-    row_label=cats(item_label," - n (%)"); row_value=""; output;
-  end;
   set work.{{ source.work_prefix }}_cat_{{ item.order }};
-  row_order={{ item.order }}*100000+_n_; item_order={{ item.order }};
-  item_kind="categorical"; variable={{ item.variable | sas_string }};
-  item_label={{ item.label | sas_string }}; display_level=level_value;
+  if _n_=1 then do;
+    row_order={{ item.order }}*100000;
+    item_order={{ item.order }};
+    item_kind="categorical";
+    variable={{ item.variable | sas_string }};
+    item_label={{ item.label | sas_string }};
+    row_label=cats(item_label," - n (%)");
+    row_value="";
+    output;
+
+  end;
+  row_order={{ item.order }}*100000+_n_;
+  item_order={{ item.order }};
+  item_kind="categorical";
+  variable={{ item.variable | sas_string }};
+  item_label={{ item.label | sas_string }};
+  display_level=level_value;
 {% if item.level_order == "custom" %}{% for level in item.custom_levels %}  if {{ item.variable }}={{ level.literal }} then display_level={{ level.display | sas_string }};
 {% endfor %}{% endif %}  row_label=cats("    ",display_level);
   row_value=cats(put(numerator,comma16.)," (",
                      put(round(percent,{{ item.percent_digits | sas_round_increment }}),
                          16.{{ item.percent_digits }}),")");
   output;
+
 run;
 {% else %}
 /* Continuous item: {{ item.label }} */
@@ -178,17 +230,6 @@ run;
     min_decimals={{ item.statistic_decimals.min }},
     max_decimals={{ item.statistic_decimals.max }}
 );
-data work.{{ source.work_prefix }}_item_{{ item.order }};
-  set work.{{ source.work_prefix }}_item_{{ item.order }}_all;
-  if missing(statistic_key)
-{% if "n" in item.statistics %}    or statistic_key="n"
-{% endif %}{% if "mean" in item.statistics %}    or statistic_key="mean"
-{% endif %}{% if "std" in item.statistics %}    or statistic_key="std"
-{% endif %}{% if "median" in item.statistics %}    or statistic_key="median"
-{% endif %}{% if "q1" in item.statistics %}    or statistic_key="q1_q3"
-{% endif %}{% if "min" in item.statistics %}    or statistic_key="min_max"
-{% endif %}  ;
-run;
 {% endif %}
 {% endfor %}
 

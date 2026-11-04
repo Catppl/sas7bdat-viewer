@@ -433,6 +433,23 @@ class SasBaselineCharacteristicsGenerator:
                 prepared["statistic_decimals"] = decimals
             items.append(prepared)
 
+        continuous_items = [
+            item for item in items if item.get("role") == "continuous"
+        ]
+        continuous_statistics = (
+            list(continuous_items[0]["statistics"])
+            if continuous_items
+            else []
+        )
+        if any(
+            set(item["statistics"]) != set(continuous_statistics)
+            for item in continuous_items[1:]
+        ):
+            raise ValueError(
+                "All continuous items in a Baseline Characteristics table "
+                "must use the same statistics."
+            )
+
         calculation = _mapping(configuration["calculation"], "calculation")
         if (
             calculation.get("standard_deviation") != "sample_n_minus_1"
@@ -519,6 +536,7 @@ class SasBaselineCharacteristicsGenerator:
                 else []
             ),
             "items": items,
+            "continuous_statistics": continuous_statistics,
             "header_label": str(display.get("header_label") or "Overall"),
             "output": output,
             "long_output": long_output,
