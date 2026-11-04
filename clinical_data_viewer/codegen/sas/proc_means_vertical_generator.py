@@ -71,6 +71,11 @@ def _reference(value: object, field: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def _normalize_sas_spacing(code: str) -> str:
+    """Keep at most one blank line between generated SAS code blocks."""
+    return re.sub(r"(?:[ \t]*\n){3,}", "\n\n", code)
+
+
 class SasProcMeansVerticalGenerator:
     """Render a readable SAS program for PROC MEANS Table Builder (Vertical)."""
 
@@ -312,10 +317,14 @@ class SasProcMeansVerticalGenerator:
             target_sas.get("population_member")
             or population_input.get("dataset", source_member)
         ).lower()
-        output_dataset = str(target_sas.get("output_dataset") or "work.pm_vertical")
-        output_library, output_member = _reference(
-            output_dataset, "targets.sas.output_dataset"
+        configured_output_dataset = str(
+            target_sas.get("output_dataset") or "work.pm_vertical"
         )
+        output_library, _configured_output_member = _reference(
+            configured_output_dataset, "targets.sas.output_dataset"
+        )
+        output_member = "proc_means_res"
+        output_dataset = f"{output_library}.{output_member}"
         _reference(f"{source_library}.{source_member}", "targets.sas source")
         _reference(
             f"{population_library}.{population_member}", "targets.sas population"
@@ -520,7 +529,8 @@ class SasProcMeansVerticalGenerator:
                 if context["layout"] == "rows"
                 else "proc_means_vertical.sas.j2"
             )
-            return self.environment.get_template(template_name).render(**context)
+            rendered = self.environment.get_template(template_name).render(**context)
+            return _normalize_sas_spacing(rendered)
         except (OSError, TemplateError) as error:
             raise ValueError(
                 f"Unable to render the vertical PROC MEANS template: {error}"

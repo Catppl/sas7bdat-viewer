@@ -12,13 +12,11 @@ data adlb;
     where SAFFL = 'Y';
 run;
 
-
 /* Prepare population source */
 data adsl;
     set analysis.adsl;
     where SAFFL = 'Y';
 run;
-
 
 /* Population N */
 proc sql noprint;
@@ -37,7 +35,6 @@ proc sql;
     from adlb;
 quit;
 
-
 data trt;
     set trt0;
     trt_ord = .;
@@ -47,14 +44,10 @@ data trt;
     if missing(trt_ord) then delete;
 run;
 
-
-
-
-
 /* One reusable macro per analysis variable.  Variable-specific settings are
    visible at the invocation lines below, so adding another variable does not
    duplicate the PROC MEANS implementation. */
-%macro pm_vertical_analysis(
+%macro proc_means_vertical(
     var=,
     token=,
     label=,
@@ -116,7 +109,6 @@ proc sql;
     order by g.trt_ord;
 quit;
 
-
 /* Total statistics for &var. */
 proc means data=adlb noprint
     vardef=df qntldef=5 alpha=0.05;
@@ -147,7 +139,6 @@ data total_&token._row;
     trt_ord = 4;
 
 run;
-
 
 /* Put all statistics for this analysis variable into one dataset */
 data values_&token.;
@@ -282,9 +273,9 @@ data labels_&token.;
     output;
     keep analysis stat_order item stat_label key1 key2;
 run;
-%mend pm_vertical_analysis;
+%mend proc_means_vertical;
 
-%pm_vertical_analysis(
+%proc_means_vertical(
     var=AGE,
     token=age,
     label=%str('Age (years)'),
@@ -300,7 +291,6 @@ run;
     lclm_decimals=1,
     uclm_decimals=1
 );
-
 
 /* Combine the macro-produced labels and values */
 data pm_labels;
@@ -336,14 +326,14 @@ proc sort data=pm_long;
     by row_ord trt_ord;
 run;
 
-proc transpose data=pm_long out=work.pm_vertical_review(drop=_name_ row_ord) prefix=col;
+proc transpose data=pm_long out=work.proc_means_res(drop=_name_ row_ord) prefix=col;
     by row_ord item stat;
     id trt_ord;
     var row_value;
 run;
 
-data work.pm_vertical_review;
-    set work.pm_vertical_review;
+data work.proc_means_res;
+    set work.proc_means_res;
     label
         item = "Item"
         stat = "Statistic"

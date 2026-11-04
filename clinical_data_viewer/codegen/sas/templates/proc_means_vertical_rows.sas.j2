@@ -129,7 +129,7 @@ run;
 /* One reusable macro per analysis variable.  Variable-specific settings are
    visible at the invocation lines below, so adding another variable does not
    duplicate the PROC MEANS implementation. */
-%macro pm_vertical_analysis(
+%macro proc_means_vertical(
     var=,
     token=,
     label=,
@@ -274,9 +274,9 @@ data labels_&token.;
 {% endif %}    output;
 {% endfor %}    keep analysis stat_order item stat_label key1 key2;
 run;
-%mend pm_vertical_analysis;
+%mend proc_means_vertical;
 
-{% for analysis in analysis %}%pm_vertical_analysis(
+{% for analysis in analysis %}%proc_means_vertical(
     var={{ analysis.name | sas_name }},
     token={{ analysis.token }},
     label=%str({{ analysis.label | sas_string }}),

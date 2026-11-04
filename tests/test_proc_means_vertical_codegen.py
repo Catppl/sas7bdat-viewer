@@ -55,9 +55,10 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("stat_aval", code)
         self.assertIn("stat_chg", code)
         self.assertIn("proc transpose", code)
-        self.assertIn("work.pm_vertical", code)
+        self.assertNotRegex(code, r"\n{3,}")
+        self.assertIn("work.proc_means_res", code)
         self.assertIn("trt_ord", code)
-        self.assertEqual(code.count("%pm_vertical_analysis("), 2)
+        self.assertEqual(code.count("%proc_means_vertical("), 2)
         self.assertIn("row_base=0", code)
         self.assertIn("row_base=5", code)
         self.assertIn("if TRT01A = 'A' then trt_ord = 1;", code)
@@ -197,7 +198,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("else if TRT01A = 'B' then trt_ord = 2;", code)
         self.assertNotIn("data trt_n", code)
         self.assertNotIn("into :col_labels", code)
-        self.assertIn("data work.pm_vertical;", code)
+        self.assertIn("data work.proc_means_res;", code)
         self.assertIn('col1 = "A (N=&n1)"', code)
         self.assertIn("where not missing(&var.)", code)
         self.assertIn("var=AVAL", code)
@@ -353,8 +354,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertNotIn("data pm_decimals;", code)
         self.assertEqual(code.count("data pm_long;"), 1)
         self.assertNotIn("data long_aval_", code)
-        self.assertEqual(code.count("%macro pm_vertical_analysis("), 1)
-        self.assertEqual(code.count("%pm_vertical_analysis("), 1)
+        self.assertEqual(code.count("%macro proc_means_vertical("), 1)
+        self.assertEqual(code.count("%proc_means_vertical("), 1)
 
     def test_macro_label_argument_is_macro_quoted(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
