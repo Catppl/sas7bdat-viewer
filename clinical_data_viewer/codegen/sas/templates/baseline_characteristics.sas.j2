@@ -63,14 +63,13 @@ quit;
 );
 proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_&order.(drop=_type_ _freq_)
-%if &include_n %then %do;    n=n
-%end;%if &include_mean %then %do;    mean=mean
-%end;%if &include_std %then %do;    std=std
-%end;%if &include_median %then %do;    median=median
-%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
-%end;%if &include_min_max %then %do;    min=min max=max
-%end;    ;
+  output out=work.&work_prefix._stat_raw_&order.
+    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
+run;
+
+data work.&work_prefix._stat_&order.;
+  set work.&work_prefix._stat_raw_&order.;
+  keep %if &include_n %then %do; n %end;%if &include_mean %then %do; mean %end;%if &include_std %then %do; std %end;%if &include_median %then %do; median %end;%if &include_q1_q3 %then %do; q1 q3 %end;%if &include_min_max %then %do; min max %end;;
 run;
 
 data work.&work_prefix._item_&order.;

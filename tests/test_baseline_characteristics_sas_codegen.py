@@ -58,6 +58,13 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("count(distinct", folded)
         self.assertIn("proc means", folded)
         self.assertIn("put(n,best.)", folded)
+        self.assertNotIn("(drop=_type_ _freq_)", folded)
+        self.assertIn(
+            "n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max",
+            folded,
+        )
+        self.assertIn("set work.&work_prefix._stat_raw_&order.", folded)
+        self.assertIn("keep %if &include_n %then %do; n %end;", folded)
         self.assertIn("vardef=df qntldef=5", folded)
         self.assertIn("if sex='f' then sort_rank=1", folded)
         self.assertIn("if ^missing(sex);", folded)
@@ -161,6 +168,13 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("where saffl = 'y' and ^missing(trt);", folded)
         self.assertNotIn("if ^missing(trt);", folded)
         self.assertIn("noprint nway missing", folded)
+        self.assertNotIn("(drop=_type_ _freq_)", folded)
+        self.assertIn(
+            "n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max",
+            folded,
+        )
+        self.assertIn("keep trt_key", folded)
+        self.assertIn("keep trt_key %if &include_n %then %do; n %end;", folded)
         self.assertIn("n=n", folded)
         self.assertIn("%macro baseline_continuous(", folded)
         self.assertIn("%baseline_continuous(", folded)

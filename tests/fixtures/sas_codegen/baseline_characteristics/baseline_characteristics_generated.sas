@@ -96,32 +96,25 @@ proc means data=work.&work_prefix._source noprint nway missing
     vardef=df qntldef=5;
   class trt_key;
   var &var.;
-  output out=work.&work_prefix._stat_&order.(drop=_type_ _freq_)
-%if &include_n %then %do;    n=n
-%end;%if &include_mean %then %do;    mean=mean
-%end;%if &include_std %then %do;    std=std
-%end;%if &include_median %then %do;    median=median
-%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
-%end;%if &include_min_max %then %do;    min=min max=max
-%end;    ;
+  output out=work.&work_prefix._stat_raw_&order.
+    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
+run;
+data work.&work_prefix._stat_&order.;
+  set work.&work_prefix._stat_raw_&order.;
+  keep trt_key %if &include_n %then %do; n %end;%if &include_mean %then %do; mean %end;%if &include_std %then %do; std %end;%if &include_median %then %do; median %end;%if &include_q1_q3 %then %do; q1 q3 %end;%if &include_min_max %then %do; min max %end;;
 run;
 %if &include_total %then %do;
 proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_total_&order.(drop=_type_ _freq_)
-%if &include_n %then %do;    n=n
-%end;%if &include_mean %then %do;    mean=mean
-%end;%if &include_std %then %do;    std=std
-%end;%if &include_median %then %do;    median=median
-%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
-%end;%if &include_min_max %then %do;    min=min max=max
-%end;    ;
+  output out=work.&work_prefix._stat_total_raw_&order.
+    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
 run;
 
 data work.&work_prefix._stat_total_&order.;
   length trt_key $200;
-  set work.&work_prefix._stat_total_&order.;
+  set work.&work_prefix._stat_total_raw_&order.;
   trt_key="TOTAL";
+  keep trt_key %if &include_n %then %do; n %end;%if &include_mean %then %do; mean %end;%if &include_std %then %do; std %end;%if &include_median %then %do; median %end;%if &include_q1_q3 %then %do; q1 q3 %end;%if &include_min_max %then %do; min max %end;;
 run;
 
 data work.&work_prefix._stat_all_&order.;
