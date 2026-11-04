@@ -70,7 +70,7 @@ quit;
 
 %macro baseline_continuous(
     var=,
-    token=,
+    order=,
     label=,
     work_prefix=,
     include_total=0,
@@ -92,7 +92,7 @@ proc means data=work.&work_prefix._source noprint nway missing
     vardef=df qntldef=5;
   class trt_key;
   var &var.;
-  output out=work.&work_prefix._stat_&token.(drop=_type_ _freq_)
+  output out=work.&work_prefix._stat_&order.(drop=_type_ _freq_)
 %if &include_n %then %do;    n=n
 %end;%if &include_mean %then %do;    mean=mean
 %end;%if &include_std %then %do;    std=std
@@ -104,7 +104,7 @@ run;
 %if &include_total %then %do;
 proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_total_&token.(drop=_type_ _freq_)
+  output out=work.&work_prefix._stat_total_&order.(drop=_type_ _freq_)
 %if &include_n %then %do;    n=n
 %end;%if &include_mean %then %do;    mean=mean
 %end;%if &include_std %then %do;    std=std
@@ -114,19 +114,19 @@ proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
 %end;    ;
 run;
 
-data work.&work_prefix._stat_total_&token.;
+data work.&work_prefix._stat_total_&order.;
   length trt_key $200;
-  set work.&work_prefix._stat_total_&token.;
+  set work.&work_prefix._stat_total_&order.;
   trt_key="TOTAL";
 run;
 
-data work.&work_prefix._stat_all_&token.;
-  set work.&work_prefix._stat_&token. work.&work_prefix._stat_total_&token.;
+data work.&work_prefix._stat_all_&order.;
+  set work.&work_prefix._stat_&order. work.&work_prefix._stat_total_&order.;
 run;
 %end;
 
 proc sql;
-  create table work.&work_prefix._cont_&token. as
+  create table work.&work_prefix._cont_&order. as
   select t.trt_order, t.trt_label, t.big_n
 %if &include_n %then %do;         , s.n
 %end;%if &include_mean %then %do;         , s.mean
@@ -135,42 +135,42 @@ proc sql;
 %end;%if &include_q1_q3 %then %do;         , s.q1, s.q3
 %end;%if &include_min_max %then %do;         , s.min, s.max
 %end;  from work.&work_prefix._trt as t
-%if &include_total %then %do;  left join work.&work_prefix._stat_all_&token. as s
-%end;%else %do;  left join work.&work_prefix._stat_&token. as s
+%if &include_total %then %do;  left join work.&work_prefix._stat_all_&order. as s
+%end;%else %do;  left join work.&work_prefix._stat_&order. as s
 %end;
     on t.trt_key=s.trt_key
   order by t.trt_order;
 quit;
 
-data work.&work_prefix._item_&token.;
+data work.&work_prefix._item_&order.;
   length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200 cnt1 cnt2 $200;
-  row_order=&token.*100000; item_order=&token.;
+  row_order=&order.*100000; item_order=&order.;
   row_label=&label.; row_value="";
   trt_order=1; trt_label=""; output;
-  set work.&work_prefix._cont_&token.;
-  item_order=&token.; trt_label=trt_label;
-%if &include_n %then %do;  row_order=&token.*100000+1; row_label="    n";
+  set work.&work_prefix._cont_&order.;
+  item_order=&order.; trt_label=trt_label;
+%if &include_n %then %do;  row_order=&order.*100000+1; row_label="    n";
   row_value=strip(put(n,best.)); output;
-%end;%if &include_mean %then %do;  row_order=&token.*100000+2; row_label="    Mean";
+%end;%if &include_mean %then %do;  row_order=&order.*100000+2; row_label="    Mean";
   row_value=strip(put(mean,8.&mean_decimals.));
   if missing(mean) then row_value="-";
   output;
-%end;%if &include_std %then %do;  row_order=&token.*100000+3; row_label="    SD";
+%end;%if &include_std %then %do;  row_order=&order.*100000+3; row_label="    SD";
   row_value=strip(put(std,8.&std_decimals.));
   if missing(std) then row_value="-";
   output;
-%end;%if &include_median %then %do;  row_order=&token.*100000+4; row_label="    Median";
+%end;%if &include_median %then %do;  row_order=&order.*100000+4; row_label="    Median";
   row_value=strip(put(median,8.&median_decimals.));
   if missing(median) then row_value="-";
   output;
-%end;%if &include_q1_q3 %then %do;  row_order=&token.*100000+5; row_label="    Q1, Q3";
+%end;%if &include_q1_q3 %then %do;  row_order=&order.*100000+5; row_label="    Q1, Q3";
   cnt1=strip(put(q1,8.&q1_decimals.));
   cnt2=strip(put(q3,8.&q3_decimals.));
   if missing(q1) then cnt1="-";
   if missing(q3) then cnt2="-";
   row_value=cats(cnt1,", ",cnt2); output;
-%end;%if &include_min_max %then %do;  row_order=&token.*100000+6; row_label="    Min, Max";
+%end;%if &include_min_max %then %do;  row_order=&order.*100000+6; row_label="    Min, Max";
   cnt1=strip(put(min,8.&min_decimals.));
   cnt2=strip(put(max,8.&max_decimals.));
   if missing(min) then cnt1="-";
@@ -260,7 +260,7 @@ run;
 /* Continuous item: {{ item.label }} */
 %baseline_continuous(
     var={{ item.variable }},
-    token={{ item.order }},
+    order={{ item.order }},
     label=%str({{ item.label | sas_string }}),
     work_prefix={{ source.work_prefix }},
     include_total={{ 1 if include_total else 0 }},
