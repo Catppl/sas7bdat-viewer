@@ -265,7 +265,7 @@ data pm_long;
     set pm_display;
     statistic = stat_label;
     if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
-    else if key1 in ("subjects", "n", "nmiss") then row_value = strip(put(value1, 3.));
+    else if key1 in ("subjects", "n", "nmiss") then row_value = "   " || strip(put(value1, best.));
 {% for analysis in analysis %}{% for row in analysis.format_rows %}{% if row["keys"]|length > 1 %}    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} and missing(value1) and missing(value2) then row_value = "—, —";
     else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.{{ row["decimals"][0] }}))), ifc(missing(value2), "—", strip(put(value2, 8.{{ row["decimals"][1] }}))));
 {% else %}    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and missing(value1) then row_value = "—";

@@ -201,6 +201,10 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertNotIn("base_chg", code)
         self.assertNotIn("data pm_decimals;", code)
         self.assertNotIn("putn(", code)
+        self.assertIn(
+            'row_value = "   " || strip(put(value1, best.));',
+            code,
+        )
         self.assertIn("row_value = strip(put(value1, 8.2));", code)
         self.assertIn(
             'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',

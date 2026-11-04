@@ -265,7 +265,7 @@ data pm_long;
     set pm_display;
     stat = stat_label;
     if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
-    else if key1 in ("subjects", "n", "nmiss") then row_value = strip(put(value1, 3.));
+    else if key1 in ("subjects", "n", "nmiss") then row_value = "   " || strip(put(value1, best.));
     else if analysis = 'age' and key1 = 'mean' and missing(value1) then row_value = "—";
     else if analysis = 'age' and key1 = 'mean' then row_value = strip(put(value1, 8.1));
     else if analysis = 'age' and key1 = 'std' and missing(value1) then row_value = "—";
