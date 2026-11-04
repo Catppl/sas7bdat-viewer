@@ -57,6 +57,9 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("proc transpose", code)
         self.assertIn("work.pm_vertical", code)
         self.assertIn("trt_ord", code)
+        self.assertEqual(code.count("%pm_vertical_analysis("), 2)
+        self.assertIn("row_base=0", code)
+        self.assertIn("row_base=5", code)
         self.assertIn("if TRT01A = 'A' then trt_ord = 1;", code)
         self.assertIn("else if TRT01A = 'B' then trt_ord = 2;", code)
         self.assertNotIn("select coalesce(max(trt_ord), 0) into :n_trt", code)
@@ -196,7 +199,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertNotIn("into :col_labels", code)
         self.assertIn("data work.pm_vertical;", code)
         self.assertIn('col1 = "A (N=&n1)"', code)
-        self.assertIn("where not missing(AVAL)", code)
+        self.assertIn("where not missing(&var.)", code)
+        self.assertIn("var=AVAL", code)
         self.assertNotIn("base_aval", code)
         self.assertNotIn("base_chg", code)
         self.assertNotIn("data pm_decimals;", code)
@@ -205,11 +209,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
             'row_value = "   " || strip(put(value1, best.));',
             code,
         )
-        self.assertIn("row_value = strip(put(value1, 8.2));", code)
-        self.assertIn(
-            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',
-            code,
-        )
+        self.assertIn("mean_decimals=2", code)
         self.assertNotIn('if key2 = "" then do;', code)
         self.assertNotIn("value1_text", code)
         self.assertNotIn("value2_text", code)
@@ -237,8 +237,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
 
         self.assertNotIn("base_aval", code)
         self.assertNotIn("base_chg", code)
-        self.assertIn("row_value = strip(put(value1, 8.2));", code)
-        self.assertIn("row_value = strip(put(value1, 8.3));", code)
+        self.assertIn("mean_decimals=2", code)
+        self.assertIn("mean_decimals=3", code)
 
     def test_generator_requires_resolved_base_decimals_for_auto(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -311,7 +311,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("PROC MEANS Table Builder (Vertical - Groups as Rows)", code)
         self.assertIn("class AVISIT TRT01A;", code)
         self.assertIn("create table row0", code)
-        self.assertIn("create table out_total_aval", code)
+        self.assertIn("create table out_total_&token. as", code)
         self.assertIn("coalesce(s.n, 0) as n", code)
         self.assertIn("by output_row group item statistic", code)
         self.assertIn("prefix=col", code)
@@ -346,12 +346,24 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         configuration["variables"]["analysis"] = ["AVAL"]
         code = SasProcMeansVerticalGenerator().generate(configuration)
 
-        self.assertEqual(code.count("data values_aval;"), 1)
+        self.assertEqual(code.count("data values_&token.;"), 2)
         self.assertNotIn("data values_chg;", code)
+        self.assertEqual(code.count("data labels_&token.;"), 1)
         self.assertEqual(code.count("data pm_labels;"), 1)
         self.assertNotIn("data pm_decimals;", code)
         self.assertEqual(code.count("data pm_long;"), 1)
         self.assertNotIn("data long_aval_", code)
+        self.assertEqual(code.count("%macro pm_vertical_analysis("), 1)
+        self.assertEqual(code.count("%pm_vertical_analysis("), 1)
+
+    def test_macro_label_argument_is_macro_quoted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = self._configuration(Path(temporary))
+        configuration["item"]["labels"]["AVAL"] = "Cholesterol, Total"
+
+        code = SasProcMeansVerticalGenerator().generate(configuration)
+
+        self.assertIn("label=%str('Cholesterol, Total')", code)
 
     def test_generator_combines_confidence_limits_with_fixed_display_precision(
         self,
@@ -368,7 +380,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("key1 = 'lclm';", code)
         self.assertIn("key2 = 'uclm';", code)
         self.assertIn(
-            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',
+            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.&lclm_decimals.))), ifc(missing(value2), "—", strip(put(value2, 8.&uclm_decimals.))));',
             code,
         )
         self.assertNotIn('if key2 = "" then do;', code)
@@ -396,7 +408,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("key1 = 'lclm';", code)
         self.assertIn("key2 = 'uclm';", code)
         self.assertIn(
-            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',
+            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.&lclm_decimals.))), ifc(missing(value2), "—", strip(put(value2, 8.&uclm_decimals.))));',
             code,
         )
         self.assertNotIn('if key2 = "" then do;', code)

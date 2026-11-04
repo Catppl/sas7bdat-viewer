@@ -126,96 +126,114 @@ data row_pop;
     big_n = &{{ total_n_macro }};
 run;
 
-{% for analysis in analysis %}
-/* Statistics for {{ analysis.name }} */
+/* One reusable macro per analysis variable.  Variable-specific settings are
+   visible at the invocation lines below, so adding another variable does not
+   duplicate the PROC MEANS implementation. */
+%macro pm_vertical_analysis(
+    var=,
+    token=,
+    label=,
+    row_base=,
+    mean_decimals=,
+    std_decimals=,
+    stderr_decimals=,
+    median_decimals=,
+    q1_decimals=,
+    q3_decimals=,
+    min_decimals=,
+    max_decimals=,
+    lclm_decimals=,
+    uclm_decimals=
+);
+/* Statistics for &var. */
 proc means data={{ source.work_member | sas_name }} noprint nway missing
     vardef=df qntldef=5 alpha={{ alpha }};
     class {% for group in row_group_variables %}{{ group.sas_name }} {% endfor %}{% for group in group_variables %}{{ group.sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-    var {{ analysis.name | sas_name }};
-    output out=stat_{{ analysis.token }}(drop=_type_ _freq_)
+    var &var.;
+    output out=stat_&token.(drop=_type_ _freq_)
 {% if proc_statistics %}{% for key in proc_statistics %}        {{ key }}={{ key }}
 {% endfor %}        ;
 {% else %}        n=internal_n;
 {% endif %}run;
 
-/* Distinct subject count for {{ analysis.name }} */
+/* Distinct subject count for &var. */
 proc sql;
-    create table subj_{{ analysis.token }} as
+    create table subj_&token. as
     select
 {% for group in row_group_variables %}        {{ group.sas_name }},{% endfor %}
 {% for group in group_variables %}        {{ group.sas_name }},{% endfor %}
         count(distinct {{ subject | sas_name }}) as subject_n
     from {{ source.work_member | sas_name }}
-    where not missing({{ analysis.name | sas_name }})
+    where not missing(&var.)
       and not missing({{ subject | sas_name }})
     group by {% for group in row_group_variables %}{{ group.sas_name }}{% if not loop.last or group_variables %}, {% endif %}{% endfor %}{% for group in group_variables %}{{ group.sas_name }}{% if not loop.last %}, {% endif %}{% endfor %};
 quit;
 
 /* Align source statistics to the runtime row and column order */
 proc sql;
-    create table grid_{{ analysis.token }} as
+    create table grid_&token. as
     select r.*, c.col_ord, c.col_label, c.big_n
     from row as r, col_n as c;
 quit;
 
 proc sql;
-    create table out_{{ analysis.token }} as
+    create table out_&token. as
     select g.row_ord, g.row_label, g.col_ord, g.col_label, g.big_n,
 {% if proc_statistics %}{% for key in proc_statistics %}{% if key in ["n", "nmiss"] %}           coalesce(s.{{ key }}, 0) as {{ key }}{% else %}           s.{{ key }}{% endif %}{% if not loop.last %},{% endif %}
 {% endfor %}{% else %}           s.internal_n
 {% endif %}           , coalesce(u.subject_n, 0) as subject_n
-    from grid_{{ analysis.token }} as g
-    left join stat_{{ analysis.token }} as s
+    from grid_&token. as g
+    left join stat_&token. as s
         on {% for group in row_group_variables %}g.{{ group.sas_name }} = s.{{ group.sas_name }}{% if not loop.last or group_variables %} and {% endif %}{% endfor %}{% for group in group_variables %}g.{{ group.sas_name }} = s.{{ group.sas_name }}{% if not loop.last %} and {% endif %}{% endfor %}
-    left join subj_{{ analysis.token }} as u
+    left join subj_&token. as u
         on {% for group in row_group_variables %}g.{{ group.sas_name }} = u.{{ group.sas_name }}{% if not loop.last or group_variables %} and {% endif %}{% endfor %}{% for group in group_variables %}g.{{ group.sas_name }} = u.{{ group.sas_name }}{% if not loop.last %} and {% endif %}{% endfor %};
 quit;
 
 {% if include_total %}
-/* Total statistics for {{ analysis.name }} within each row group */
+/* Total statistics for &var. within each row group */
 proc means data={{ source.work_member | sas_name }} noprint nway missing
     vardef=df qntldef=5 alpha={{ alpha }};
     class {% for group in row_group_variables %}{{ group.sas_name }}{% if not loop.last %} {% endif %}{% endfor %};
-    var {{ analysis.name | sas_name }};
-    output out=stat_total_{{ analysis.token }}(drop=_type_ _freq_)
+    var &var.;
+    output out=stat_total_&token.(drop=_type_ _freq_)
 {% if proc_statistics %}{% for key in proc_statistics %}        {{ key }}={{ key }}
 {% endfor %}        ;
 {% else %}        n=internal_n;
 {% endif %}run;
 
 proc sql;
-    create table subj_total_{{ analysis.token }} as
+    create table subj_total_&token. as
     select
 {% for group in row_group_variables %}        {{ group.sas_name }},{% endfor %}
         count(distinct {{ subject | sas_name }}) as subject_n
     from {{ source.work_member | sas_name }}
-    where not missing({{ analysis.name | sas_name }})
+    where not missing(&var.)
       and not missing({{ subject | sas_name }})
     group by {% for group in row_group_variables %}{{ group.sas_name }}{% if not loop.last %}, {% endif %}{% endfor %};
 quit;
 
 proc sql;
-    create table out_total_{{ analysis.token }} as
+    create table out_total_&token. as
     select r.row_ord, r.row_label, &n_col + 1 as col_ord,
            "Total" as col_label length=200, r.big_n,
 {% if proc_statistics %}{% for key in proc_statistics %}{% if key in ["n", "nmiss"] %}           coalesce(s.{{ key }}, 0) as {{ key }}{% else %}           s.{{ key }}{% endif %}{% if not loop.last %},{% endif %}
 {% endfor %}{% else %}           s.internal_n
 {% endif %}           , coalesce(u.subject_n, 0) as subject_n
     from row_pop as r
-    left join stat_total_{{ analysis.token }} as s
+    left join stat_total_&token. as s
         on {% for group in row_group_variables %}r.{{ group.sas_name }} = s.{{ group.sas_name }}{% if not loop.last %} and {% endif %}{% endfor %}
-    left join subj_total_{{ analysis.token }} as u
+    left join subj_total_&token. as u
         on {% for group in row_group_variables %}r.{{ group.sas_name }} = u.{{ group.sas_name }}{% if not loop.last %} and {% endif %}{% endfor %};
 quit;
 {% endif %}
 
 /* Put all statistics for this analysis variable into one dataset */
-data values_{{ analysis.token }};
-    set out_{{ analysis.token }}{% if include_total %} out_total_{{ analysis.token }}{% endif %};
-    length analysis $32 group $200 key1 key2 $32 value1 value2 8;
-    analysis = {{ analysis.token | sas_string }};
+data values_&token.;
+    set out_&token.{% if include_total %} out_total_&token.{% endif %};
+    length analysis $32 group $200 key1 key2 $32 value1 value2 8 row_value $200;
+    analysis = "&token.";
 {% for row in statistics %}    stat_order = {{ loop.index }};
-    output_row = (row_ord - 1) * {{ analysis_count * (statistics|length) }} + {{ (analysis.index - 1) * (statistics|length) + loop.index }};
+    output_row = (row_ord - 1) * {{ analysis_count * (statistics|length) }} + %eval(&row_base. + {{ loop.index }});
     key1 = {{ row["keys"][0] | sas_string }};
 {% if row["keys"]|length > 1 %}    key2 = {{ row["keys"][1] | sas_string }};
 {% else %}    key2 = "";
@@ -228,20 +246,59 @@ data values_{{ analysis.token }};
 {% endif %}    output;
 {% endfor %}    keep analysis stat_order output_row group col_ord big_n key1 key2 value1 value2;
 run;
-{% endfor %}
 
-/* Centralized display labels for all analysis variables and statistics */
-data pm_labels;
+/* Format this variable using its invocation-level decimal settings. */
+data values_&token.;
+    set values_&token.;
+    length row_value $200;
+    if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
+    else if key1 in ("subjects", "n", "nmiss") then row_value = "   " || strip(put(value1, best.));
+{% for row in statistics %}{% if row["keys"]|length > 1 %}    else if key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} and missing(value1) and missing(value2) then row_value = "—, —";
+    else if key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.&{{ row["keys"][0] }}_decimals.))), ifc(missing(value2), "—", strip(put(value2, 8.&{{ row["keys"][1] }}_decimals.))));
+{% elif row["keys"][0] not in ["subjects", "n", "nmiss"] %}    else if key1 = {{ row["keys"][0] | sas_string }} and missing(value1) then row_value = "—";
+    else if key1 = {{ row["keys"][0] | sas_string }} then row_value = strip(put(value1, 8.&{{ row["keys"][0] }}_decimals.));
+{% endif %}{% endfor %}    else row_value = "—";
+    keep analysis stat_order output_row group col_ord key1 key2 row_value;
+run;
+
+/* Centralized display labels for this analysis variable */
+data labels_&token.;
     length analysis $32 item $200 stat_label $40 key1 key2 $32;
-{% for analysis in analysis %}{% for row in statistics %}    analysis = {{ analysis.token | sas_string }};
+{% for row in statistics %}    analysis = "&token.";
     stat_order = {{ loop.index }};
-    item = {{ analysis.label | sas_string }};
+    item = &label.;
     stat_label = {{ row.label | sas_string }};
     key1 = {{ row["keys"][0] | sas_string }};
 {% if row["keys"]|length > 1 %}    key2 = {{ row["keys"][1] | sas_string }};
 {% else %}    key2 = "";
 {% endif %}    output;
-{% endfor %}{% endfor %}    keep analysis stat_order item stat_label key1 key2;
+{% endfor %}    keep analysis stat_order item stat_label key1 key2;
+run;
+%mend pm_vertical_analysis;
+
+{% for analysis in analysis %}%pm_vertical_analysis(
+    var={{ analysis.name | sas_name }},
+    token={{ analysis.token }},
+    label=%str({{ analysis.label | sas_string }}),
+    row_base={{ (analysis.index - 1) * (statistics|length) }},
+    mean_decimals={{ analysis.display_decimals.get("mean", 0) }},
+    std_decimals={{ analysis.display_decimals.get("std", 0) }},
+    stderr_decimals={{ analysis.display_decimals.get("stderr", 0) }},
+    median_decimals={{ analysis.display_decimals.get("median", 0) }},
+    q1_decimals={{ analysis.display_decimals.get("q1", 0) }},
+    q3_decimals={{ analysis.display_decimals.get("q3", 0) }},
+    min_decimals={{ analysis.display_decimals.get("min", 0) }},
+    max_decimals={{ analysis.display_decimals.get("max", 0) }},
+    lclm_decimals={{ analysis.display_decimals.get("lclm", 0) }},
+    uclm_decimals={{ analysis.display_decimals.get("uclm", 0) }}
+);
+{% endfor %}
+
+/* Combine the macro-produced labels and values */
+data pm_labels;
+    set
+{% for analysis in analysis %}        labels_{{ analysis.token }}
+{% endfor %};
 run;
 
 data pm_values;
@@ -259,18 +316,11 @@ proc sql;
        and v.stat_order = l.stat_order;
 quit;
 
-/* Format every statistic using backend-resolved PUT formats. */
+/* Join labels to the macro-produced display values. */
 data pm_long;
     length statistic row_value $200;
     set pm_display;
     statistic = stat_label;
-    if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
-    else if key1 in ("subjects", "n", "nmiss") then row_value = "   " || strip(put(value1, best.));
-{% for analysis in analysis %}{% for row in analysis.format_rows %}{% if row["keys"]|length > 1 %}    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} and missing(value1) and missing(value2) then row_value = "—, —";
-    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.{{ row["decimals"][0] }}))), ifc(missing(value2), "—", strip(put(value2, 8.{{ row["decimals"][1] }}))));
-{% else %}    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and missing(value1) then row_value = "—";
-    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} then row_value = strip(put(value1, 8.{{ row["decimals"][0] }}));
-{% endif %}{% endfor %}{% endfor %}    else row_value = "—";
     keep output_row group item statistic col_ord row_value;
 run;
 
@@ -303,7 +353,7 @@ proc datasets library=work nolist;
     delete {{ source.work_member | sas_name }}{% if not population_source.reuse_analysis_data %} {{ population_source.work_member | sas_name }}{% endif %}
         row0 row row_pop col0 col col_n
         pm_labels pm_values pm_display pm_long
-{% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} grid_{{ analysis.token }} out_{{ analysis.token }} values_{{ analysis.token }}
+{% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} grid_{{ analysis.token }} out_{{ analysis.token }} values_{{ analysis.token }} labels_{{ analysis.token }}
 {% if include_total %}        stat_total_{{ analysis.token }} subj_total_{{ analysis.token }} out_total_{{ analysis.token }}
 {% endif %}{% endfor %};
 quit;

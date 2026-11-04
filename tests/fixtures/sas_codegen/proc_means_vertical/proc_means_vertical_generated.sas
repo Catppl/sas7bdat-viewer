@@ -51,13 +51,31 @@ run;
 
 
 
-
-/* Statistics for AGE */
+/* One reusable macro per analysis variable.  Variable-specific settings are
+   visible at the invocation lines below, so adding another variable does not
+   duplicate the PROC MEANS implementation. */
+%macro pm_vertical_analysis(
+    var=,
+    token=,
+    label=,
+    row_base=,
+    mean_decimals=,
+    std_decimals=,
+    stderr_decimals=,
+    median_decimals=,
+    q1_decimals=,
+    q3_decimals=,
+    min_decimals=,
+    max_decimals=,
+    lclm_decimals=,
+    uclm_decimals=
+);
+/* Statistics for &var. */
 proc means data=adlb noprint nway missing
     vardef=df qntldef=5 alpha=0.05;
     class TRT01A;
-    var AGE;
-    output out=stat_age(drop=_type_ _freq_)
+    var &var.;
+    output out=stat_&token.(drop=_type_ _freq_)
         n=n
         mean=mean
         std=std
@@ -71,14 +89,14 @@ proc means data=adlb noprint nway missing
         ;
 run;
 
-/* Distinct subject count for AGE */
+/* Distinct subject count for &var. */
 proc sql;
-    create table subj_age as
+    create table subj_&token. as
     select
         TRT01A,
         count(distinct USUBJID) as subject_n
     from adlb
-    where not missing(AGE)
+    where not missing(&var.)
       and not missing(USUBJID)
     group by TRT01A
 ;
@@ -86,24 +104,24 @@ quit;
 
 /* Align statistics with runtime group order */
 proc sql;
-    create table out_age as
+    create table out_&token. as
     select g.trt_ord,
            s.*,
            coalesce(u.subject_n, 0) as subject_n
     from trt as g
-    left join stat_age as s
+    left join stat_&token. as s
         on g.TRT01A = s.TRT01A
-    left join subj_age as u
+    left join subj_&token. as u
         on g.TRT01A = u.TRT01A
     order by g.trt_ord;
 quit;
 
 
-/* Total statistics for AGE */
+/* Total statistics for &var. */
 proc means data=adlb noprint
     vardef=df qntldef=5 alpha=0.05;
-    var AGE;
-    output out=total_age(drop=_type_ _freq_)
+    var &var.;
+    output out=total_&token.(drop=_type_ _freq_)
         n=n
         mean=mean
         std=std
@@ -118,68 +136,68 @@ proc means data=adlb noprint
 run;
 
 proc sql;
-    create table total_age_n as
+    create table total_&token._n as
     select count(distinct USUBJID) as subject_n
     from adlb
     where not missing(USUBJID);
 quit;
 
-data total_age_row;
-    merge total_age total_age_n;
+data total_&token._row;
+    merge total_&token. total_&token._n;
     trt_ord = 4;
 
 run;
 
 
 /* Put all statistics for this analysis variable into one dataset */
-data values_age;
-    set out_age total_age_row;
-    length analysis $32 key1 key2 $32 value1 value2 8;
-    analysis = 'age';
+data values_&token.;
+    set out_&token. total_&token._row;
+    length analysis $32 key1 key2 $32 value1 value2 8 row_value $200;
+    analysis = "&token.";
     stat_order = 1;
-    row_ord = 1;
+    row_ord = %eval(&row_base. + 1);
     key1 = 'n';
     key2 = "";
     value1 = n;
     value2 = .;
     output;
     stat_order = 2;
-    row_ord = 2;
+    row_ord = %eval(&row_base. + 2);
     key1 = 'mean';
     key2 = "";
     value1 = mean;
     value2 = .;
     output;
     stat_order = 3;
-    row_ord = 3;
+    row_ord = %eval(&row_base. + 3);
     key1 = 'std';
     key2 = "";
     value1 = std;
     value2 = .;
     output;
     stat_order = 4;
-    row_ord = 4;
+    row_ord = %eval(&row_base. + 4);
     key1 = 'median';
     key2 = "";
     value1 = median;
     value2 = .;
     output;
     stat_order = 5;
-    row_ord = 5;
+    row_ord = %eval(&row_base. + 5);
     key1 = 'q1';
     key2 = 'q3';
     value1 = q1;
     value2 = q3;
     output;
     stat_order = 6;
-    row_ord = 6;
+    row_ord = %eval(&row_base. + 6);
     key1 = 'min';
     key2 = 'max';
     value1 = min;
     value2 = max;
     output;
     stat_order = 7;
-    row_ord = 7;
+    row_ord = %eval(&row_base. + 7);
     key1 = 'lclm';
     key2 = 'uclm';
     value1 = lclm;
@@ -188,60 +206,107 @@ data values_age;
     keep analysis stat_order row_ord trt_ord subject_n key1 key2 value1 value2;
 run;
 
+/* Format this variable using its invocation-level decimal settings. */
+data values_&token.;
+    set values_&token.;
+    length row_value $200;
+    if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
+    else if key1 in ("subjects", "n", "nmiss") then row_value = "   " || strip(put(value1, best.));
+    else if key1 = 'mean' and missing(value1) then row_value = "—";
+    else if key1 = 'mean' then row_value = strip(put(value1, 8.&mean_decimals.));
+    else if key1 = 'std' and missing(value1) then row_value = "—";
+    else if key1 = 'std' then row_value = strip(put(value1, 8.&std_decimals.));
+    else if key1 = 'median' and missing(value1) then row_value = "—";
+    else if key1 = 'median' then row_value = strip(put(value1, 8.&median_decimals.));
+    else if key1 = 'q1' and key2 = 'q3' and missing(value1) and missing(value2) then row_value = "—, —";
+    else if key1 = 'q1' and key2 = 'q3' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.&q1_decimals.))), ifc(missing(value2), "—", strip(put(value2, 8.&q3_decimals.))));
+    else if key1 = 'min' and key2 = 'max' and missing(value1) and missing(value2) then row_value = "—, —";
+    else if key1 = 'min' and key2 = 'max' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.&min_decimals.))), ifc(missing(value2), "—", strip(put(value2, 8.&max_decimals.))));
+    else if key1 = 'lclm' and key2 = 'uclm' and missing(value1) and missing(value2) then row_value = "—, —";
+    else if key1 = 'lclm' and key2 = 'uclm' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.&lclm_decimals.))), ifc(missing(value2), "—", strip(put(value2, 8.&uclm_decimals.))));
+    else row_value = "—";
+    keep analysis stat_order row_ord trt_ord key1 key2 row_value;
+run;
 
-/* Centralized display labels for all analysis variables and statistics */
-data pm_labels;
+/* Centralized display labels for this analysis variable */
+data labels_&token.;
     length analysis $32 item $200 stat_label $40 key1 key2 $32;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 1;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = 'n';
     key1 = 'n';
     key2 = "";
     output;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 2;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = 'Mean';
     key1 = 'mean';
     key2 = "";
     output;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 3;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = 'Std';
     key1 = 'std';
     key2 = "";
     output;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 4;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = 'Median';
     key1 = 'median';
     key2 = "";
     output;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 5;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = 'Q1, Q3';
     key1 = 'q1';
     key2 = 'q3';
     output;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 6;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = 'Min, Max';
     key1 = 'min';
     key2 = 'max';
     output;
-    analysis = 'age';
+    analysis = "&token.";
     stat_order = 7;
-    item = 'Age (years)';
+    item = &label.;
     stat_label = '95% CI Mean';
     key1 = 'lclm';
     key2 = 'uclm';
     output;
     keep analysis stat_order item stat_label key1 key2;
+run;
+%mend pm_vertical_analysis;
+
+%pm_vertical_analysis(
+    var=AGE,
+    token=age,
+    label=%str('Age (years)'),
+    row_base=0,
+    mean_decimals=1,
+    std_decimals=2,
+    stderr_decimals=0,
+    median_decimals=1,
+    q1_decimals=1,
+    q3_decimals=1,
+    min_decimals=0,
+    max_decimals=0,
+    lclm_decimals=1,
+    uclm_decimals=1
+);
+
+
+/* Combine the macro-produced labels and values */
+data pm_labels;
+    set
+        labels_age
+;
 run;
 
 data pm_values;
@@ -259,26 +324,11 @@ proc sql;
        and v.stat_order = l.stat_order;
 quit;
 
-/* Format every statistic using backend-resolved PUT formats. */
+/* Join labels to the macro-produced display values. */
 data pm_long;
     length stat row_value $200;
     set pm_display;
     stat = stat_label;
-    if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
-    else if key1 in ("subjects", "n", "nmiss") then row_value = "   " || strip(put(value1, best.));
-    else if analysis = 'age' and key1 = 'mean' and missing(value1) then row_value = "—";
-    else if analysis = 'age' and key1 = 'mean' then row_value = strip(put(value1, 8.1));
-    else if analysis = 'age' and key1 = 'std' and missing(value1) then row_value = "—";
-    else if analysis = 'age' and key1 = 'std' then row_value = strip(put(value1, 8.2));
-    else if analysis = 'age' and key1 = 'median' and missing(value1) then row_value = "—";
-    else if analysis = 'age' and key1 = 'median' then row_value = strip(put(value1, 8.1));
-    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' and missing(value1) and missing(value2) then row_value = "—, —";
-    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
-    else if analysis = 'age' and key1 = 'min' and key2 = 'max' and missing(value1) and missing(value2) then row_value = "—, —";
-    else if analysis = 'age' and key1 = 'min' and key2 = 'max' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.0))), ifc(missing(value2), "—", strip(put(value2, 8.0))));
-    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' and missing(value1) and missing(value2) then row_value = "—, —";
-    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
-    else row_value = "—";
     keep row_ord item stat trt_ord row_value;
 run;
 
@@ -309,7 +359,7 @@ run;
 proc datasets library=work nolist;
     delete adlb adsl
         trt0 trt pm_labels pm_values pm_display pm_long
-        stat_age subj_age out_age values_age
+        stat_age subj_age out_age values_age labels_age
         total_age total_age_n total_age_row
 ;
 quit;
