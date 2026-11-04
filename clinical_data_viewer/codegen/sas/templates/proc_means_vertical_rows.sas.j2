@@ -33,19 +33,9 @@ run;
 {% endif %}
 
 proc sql noprint;
-{% for count in population_counts %}    select count(distinct {{ subject | sas_name }})
-        into :{{ count.macro }}
-    from {{ population_source.work_member | sas_name }}{% if population_treatment %}
-    where {{ population_treatment | sas_name }} = {{ count.population_literal }}{% endif %};
-{% endfor %}{% if population_treatment %}    select count(distinct {{ subject | sas_name }})
-        into :{{ total_n_macro }}
-    from {{ population_source.work_member | sas_name }}
-    where not missing({{ population_treatment | sas_name }});
+{% for count in population_counts %}    select count(distinct {{ subject | sas_name }}) into :{{ count.macro }} trimmed from {{ population_source.work_member | sas_name }}{% if population_treatment %} where {{ population_treatment | sas_name }} = {{ count.population_literal }}{% endif %};
+{% endfor %}{% if population_treatment %}    select count(distinct {{ subject | sas_name }}) into :{{ total_n_macro }} trimmed from {{ population_source.work_member | sas_name }} where not missing({{ population_treatment | sas_name }});
 {% endif %}quit;
-
-{% for count in population_counts %}%let {{ count.macro }}=&{{ count.macro }};
-{% endfor %}{% if population_treatment %}%let {{ total_n_macro }}=&{{ total_n_macro }};
-{% endif %}
 
 /* Runtime row-group order */
 proc sql;
@@ -56,10 +46,10 @@ proc sql;
 quit;
 
 data row;
-    set row0;
     length row_label $200;
 {% for group in row_group_variables %}    length r{{ group.index }}_key r{{ group.index }}_label $200;
-{% if group.kind == "numeric" %}    if missing({{ group.sas_name }}) then do;
+{% endfor %}    set row0;
+{% for group in row_group_variables %}{% if group.kind == "numeric" %}    if missing({{ group.sas_name }}) then do;
         r{{ group.index }}_label = "(Missing)";
         r{{ group.index }}_key = "";
     end;
@@ -93,10 +83,10 @@ proc sql;
 quit;
 
 data col;
-    set col0;
     length col_label $200;
 {% for group in group_variables %}    length g{{ group.index }}_key g{{ group.index }}_label $200;
-{% if group.kind == "numeric" %}    if missing({{ group.sas_name }}) then do;
+{% endfor %}    set col0;
+{% for group in group_variables %}{% if group.kind == "numeric" %}    if missing({{ group.sas_name }}) then do;
         g{{ group.index }}_label = "(Missing)";
         g{{ group.index }}_key = "";
     end;
@@ -324,24 +314,24 @@ quit;
 
 /* Format every statistic in one display step */
 data pm_long;
-    length statistic display $200;
+    length statistic row_value $200;
     set pm_display;
     statistic = stat_label;
     if key2 = "" then do;
         if key1 in ("subjects", "n", "nmiss") then
-            display = strip(put(value1, 12.));
+            row_value = strip(put(value1, 12.));
         else if missing(value1) then
-            display = "—";
+            row_value = "—";
         else
-            display = strip(putn(value1, cats("32.", dec1)));
+            row_value = strip(putn(value1, cats("32.", dec1)));
     end;
     else if missing(value1) and missing(value2) then
-        display = "—, —";
+        row_value = "—, —";
     else
-        display = catx(", ",
+        row_value = catx(", ",
             ifc(missing(value1), "—", strip(putn(value1, cats("32.", dec1)))),
             ifc(missing(value2), "—", strip(putn(value2, cats("32.", dec2)))));
-    keep output_row group item statistic col_ord display;
+    keep output_row group item statistic col_ord row_value;
 run;
 
 proc sort data=pm_long;
@@ -351,7 +341,7 @@ run;
 proc transpose data=pm_long out={{ output_dataset }}(drop=_name_ output_row) prefix=col;
     by output_row group item statistic;
     id col_ord;
-    var display;
+    var row_value;
 run;
 
 /* Apply readable labels to the generated columns */

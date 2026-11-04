@@ -56,7 +56,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("stat_chg", code)
         self.assertIn("proc transpose", code)
         self.assertIn("work.pm_vertical", code)
-        self.assertIn("grp_ord", code)
+        self.assertIn("trt_ord", code)
+        self.assertNotIn("%let n1=&n1;", code)
         self.assertNotIn("resolved_hierarchy", code)
         self.assertNotIn("proc_means_vertical_analysis_variable", code)
 
@@ -99,7 +100,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("data adlb;", code)
         self.assertIn("data adsl;", code)
         self.assertIn("set analysis.adsl;", code)
-        self.assertIn("into :n1\n    from adsl\n    where", code)
+        self.assertIn("into :n1 trimmed from adsl where", code)
         self.assertNotIn("libname analysis ", code)
 
     def test_same_population_source_with_different_filter_uses_pop_suffix(
@@ -128,7 +129,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("data adlb;", code)
         self.assertIn("data adlb_pop;", code)
         self.assertIn("where TRT01A = 'A';", code)
-        self.assertIn("into :n1\n    from adlb_pop\n    where", code)
+        self.assertIn("into :n1 trimmed from adlb_pop where", code)
 
     def test_generator_rejects_xpt_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -145,29 +146,20 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
                 self._configuration(Path(temporary))
             )
         self.assertIn(
-            "select count(distinct USUBJID)\n"
-            "        into :n1\n"
-            "    from adlb\n"
-            "    where TRT01A = 'A';",
+            "select count(distinct USUBJID) into :n1 trimmed from adlb where TRT01A = 'A';",
             code,
         )
         self.assertIn(
-            "select count(distinct USUBJID)\n"
-            "        into :n2\n"
-            "    from adlb\n"
-            "    where TRT01A = 'B';",
+            "select count(distinct USUBJID) into :n2 trimmed from adlb where TRT01A = 'B';",
             code,
         )
         self.assertIn(
-            "select count(distinct USUBJID)\n"
-            "        into :nt\n"
-            "    from adlb\n"
-            "    where not missing(TRT01A);",
+            "select count(distinct USUBJID) into :nt trimmed from adlb where not missing(TRT01A);",
             code,
         )
-        self.assertIn("%let n1=&n1;", code)
-        self.assertIn("%let n2=&n2;", code)
-        self.assertIn("%let nt=&nt;", code)
+        self.assertNotIn("%let n1=&n1;", code)
+        self.assertNotIn("%let n2=&n2;", code)
+        self.assertNotIn("%let nt=&nt;", code)
         self.assertNotIn("create table pop_n", code)
         self.assertNotIn("create table pop_total", code)
         self.assertNotIn("trt_key", code)
@@ -214,12 +206,10 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         code = SasProcMeansVerticalGenerator().generate(configuration)
 
         self.assertIn(
-            "select count(distinct USUBJID)\n"
-            "        into :n1\n"
-            "    from adlb;",
+            "select count(distinct USUBJID) into :n1 trimmed from adlb;",
             code,
         )
-        self.assertIn("%let n1=&n1;", code)
+        self.assertNotIn("%let n1=&n1;", code)
         self.assertNotIn("into :nt", code)
         self.assertIn("big_n = &n1;", code)
 
@@ -250,6 +240,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("by output_row group item statistic", code)
         self.assertIn("prefix=col", code)
         self.assertIn("data pm_decimals;", code)
+        self.assertIn("length statistic row_value $200;", code)
+        self.assertIn("var row_value;", code)
         self.assertNotIn("data long_aval_", code)
         self.assertNotIn("resolved_hierarchy", code)
 

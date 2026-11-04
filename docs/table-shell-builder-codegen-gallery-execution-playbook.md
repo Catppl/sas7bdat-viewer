@@ -628,6 +628,59 @@ disp_dec
 - 不得使用 `resolved_hierarchy` 固定数据驱动表的未来排序；
 - numeric variables 用 raw numeric semantics，不用 `vvalue()` 把 formatted text 当 grouping key。
 
+### 12.6 Codegen Review Fixture
+
+每个 Table Builder 的 SAS code review fixture 统一放在：
+
+```text
+tests/fixtures/sas_codegen/<table_type>/
+```
+
+每个 table 类型至少保留一份配置 JSON 和一份由正式 Generator 生成的 SAS 程序：
+
+```text
+tests/fixtures/sas_codegen/<table_type>/
+├── <table_type>_config.json
+└── <table_type>_generated.sas
+```
+
+例如 PROC MEANS Vertical：
+
+```text
+tests/fixtures/sas_codegen/proc_means_vertical/
+├── proc_means_vertical_config.json
+└── proc_means_vertical_generated.sas
+```
+
+规则：
+
+- JSON 是该 review fixture 的唯一业务输入；
+- `.sas` 必须通过正式的 Jinja2 Generator 重新生成，不手工维护生成结果；
+- fixture 应覆盖代表性的 source、population、filter、分组、Total、统计量和小数位设置；
+- 新增其他 table 时，沿用相同目录和命名规则，例如 `baseline_characteristics/`、`shift_table/`；
+- 生成的 SAS 用于人工 review 或外部 SAS 环境验证；本地没有 SAS runtime 时，必须明确只完成 codegen 验证。
+
+推荐生成命令：
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+from clinical_data_viewer.codegen.sas import SasProcMeansVerticalGenerator
+
+fixture_dir = Path("tests/fixtures/sas_codegen/proc_means_vertical")
+configuration = json.loads(
+    (fixture_dir / "proc_means_vertical_config.json").read_text(encoding="utf-8")
+)
+code = SasProcMeansVerticalGenerator().generate(configuration)
+(fixture_dir / "proc_means_vertical_generated.sas").write_text(
+    code, encoding="utf-8"
+)
+PY
+```
+
+后续模块只需要替换 Generator、目录名和文件名，不要重新设计 fixture 位置。
+
 ## 13. Gallery 接入
 
 ### 13.1 注册卡片

@@ -1,0 +1,160 @@
+{
+  "type": "proc_means_vertical",
+  "version": 1,
+  "input": {
+    "kind": "sas",
+    "format": "sas7bdat",
+    "dataset": "ADLB",
+    "source_path": "/data/analysis/adam/adlb.sas7bdat",
+    "source_directory": "/data/analysis/adam"
+  },
+  "population": {
+    "input": {
+      "kind": "sas",
+      "format": "sas7bdat",
+      "dataset": "ADSL",
+      "source_path": "/data/analysis/adam/adsl.sas7bdat",
+      "source_directory": "/data/analysis/adam"
+    },
+    "variables": {
+      "USUBJID": {
+        "type": "character",
+        "label": "Subject Identifier",
+        "length": 40,
+        "format": ""
+      },
+      "TRT01A": {
+        "type": "character",
+        "label": "Treatment",
+        "length": 40,
+        "format": ""
+      },
+      "SAFFL": {
+        "type": "character",
+        "label": "Safety Population Flag",
+        "length": 1,
+        "format": ""
+      }
+    },
+    "filter": {
+      "language": "sas_like",
+      "text": "SAFFL = \"Y\"",
+      "ast": {
+        "type": "comparison",
+        "variable": "SAFFL",
+        "operator": "=",
+        "prefix": false,
+        "operand": {
+          "type": "literal",
+          "value": "Y"
+        }
+      }
+    }
+  },
+  "variables": {
+    "analysis": ["AGE"],
+    "group": ["TRT01A"],
+    "row_group": [],
+    "treatment": "TRT01A",
+    "population_treatment": "TRT01A"
+  },
+  "variable_metadata": {
+    "USUBJID": {
+      "type": "character",
+      "label": "Subject Identifier",
+      "length": 40,
+      "format": ""
+    },
+    "TRT01A": {
+      "type": "character",
+      "label": "Treatment",
+      "length": 40,
+      "format": ""
+    },
+    "SAFFL": {
+      "type": "character",
+      "label": "Safety Population Flag",
+      "length": 1,
+      "format": ""
+    },
+    "AGE": {
+      "type": "numeric",
+      "label": "Age",
+      "length": 8,
+      "format": ""
+    }
+  },
+  "dataset_filter": {
+    "language": "sas_like",
+    "text": "SAFFL = \"Y\"",
+    "ast": {
+      "type": "comparison",
+      "variable": "SAFFL",
+      "operator": "=",
+      "prefix": false,
+      "operand": {
+        "type": "literal",
+        "value": "Y"
+      }
+    }
+  },
+  "item": {
+    "labels": {
+      "age": "Age (years)"
+    },
+    "order": ["AGE"]
+  },
+  "statistics": [
+    "n",
+    "mean",
+    "std",
+    "median",
+    "q1",
+    "q3",
+    "min",
+    "max",
+    "lclm",
+    "uclm"
+  ],
+  "total": {
+    "enabled": true,
+    "method": "recompute"
+  },
+  "display": {
+    "layout": "vertical",
+    "rounding": "half_up",
+    "maximum_decimals": 4,
+    "base_decimals": {
+      "AGE": 0
+    },
+    "statistic_decimals": {
+      "mean": 1,
+      "std": 2,
+      "median": 1,
+      "q1": 1,
+      "q3": 1,
+      "min": 0,
+      "max": 0
+    }
+  },
+  "calculation": {
+    "reference_engine": "python_proc_means_vertical_v1",
+    "confidence": 0.95,
+    "alpha": 0.05,
+    "n": "nonmissing_analysis_records",
+    "N": "distinct_subjects_from_population",
+    "total_method": "recompute_distinct_subjects"
+  },
+  "targets": {
+    "sas": {
+      "source_library": "analysis",
+      "source_member": "adlb",
+      "population_library": "analysis",
+      "population_member": "adsl",
+      "output_dataset": "work.pm_vertical_review"
+    }
+  },
+  "_runtime": {
+    "population_levels": ["Placebo", "Drug A", "Drug B"]
+  }
+}
