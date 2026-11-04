@@ -49,9 +49,7 @@ run;
 
 
 
-proc sql noprint;
-    select coalesce(max(trt_ord), 0) into :n_trt trimmed from trt;
-quit;
+
 
 
 /* Statistics for AGE */
@@ -128,7 +126,8 @@ quit;
 
 data total_age_row;
     merge total_age total_age_n;
-    trt_ord = &n_trt + 1;
+    trt_ord = 4;
+
 run;
 
 
@@ -301,7 +300,8 @@ data work.pm_vertical_review;
         col1 = "Placebo (N=&n1)"
         col2 = "Drug A (N=&n2)"
         col3 = "Drug B (N=&n3)"
-        col%eval(&n_trt + 1) = "Total (N=&nt)"
+        col4 = "Total (N=&nt)"
+
 ;
 run;
 

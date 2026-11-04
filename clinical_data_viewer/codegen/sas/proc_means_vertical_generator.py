@@ -452,6 +452,13 @@ class SasProcMeansVerticalGenerator:
                 if row["keys"][0] not in {"subjects", "n", "nmiss"}
             ]
 
+        include_total = bool(configuration.get("total", {}).get("enabled", True))
+        static_total_ord = None
+        if include_total and (
+            not group_names or (len(group_names) == 1 and treatment_group)
+        ):
+            static_total_ord = len(population_counts) + 1
+
         return {
             "version": 1,
             "source": {
@@ -488,7 +495,8 @@ class SasProcMeansVerticalGenerator:
             "statistic_keys": statistics,
             "proc_statistics": [key for key in statistics if key != "subjects"],
             "offsets": offsets,
-            "include_total": bool(configuration.get("total", {}).get("enabled", True)),
+            "include_total": include_total,
+            "static_total_ord": static_total_ord,
             "treatment": treatment_name,
             "population_treatment": population_treatment_name if treatment_name else "",
             "population_counts": population_counts,

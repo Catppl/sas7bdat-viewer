@@ -75,9 +75,10 @@ data trt;
 run;
 {% endif %}
 
-proc sql noprint;
+{% if not static_total_ord %}proc sql noprint;
     select coalesce(max(trt_ord), 0) into :n_trt trimmed from trt;
 quit;
+{% endif %}
 
 {% for analysis in analysis %}
 /* Statistics for {{ analysis.name }} */
@@ -140,7 +141,9 @@ quit;
 
 data total_{{ analysis.token }}_row;
     merge total_{{ analysis.token }} total_{{ analysis.token }}_n;
-    trt_ord = &n_trt + 1;
+{% if static_total_ord %}    trt_ord = {{ static_total_ord }};
+{% else %}    trt_ord = &n_trt + 1;
+{% endif %}
 run;
 {% endif %}
 
@@ -224,7 +227,9 @@ data {{ output_dataset }};
         item = "Item"
         stat = "Statistic"
 {% for count in population_counts %}        col{{ loop.index }} = {{ count.label | sas_label }}
-{% endfor %}{% if include_total %}        col%eval(&n_trt + 1) = "Total (N=&{{ total_n_macro }})"
+{% endfor %}{% if include_total %}{% if static_total_ord %}        col{{ static_total_ord }} = "Total (N=&{{ total_n_macro }})"
+{% else %}        col%eval(&n_trt + 1) = "Total (N=&{{ total_n_macro }})"
+{% endif %}
 {% endif %};
 run;
 

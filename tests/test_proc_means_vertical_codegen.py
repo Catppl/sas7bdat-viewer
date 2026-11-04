@@ -59,12 +59,32 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("trt_ord", code)
         self.assertIn("if TRT01A = 'A' then trt_ord = 1;", code)
         self.assertIn("else if TRT01A = 'B' then trt_ord = 2;", code)
+        self.assertNotIn("select coalesce(max(trt_ord), 0) into :n_trt", code)
+        self.assertIn("trt_ord = 3;", code)
+        self.assertIn('col3 = "Total (N=&nt)"', code)
         self.assertNotIn("length trt_key $200;", code)
         self.assertNotIn("trt_value", code)
         self.assertNotIn("proc sort data=trt;", code)
         self.assertNotIn("trt1_value", code)
         self.assertNotIn("%let n1=&n1;", code)
         self.assertNotIn("resolved_hierarchy", code)
+
+    def test_dynamic_multi_group_layout_keeps_runtime_total_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = self._configuration(Path(temporary))
+        configuration["variable_metadata"]["AVISIT"] = {
+            "type": "character",
+            "label": "Analysis Visit",
+            "length": 40,
+            "format": "",
+        }
+        configuration["variables"]["group"] = ["TRT01A", "AVISIT"]
+
+        code = SasProcMeansVerticalGenerator().generate(configuration)
+
+        self.assertIn("select coalesce(max(trt_ord), 0) into :n_trt", code)
+        self.assertIn("trt_ord = &n_trt + 1;", code)
+        self.assertIn('col%eval(&n_trt + 1) = "Total (N=&nt)"', code)
         self.assertNotIn("proc_means_vertical_analysis_variable", code)
 
     def test_explicit_same_population_source_and_filter_are_reused(self) -> None:
