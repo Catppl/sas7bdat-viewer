@@ -57,14 +57,14 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("where saffl = 'y'", folded)
         self.assertIn("count(distinct", folded)
         self.assertIn("proc means", folded)
-        self.assertIn("put(n,3.)", folded)
+        self.assertIn("put(n,best.)", folded)
         self.assertIn("vardef=df qntldef=5", folded)
         self.assertIn("if sex='f' then sort_rank=1", folded)
         self.assertIn("if ^missing(sex);", folded)
         self.assertNotIn("if missing(sex) then", folded)
         self.assertNotIn("vvalue(", folded)
         self.assertNotIn("putn(", folded)
-        self.assertIn("put(round(raw_value_1,0.1),8.1)", folded)
+        self.assertIn("put(raw_value_1,8.&mean_decimals.)", folded)
         self.assertIn("select usubjid into :duplicate_subject_ids separated by ', '", folded)
         self.assertIn("duplicate usubjid values: &duplicate_subject_ids.", folded)
         self.assertIn("missing usubjid at source observation", folded)
@@ -81,6 +81,12 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("work.baseline_characteristics_long", folded)
         self.assertIn("work.baseline_characteristics", folded)
         self.assertNotIn("delete baseline_characteristics", folded)
+        self.assertNotIn("proc append", folded)
+        self.assertNotIn("stop;", folded)
+        self.assertIn(
+            "set\n    work.adsl_item_1\n    work.adsl_item_2",
+            folded,
+        )
 
     def test_rejects_merge_and_character_continuous_item(self) -> None:
         configuration = self.configuration()
@@ -154,6 +160,11 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn('trt_3="total (n=&nt)"', folded)
         self.assertIn("where saffl = 'y' and ^missing(trt);", folded)
         self.assertNotIn("if ^missing(trt);", folded)
+        self.assertIn("noprint nway missing", folded)
+        self.assertIn("n=n", folded)
+        self.assertIn("%macro baseline_continuous(", folded)
+        self.assertIn("%baseline_continuous(", folded)
+        self.assertIn("include_total=1", folded)
         self.assertIn("select usubjid into :duplicate_subject_ids separated by ', '", folded)
         self.assertIn("duplicate usubjid values: &duplicate_subject_ids.", folded)
         for legacy_length in ("$12", "$16", "$32", "$80", "$256", "$320", "$400"):
@@ -161,14 +172,20 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("data _null_;", folded)
         self.assertNotIn("vvalue(", folded)
         self.assertNotIn("putn(", folded)
-        self.assertIn("put(round(mean,0.1),8.1)", folded)
+        self.assertIn("put(mean,8.&mean_decimals.)", folded)
         self.assertNotIn("_bc_", folded)
         self.assertIn("big_n=&n1", folded)
         self.assertIn("big_n=&n2", folded)
         self.assertIn('"total"', folded)
-        self.assertIn("adsl_stat_total_1", folded)
-        self.assertIn("adsl_stat_all_1", folded)
+        self.assertIn("&work_prefix._stat_total_&token.", folded)
+        self.assertIn("&work_prefix._stat_all_&token.", folded)
         self.assertIn('"total"', folded)
+        self.assertNotIn("proc append", folded)
+        self.assertNotIn("stop;", folded)
+        self.assertIn(
+            "set\n    work.adsl_item_1",
+            folded,
+        )
         self.assertIn("from analysis.adsl", folded)
         self.assertNotIn("_bc_population", folded)
         self.assertNotIn("treatment columns is not available", folded)

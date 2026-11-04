@@ -71,11 +71,119 @@ quit;
 %validate_subjects;
 
 /* Long rows are calculated once, then transposed to treatment columns. */
-data work.adsl_long;
-  length row_order item_order 8 row_label $200 row_value $200
-         trt_order 8 trt_label $200;
-  stop;
+
+%macro baseline_continuous(
+    var=,
+    token=,
+    label=,
+    work_prefix=,
+    include_total=0,
+    include_n=0,
+    include_mean=0,
+    include_std=0,
+    include_median=0,
+    include_q1_q3=0,
+    include_min_max=0,
+    mean_decimals=0,
+    std_decimals=0,
+    median_decimals=0,
+    q1_decimals=0,
+    q3_decimals=0,
+    min_decimals=0,
+    max_decimals=0
+);
+proc means data=work.&work_prefix._source noprint nway missing
+    vardef=df qntldef=5;
+  class trt_key;
+  var &var.;
+  output out=work.&work_prefix._stat_&token.(drop=_type_ _freq_)
+%if &include_n %then %do;    n=n
+%end;%if &include_mean %then %do;    mean=mean
+%end;%if &include_std %then %do;    std=std
+%end;%if &include_median %then %do;    median=median
+%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
+%end;%if &include_min_max %then %do;    min=min max=max
+%end;    ;
 run;
+%if &include_total %then %do;
+proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
+  var &var.;
+  output out=work.&work_prefix._stat_total_&token.(drop=_type_ _freq_)
+%if &include_n %then %do;    n=n
+%end;%if &include_mean %then %do;    mean=mean
+%end;%if &include_std %then %do;    std=std
+%end;%if &include_median %then %do;    median=median
+%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
+%end;%if &include_min_max %then %do;    min=min max=max
+%end;    ;
+run;
+
+data work.&work_prefix._stat_total_&token.;
+  length trt_key $200;
+  set work.&work_prefix._stat_total_&token.;
+  trt_key="TOTAL";
+run;
+
+data work.&work_prefix._stat_all_&token.;
+  set work.&work_prefix._stat_&token. work.&work_prefix._stat_total_&token.;
+run;
+%end;
+
+proc sql;
+  create table work.&work_prefix._cont_&token. as
+  select t.trt_order, t.trt_label, t.big_n
+%if &include_n %then %do;         , s.n
+%end;%if &include_mean %then %do;         , s.mean
+%end;%if &include_std %then %do;         , s.std
+%end;%if &include_median %then %do;         , s.median
+%end;%if &include_q1_q3 %then %do;         , s.q1, s.q3
+%end;%if &include_min_max %then %do;         , s.min, s.max
+%end;  from work.&work_prefix._trt as t
+%if &include_total %then %do;  left join work.&work_prefix._stat_all_&token. as s
+%end;%else %do;  left join work.&work_prefix._stat_&token. as s
+%end;
+    on t.trt_key=s.trt_key
+  order by t.trt_order;
+quit;
+
+data work.&work_prefix._item_&token.;
+  length row_order item_order 8 row_label $200 row_value $200
+         trt_order 8 trt_label $200 cnt1 cnt2 $200;
+  row_order=&token.*100000; item_order=&token.;
+  row_label=&label.; row_value="";
+  trt_order=1; trt_label=""; output;
+  set work.&work_prefix._cont_&token.;
+  item_order=&token.; trt_label=trt_label;
+%if &include_n %then %do;  row_order=&token.*100000+1; row_label="    n";
+  row_value=strip(put(n,best.)); output;
+%end;%if &include_mean %then %do;  row_order=&token.*100000+2; row_label="    Mean";
+  row_value=strip(put(mean,8.&mean_decimals.));
+  if missing(mean) then row_value="-";
+  output;
+%end;%if &include_std %then %do;  row_order=&token.*100000+3; row_label="    SD";
+  row_value=strip(put(std,8.&std_decimals.));
+  if missing(std) then row_value="-";
+  output;
+%end;%if &include_median %then %do;  row_order=&token.*100000+4; row_label="    Median";
+  row_value=strip(put(median,8.&median_decimals.));
+  if missing(median) then row_value="-";
+  output;
+%end;%if &include_q1_q3 %then %do;  row_order=&token.*100000+5; row_label="    Q1, Q3";
+  cnt1=strip(put(q1,8.&q1_decimals.));
+  cnt2=strip(put(q3,8.&q3_decimals.));
+  if missing(q1) then cnt1="-";
+  if missing(q3) then cnt2="-";
+  row_value=cats(cnt1,", ",cnt2); output;
+%end;%if &include_min_max %then %do;  row_order=&token.*100000+6; row_label="    Min, Max";
+  cnt1=strip(put(min,8.&min_decimals.));
+  cnt2=strip(put(max,8.&max_decimals.));
+  if missing(min) then cnt1="-";
+  if missing(max) then cnt2="-";
+  row_value=cats(cnt1,", ",cnt2); output;
+%end;  keep row_order item_order row_label row_value trt_order trt_label;
+run;
+
+%mend baseline_continuous;
 
 /* Categorical item: Sex */
 data work.adsl_cat_source_1;
@@ -146,139 +254,57 @@ data work.adsl_item_1;
   output;
 run;
 
-proc append base=work.adsl_long data=work.adsl_item_1 force; run;
-
 /* Continuous item: Age (years) */
-proc means data=work.adsl_source noprint vardef=df qntldef=5;
-  class trt_key;
-  var AGE;
-  output out=work.adsl_stat_2(drop=_type_ _freq_)
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
-run;
-proc means data=work.adsl_source noprint vardef=df qntldef=5;
-  var AGE;
-  output out=work.adsl_stat_total_2(drop=_type_ _freq_)
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
-run;
-
-data work.adsl_stat_total_2;
-  length trt_key $200;
-  set work.adsl_stat_total_2;
-  trt_key="TOTAL";
-run;
-
-data work.adsl_stat_all_2;
-  set work.adsl_stat_2 work.adsl_stat_total_2;
-run;
-
-proc sql;
-  create table work.adsl_cont_2 as
-  select t.trt_order, t.trt_label, t.big_n,
-         s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
-  from work.adsl_trt as t
-  left join work.adsl_stat_all_2 as s
-    on t.trt_key=s.trt_key
-  order by t.trt_order;
-quit;
-
-data work.adsl_item_2;
-  length row_order item_order 8 row_label $200 row_value $200
-         trt_order 8 trt_label $200;
-  row_order=2*100000; item_order=2;
-  row_label='Age (years)'; row_value="";
-  trt_order=1; trt_label=""; output;
-  set work.adsl_cont_2;
-  item_order=2; trt_label=trt_label;
-  row_order=2*100000+1; row_label="    n";
-  row_value=strip(put(n,3.)); output;
-  row_order=2*100000+2; row_label="    Mean";
-  row_value=strip(put(round(mean,0.1),8.1));
-  if missing(mean) then row_value="-";
-  output;
-  row_order=2*100000+3; row_label="    SD";
-  row_value=strip(put(round(std,0.1),8.1));
-  if missing(std) then row_value="-";
-  output;
-  row_order=2*100000+4; row_label="    Median";
-  row_value=strip(put(round(median,0.1),8.1));
-  if missing(median) then row_value="-";
-  output;
-  row_order=2*100000+5; row_label="    Q1, Q3";
-  cnt1=strip(put(round(q1,0.1),8.1));
-  cnt2=strip(put(round(q3,0.1),8.1));
-  if missing(q1) then cnt1="-";
-  if missing(q3) then cnt2="-";
-  row_value=cats(cnt1,", ",cnt2); output;
-  row_order=2*100000+6; row_label="    Min, Max";
-  cnt1=strip(put(round(min,1),8.0));
-  cnt2=strip(put(round(max,1),8.0));
-  if missing(min) then cnt1="-";
-  if missing(max) then cnt2="-";
-  row_value=cats(cnt1,", ",cnt2); output;
-  keep row_order item_order row_label row_value trt_order trt_label;
-run;
-
-proc append base=work.adsl_long data=work.adsl_item_2 force; run;
+%baseline_continuous(
+    var=AGE,
+    token=2,
+    label=%str('Age (years)'),
+    work_prefix=adsl,
+    include_total=1,
+    include_n=1,
+    include_mean=1,
+    include_std=1,
+    include_median=1,
+    include_q1_q3=1,
+    include_min_max=1,
+    mean_decimals=1,
+    std_decimals=1,
+    median_decimals=1,
+    q1_decimals=1,
+    q3_decimals=1,
+    min_decimals=0,
+    max_decimals=0
+);
 
 /* Continuous item: Body Mass Index (kg/m2) */
-proc means data=work.adsl_source noprint vardef=df qntldef=5;
-  class trt_key;
-  var BMI;
-  output out=work.adsl_stat_3(drop=_type_ _freq_)
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
-run;
-proc means data=work.adsl_source noprint vardef=df qntldef=5;
-  var BMI;
-  output out=work.adsl_stat_total_3(drop=_type_ _freq_)
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
-run;
+%baseline_continuous(
+    var=BMI,
+    token=3,
+    label=%str('Body Mass Index (kg/m2)'),
+    work_prefix=adsl,
+    include_total=1,
+    include_n=1,
+    include_mean=1,
+    include_std=1,
+    include_median=1,
+    include_q1_q3=0,
+    include_min_max=0,
+    mean_decimals=1,
+    std_decimals=1,
+    median_decimals=1,
+    q1_decimals=0,
+    q3_decimals=0,
+    min_decimals=0,
+    max_decimals=0
+);
 
-data work.adsl_stat_total_3;
-  length trt_key $200;
-  set work.adsl_stat_total_3;
-  trt_key="TOTAL";
+data work.adsl_long;
+  set
+    work.adsl_item_1
+    work.adsl_item_2
+    work.adsl_item_3
+  ;
 run;
-
-data work.adsl_stat_all_3;
-  set work.adsl_stat_3 work.adsl_stat_total_3;
-run;
-
-proc sql;
-  create table work.adsl_cont_3 as
-  select t.trt_order, t.trt_label, t.big_n,
-         s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
-  from work.adsl_trt as t
-  left join work.adsl_stat_all_3 as s
-    on t.trt_key=s.trt_key
-  order by t.trt_order;
-quit;
-
-data work.adsl_item_3;
-  length row_order item_order 8 row_label $200 row_value $200
-         trt_order 8 trt_label $200;
-  row_order=3*100000; item_order=3;
-  row_label='Body Mass Index (kg/m2)'; row_value="";
-  trt_order=1; trt_label=""; output;
-  set work.adsl_cont_3;
-  item_order=3; trt_label=trt_label;
-  row_order=3*100000+1; row_label="    n";
-  row_value=strip(put(n,3.)); output;
-  row_order=3*100000+2; row_label="    Mean";
-  row_value=strip(put(round(mean,0.1),8.1));
-  if missing(mean) then row_value="-";
-  output;
-  row_order=3*100000+3; row_label="    SD";
-  row_value=strip(put(round(std,0.1),8.1));
-  if missing(std) then row_value="-";
-  output;
-  row_order=3*100000+4; row_label="    Median";
-  row_value=strip(put(round(median,0.1),8.1));
-  if missing(median) then row_value="-";
-  output;
-  keep row_order item_order row_label row_value trt_order trt_label;
-run;
-
-proc append base=work.adsl_long data=work.adsl_item_3 force; run;
 
 /* Final wide result */
 proc sort data=work.adsl_long;

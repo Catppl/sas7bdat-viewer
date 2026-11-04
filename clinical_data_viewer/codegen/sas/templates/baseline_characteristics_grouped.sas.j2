@@ -67,11 +67,119 @@ quit;
 %validate_subjects;
 
 /* Long rows are calculated once, then transposed to treatment columns. */
-data work.{{ source.work_prefix }}_long;
-  length row_order item_order 8 row_label $200 row_value $200
-         trt_order 8 trt_label $200;
-  stop;
+
+%macro baseline_continuous(
+    var=,
+    token=,
+    label=,
+    work_prefix=,
+    include_total=0,
+    include_n=0,
+    include_mean=0,
+    include_std=0,
+    include_median=0,
+    include_q1_q3=0,
+    include_min_max=0,
+    mean_decimals=0,
+    std_decimals=0,
+    median_decimals=0,
+    q1_decimals=0,
+    q3_decimals=0,
+    min_decimals=0,
+    max_decimals=0
+);
+proc means data=work.&work_prefix._source noprint nway missing
+    vardef=df qntldef=5;
+  class trt_key;
+  var &var.;
+  output out=work.&work_prefix._stat_&token.(drop=_type_ _freq_)
+%if &include_n %then %do;    n=n
+%end;%if &include_mean %then %do;    mean=mean
+%end;%if &include_std %then %do;    std=std
+%end;%if &include_median %then %do;    median=median
+%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
+%end;%if &include_min_max %then %do;    min=min max=max
+%end;    ;
 run;
+%if &include_total %then %do;
+proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
+  var &var.;
+  output out=work.&work_prefix._stat_total_&token.(drop=_type_ _freq_)
+%if &include_n %then %do;    n=n
+%end;%if &include_mean %then %do;    mean=mean
+%end;%if &include_std %then %do;    std=std
+%end;%if &include_median %then %do;    median=median
+%end;%if &include_q1_q3 %then %do;    q1=q1 q3=q3
+%end;%if &include_min_max %then %do;    min=min max=max
+%end;    ;
+run;
+
+data work.&work_prefix._stat_total_&token.;
+  length trt_key $200;
+  set work.&work_prefix._stat_total_&token.;
+  trt_key="TOTAL";
+run;
+
+data work.&work_prefix._stat_all_&token.;
+  set work.&work_prefix._stat_&token. work.&work_prefix._stat_total_&token.;
+run;
+%end;
+
+proc sql;
+  create table work.&work_prefix._cont_&token. as
+  select t.trt_order, t.trt_label, t.big_n
+%if &include_n %then %do;         , s.n
+%end;%if &include_mean %then %do;         , s.mean
+%end;%if &include_std %then %do;         , s.std
+%end;%if &include_median %then %do;         , s.median
+%end;%if &include_q1_q3 %then %do;         , s.q1, s.q3
+%end;%if &include_min_max %then %do;         , s.min, s.max
+%end;  from work.&work_prefix._trt as t
+%if &include_total %then %do;  left join work.&work_prefix._stat_all_&token. as s
+%end;%else %do;  left join work.&work_prefix._stat_&token. as s
+%end;
+    on t.trt_key=s.trt_key
+  order by t.trt_order;
+quit;
+
+data work.&work_prefix._item_&token.;
+  length row_order item_order 8 row_label $200 row_value $200
+         trt_order 8 trt_label $200 cnt1 cnt2 $200;
+  row_order=&token.*100000; item_order=&token.;
+  row_label=&label.; row_value="";
+  trt_order=1; trt_label=""; output;
+  set work.&work_prefix._cont_&token.;
+  item_order=&token.; trt_label=trt_label;
+%if &include_n %then %do;  row_order=&token.*100000+1; row_label="    n";
+  row_value=strip(put(n,best.)); output;
+%end;%if &include_mean %then %do;  row_order=&token.*100000+2; row_label="    Mean";
+  row_value=strip(put(mean,8.&mean_decimals.));
+  if missing(mean) then row_value="-";
+  output;
+%end;%if &include_std %then %do;  row_order=&token.*100000+3; row_label="    SD";
+  row_value=strip(put(std,8.&std_decimals.));
+  if missing(std) then row_value="-";
+  output;
+%end;%if &include_median %then %do;  row_order=&token.*100000+4; row_label="    Median";
+  row_value=strip(put(median,8.&median_decimals.));
+  if missing(median) then row_value="-";
+  output;
+%end;%if &include_q1_q3 %then %do;  row_order=&token.*100000+5; row_label="    Q1, Q3";
+  cnt1=strip(put(q1,8.&q1_decimals.));
+  cnt2=strip(put(q3,8.&q3_decimals.));
+  if missing(q1) then cnt1="-";
+  if missing(q3) then cnt2="-";
+  row_value=cats(cnt1,", ",cnt2); output;
+%end;%if &include_min_max %then %do;  row_order=&token.*100000+6; row_label="    Min, Max";
+  cnt1=strip(put(min,8.&min_decimals.));
+  cnt2=strip(put(max,8.&max_decimals.));
+  if missing(min) then cnt1="-";
+  if missing(max) then cnt2="-";
+  row_value=cats(cnt1,", ",cnt2); output;
+%end;  keep row_order item_order row_label row_value trt_order trt_label;
+run;
+
+%mend baseline_continuous;
 
 {% for item in items %}
 {% if item.role == "categorical" %}
@@ -148,74 +256,36 @@ data work.{{ source.work_prefix }}_item_{{ item.order }};
   output;
 run;
 
-proc append base=work.{{ source.work_prefix }}_long data=work.{{ source.work_prefix }}_item_{{ item.order }} force; run;
 {% else %}
 /* Continuous item: {{ item.label }} */
-proc means data=work.{{ source.work_prefix }}_source noprint vardef=df qntldef=5;
-  class trt_key;
-  var {{ item.variable }};
-  output out=work.{{ source.work_prefix }}_stat_{{ item.order }}(drop=_type_ _freq_)
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
-run;
-{% if include_total %}proc means data=work.{{ source.work_prefix }}_source noprint vardef=df qntldef=5;
-  var {{ item.variable }};
-  output out=work.{{ source.work_prefix }}_stat_total_{{ item.order }}(drop=_type_ _freq_)
-    n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
-run;
-
-data work.{{ source.work_prefix }}_stat_total_{{ item.order }};
-  length trt_key $200;
-  set work.{{ source.work_prefix }}_stat_total_{{ item.order }};
-  trt_key="TOTAL";
-run;
-
-data work.{{ source.work_prefix }}_stat_all_{{ item.order }};
-  set work.{{ source.work_prefix }}_stat_{{ item.order }} work.{{ source.work_prefix }}_stat_total_{{ item.order }};
-run;
-{% endif %}
-
-proc sql;
-  create table work.{{ source.work_prefix }}_cont_{{ item.order }} as
-  select t.trt_order, t.trt_label, t.big_n,
-         s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
-  from work.{{ source.work_prefix }}_trt as t
-  left join work.{{ source.work_prefix }}_stat_{% if include_total %}all_{% endif %}{{ item.order }} as s
-    on t.trt_key=s.trt_key
-  order by t.trt_order;
-quit;
-
-data work.{{ source.work_prefix }}_item_{{ item.order }};
-  length row_order item_order 8 row_label $200 row_value $200
-         trt_order 8 trt_label $200;
-  row_order={{ item.order }}*100000; item_order={{ item.order }};
-  row_label={{ item.label | sas_string }}; row_value="";
-  trt_order=1; trt_label=""; output;
-  set work.{{ source.work_prefix }}_cont_{{ item.order }};
-  item_order={{ item.order }}; trt_label=trt_label;
-{% if "n" in item.statistics %}  row_order={{ item.order }}*100000+1; row_label="    n";
-  row_value=strip(put(n,3.)); output;
-{% endif %}{% for key, label in (("mean", "Mean"), ("std", "SD"), ("median", "Median")) %}{% if key in item.statistics %}  row_order={{ item.order }}*100000+{{ loop.index + 1 }}; row_label="    {{ label }}";
-  row_value=strip(put(round({{ key }},{{ item.statistic_decimals[key] | sas_round_increment }}),8.{{ item.statistic_decimals[key] }}));
-  if missing({{ key }}) then row_value="-";
-  output;
-{% endif %}{% endfor %}{% if "q1" in item.statistics %}  row_order={{ item.order }}*100000+5; row_label="    Q1, Q3";
-  cnt1=strip(put(round(q1,{{ item.statistic_decimals.q1 | sas_round_increment }}),8.{{ item.statistic_decimals.q1 }}));
-  cnt2=strip(put(round(q3,{{ item.statistic_decimals.q3 | sas_round_increment }}),8.{{ item.statistic_decimals.q3 }}));
-  if missing(q1) then cnt1="-";
-  if missing(q3) then cnt2="-";
-  row_value=cats(cnt1,", ",cnt2); output;
-{% endif %}{% if "min" in item.statistics %}  row_order={{ item.order }}*100000+6; row_label="    Min, Max";
-  cnt1=strip(put(round(min,{{ item.statistic_decimals.min | sas_round_increment }}),8.{{ item.statistic_decimals.min }}));
-  cnt2=strip(put(round(max,{{ item.statistic_decimals.max | sas_round_increment }}),8.{{ item.statistic_decimals.max }}));
-  if missing(min) then cnt1="-";
-  if missing(max) then cnt2="-";
-  row_value=cats(cnt1,", ",cnt2); output;
-{% endif %}  keep row_order item_order row_label row_value trt_order trt_label;
-run;
-
-proc append base=work.{{ source.work_prefix }}_long data=work.{{ source.work_prefix }}_item_{{ item.order }} force; run;
+%baseline_continuous(
+    var={{ item.variable }},
+    token={{ item.order }},
+    label=%str({{ item.label | sas_string }}),
+    work_prefix={{ source.work_prefix }},
+    include_total={{ 1 if include_total else 0 }},
+    include_n={{ 1 if "n" in item.statistics else 0 }},
+    include_mean={{ 1 if "mean" in item.statistics else 0 }},
+    include_std={{ 1 if "std" in item.statistics else 0 }},
+    include_median={{ 1 if "median" in item.statistics else 0 }},
+    include_q1_q3={{ 1 if "q1" in item.statistics else 0 }},
+    include_min_max={{ 1 if "min" in item.statistics else 0 }},
+    mean_decimals={{ item.statistic_decimals.mean }},
+    std_decimals={{ item.statistic_decimals.std }},
+    median_decimals={{ item.statistic_decimals.median }},
+    q1_decimals={{ item.statistic_decimals.q1 }},
+    q3_decimals={{ item.statistic_decimals.q3 }},
+    min_decimals={{ item.statistic_decimals.min }},
+    max_decimals={{ item.statistic_decimals.max }}
+);
 {% endif %}
 {% endfor %}
+
+data work.{{ source.work_prefix }}_long;
+  set
+{% for item in items %}    work.{{ source.work_prefix }}_item_{{ item.order }}
+{% endfor %}  ;
+run;
 
 /* Final wide result */
 proc sort data=work.{{ source.work_prefix }}_long;
