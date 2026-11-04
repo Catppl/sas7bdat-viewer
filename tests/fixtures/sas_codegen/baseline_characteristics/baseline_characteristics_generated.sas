@@ -77,13 +77,6 @@ quit;
     order=,
     label=,
     work_prefix=,
-    include_total=0,
-    include_n=0,
-    include_mean=0,
-    include_std=0,
-    include_median=0,
-    include_q1_q3=0,
-    include_min_max=0,
     mean_decimals=0,
     std_decimals=0,
     median_decimals=0,
@@ -96,14 +89,9 @@ proc means data=work.&work_prefix._source noprint nway missing
     vardef=df qntldef=5;
   class trt_key;
   var &var.;
-  output out=work.&work_prefix._stat_raw_&order.
+  output out=work.&work_prefix._stat_&order.
     n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
 run;
-data work.&work_prefix._stat_&order.;
-  set work.&work_prefix._stat_raw_&order.;
-  keep trt_key %if &include_n %then %do; n %end;%if &include_mean %then %do; mean %end;%if &include_std %then %do; std %end;%if &include_median %then %do; median %end;%if &include_q1_q3 %then %do; q1 q3 %end;%if &include_min_max %then %do; min max %end;;
-run;
-%if &include_total %then %do;
 proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
   output out=work.&work_prefix._stat_total_raw_&order.
@@ -114,66 +102,57 @@ data work.&work_prefix._stat_total_&order.;
   length trt_key $200;
   set work.&work_prefix._stat_total_raw_&order.;
   trt_key="TOTAL";
-  keep trt_key %if &include_n %then %do; n %end;%if &include_mean %then %do; mean %end;%if &include_std %then %do; std %end;%if &include_median %then %do; median %end;%if &include_q1_q3 %then %do; q1 q3 %end;%if &include_min_max %then %do; min max %end;;
 run;
 
 data work.&work_prefix._stat_all_&order.;
   set work.&work_prefix._stat_&order. work.&work_prefix._stat_total_&order.;
 run;
-%end;
 
 proc sql;
   create table work.&work_prefix._cont_&order. as
   select t.trt_order, t.trt_label, t.big_n
-%if &include_n %then %do;         , s.n
-%end;%if &include_mean %then %do;         , s.mean
-%end;%if &include_std %then %do;         , s.std
-%end;%if &include_median %then %do;         , s.median
-%end;%if &include_q1_q3 %then %do;         , s.q1, s.q3
-%end;%if &include_min_max %then %do;         , s.min, s.max
-%end;  from work.&work_prefix._trt as t
-%if &include_total %then %do;  left join work.&work_prefix._stat_all_&order. as s
-%end;%else %do;  left join work.&work_prefix._stat_&order. as s
-%end;
+         , s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
+  from work.&work_prefix._trt as t
+  left join work.&work_prefix._stat_all_&order. as s
     on t.trt_key=s.trt_key
   order by t.trt_order;
 quit;
 
-data work.&work_prefix._item_&order.;
+data work.&work_prefix._item_&order._all;
   length row_order item_order 8 row_label $200 row_value $200
-         trt_order 8 trt_label $200 cnt1 cnt2 $200;
+         trt_order 8 trt_label $200 statistic_key $200 cnt1 cnt2 $200;
   row_order=&order.*100000; item_order=&order.;
-  row_label=&label.; row_value="";
+  row_label=&label.; row_value=""; statistic_key="";
   trt_order=1; trt_label=""; output;
   set work.&work_prefix._cont_&order.;
   item_order=&order.; trt_label=trt_label;
-%if &include_n %then %do;  row_order=&order.*100000+1; row_label="    n";
+  row_order=&order.*100000+1; statistic_key="n"; row_label="    n";
   row_value=strip(put(n,best.)); output;
-%end;%if &include_mean %then %do;  row_order=&order.*100000+2; row_label="    Mean";
+  row_order=&order.*100000+2; statistic_key="mean"; row_label="    Mean";
   row_value=strip(put(mean,8.&mean_decimals.));
   if missing(mean) then row_value="-";
   output;
-%end;%if &include_std %then %do;  row_order=&order.*100000+3; row_label="    SD";
+  row_order=&order.*100000+3; statistic_key="std"; row_label="    SD";
   row_value=strip(put(std,8.&std_decimals.));
   if missing(std) then row_value="-";
   output;
-%end;%if &include_median %then %do;  row_order=&order.*100000+4; row_label="    Median";
+  row_order=&order.*100000+4; statistic_key="median"; row_label="    Median";
   row_value=strip(put(median,8.&median_decimals.));
   if missing(median) then row_value="-";
   output;
-%end;%if &include_q1_q3 %then %do;  row_order=&order.*100000+5; row_label="    Q1, Q3";
+  row_order=&order.*100000+5; statistic_key="q1_q3"; row_label="    Q1, Q3";
   cnt1=strip(put(q1,8.&q1_decimals.));
   cnt2=strip(put(q3,8.&q3_decimals.));
   if missing(q1) then cnt1="-";
   if missing(q3) then cnt2="-";
   row_value=cats(cnt1,", ",cnt2); output;
-%end;%if &include_min_max %then %do;  row_order=&order.*100000+6; row_label="    Min, Max";
+  row_order=&order.*100000+6; statistic_key="min_max"; row_label="    Min, Max";
   cnt1=strip(put(min,8.&min_decimals.));
   cnt2=strip(put(max,8.&max_decimals.));
   if missing(min) then cnt1="-";
   if missing(max) then cnt2="-";
   row_value=cats(cnt1,", ",cnt2); output;
-%end;  keep row_order item_order row_label row_value trt_order trt_label;
+  keep row_order item_order row_label row_value trt_order trt_label statistic_key;
 run;
 
 %mend baseline_continuous;
@@ -253,13 +232,6 @@ run;
     order=2,
     label=%str('Age (years)'),
     work_prefix=adsl,
-    include_total=1,
-    include_n=1,
-    include_mean=1,
-    include_std=1,
-    include_median=1,
-    include_q1_q3=1,
-    include_min_max=1,
     mean_decimals=1,
     std_decimals=1,
     median_decimals=1,
@@ -268,6 +240,17 @@ run;
     min_decimals=0,
     max_decimals=0
 );
+data work.adsl_item_2;
+  set work.adsl_item_2_all;
+  if missing(statistic_key)
+    or statistic_key="n"
+    or statistic_key="mean"
+    or statistic_key="std"
+    or statistic_key="median"
+    or statistic_key="q1_q3"
+    or statistic_key="min_max"
+  ;
+run;
 
 /* Continuous item: Body Mass Index (kg/m2) */
 %baseline_continuous(
@@ -275,13 +258,6 @@ run;
     order=3,
     label=%str('Body Mass Index (kg/m2)'),
     work_prefix=adsl,
-    include_total=1,
-    include_n=1,
-    include_mean=1,
-    include_std=1,
-    include_median=1,
-    include_q1_q3=0,
-    include_min_max=0,
     mean_decimals=1,
     std_decimals=1,
     median_decimals=1,
@@ -290,6 +266,15 @@ run;
     min_decimals=0,
     max_decimals=0
 );
+data work.adsl_item_3;
+  set work.adsl_item_3_all;
+  if missing(statistic_key)
+    or statistic_key="n"
+    or statistic_key="mean"
+    or statistic_key="std"
+    or statistic_key="median"
+  ;
+run;
 
 data work.adsl_long;
   set
