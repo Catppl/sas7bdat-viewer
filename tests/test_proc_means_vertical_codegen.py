@@ -57,6 +57,12 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("proc transpose", code)
         self.assertIn("work.pm_vertical", code)
         self.assertIn("trt_ord", code)
+        self.assertIn("if TRT01A = 'A' then trt_ord = 1;", code)
+        self.assertIn("else if TRT01A = 'B' then trt_ord = 2;", code)
+        self.assertNotIn("length trt_key $200;", code)
+        self.assertNotIn("trt_value", code)
+        self.assertNotIn("proc sort data=trt;", code)
+        self.assertNotIn("trt1_value", code)
         self.assertNotIn("%let n1=&n1;", code)
         self.assertNotIn("resolved_hierarchy", code)
         self.assertNotIn("proc_means_vertical_analysis_variable", code)
@@ -160,9 +166,16 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertNotIn("%let n1=&n1;", code)
         self.assertNotIn("%let n2=&n2;", code)
         self.assertNotIn("%let nt=&nt;", code)
+        self.assertNotIn("Population treatment contains missing values", code)
+        self.assertNotIn("data _null_;", code)
         self.assertNotIn("create table pop_n", code)
         self.assertNotIn("create table pop_total", code)
-        self.assertNotIn("trt_key", code)
+        self.assertIn("if TRT01A = 'A' then trt_ord = 1;", code)
+        self.assertIn("else if TRT01A = 'B' then trt_ord = 2;", code)
+        self.assertNotIn("data trt_n", code)
+        self.assertNotIn("into :col_labels", code)
+        self.assertIn("data work.pm_vertical;", code)
+        self.assertIn('col1 = "A (N=&n1)"', code)
         self.assertIn("where not missing(AVAL)", code)
         self.assertIn("base_aval", code)
         self.assertIn("base_chg", code)
@@ -191,8 +204,16 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
 
         self.assertIn("where TRT01A = 1;", code)
         self.assertIn("where TRT01A = 2;", code)
-        self.assertIn("if TRT01A = 1 then big_n = &n1;", code)
-        self.assertIn("else if TRT01A = 2 then big_n = &n2;", code)
+        self.assertIn("if TRT01A = 1 then trt_ord = 1;", code)
+        self.assertIn("else if TRT01A = 2 then trt_ord = 2;", code)
+        self.assertIn(
+            'col1 = "1 (N=&n1)"',
+            code,
+        )
+        self.assertIn(
+            'col2 = "2 (N=&n2)"',
+            code,
+        )
 
     def test_generator_without_treatment_uses_one_overall_population_macro(
         self,
@@ -211,7 +232,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         )
         self.assertNotIn("%let n1=&n1;", code)
         self.assertNotIn("into :nt", code)
-        self.assertIn("big_n = &n1;", code)
+        self.assertIn('col1 = "All (N=&n1)"', code)
 
     def test_generator_rejects_merge_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

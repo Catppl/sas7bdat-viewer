@@ -21,15 +21,6 @@ run;
 
 
 /* Population N */
-data _null_;
-    set adsl(keep=TRT01A);
-    if missing(TRT01A) then do;
-        putlog "ERROR: Population treatment contains missing values.";
-        abort cancel;
-    end;
-run;
-
-
 proc sql noprint;
     select count(distinct USUBJID) into :n1 trimmed from adsl where TRT01A = 'Placebo';
     select count(distinct USUBJID) into :n2 trimmed from adsl where TRT01A = 'Drug A';
@@ -46,35 +37,17 @@ proc sql;
     from adlb;
 quit;
 
+
 data trt;
-    length trt_label $200;
-    length trt1_key trt1_label $200;
     set trt0;
-    if missing(TRT01A) then trt1_label = "(Missing)";
-    else trt1_label = strip(TRT01A);
-    if missing(TRT01A) then trt1_key = "";
-    else trt1_key = lowcase(strip(TRT01A));
-
-    trt_label = catx(" / ", trt1_label);
-run;
-
-proc sort data=trt;
-    by trt1_key;
-run;
-
-data trt;
-    set trt;
-    trt_ord = _n_;
+    trt_ord = .;
+    if TRT01A = 'Placebo' then trt_ord = 1;
+    else if TRT01A = 'Drug A' then trt_ord = 2;
+    else if TRT01A = 'Drug B' then trt_ord = 3;
+    if missing(trt_ord) then delete;
 run;
 
 
-data trt_n;
-    set trt;
-    if TRT01A = 'Placebo' then big_n = &n1;
-    else if TRT01A = 'Drug A' then big_n = &n2;
-    else if TRT01A = 'Drug B' then big_n = &n3;
-    else big_n = .;
-run;
 
 proc sql noprint;
     select coalesce(max(trt_ord), 0) into :n_trt trimmed from trt;
@@ -120,11 +93,9 @@ quit;
 proc sql;
     create table out_age as
     select g.trt_ord,
-           g.trt_label,
-           g.big_n,
            s.*,
            coalesce(u.subject_n, 0) as subject_n
-    from trt_n as g
+    from trt as g
     left join stat_age as s
         on g.TRT01A = s.TRT01A
     left join subj_age as u
@@ -159,11 +130,8 @@ proc sql;
 quit;
 
 data total_age_row;
-    length trt_label $200;
     merge total_age total_age_n;
     trt_ord = &n_trt + 1;
-    trt_label = "Total";
-    big_n = &nt;
 run;
 
 
@@ -221,7 +189,7 @@ data values_age;
     value1 = lclm;
     value2 = uclm;
     output;
-    keep analysis stat_order row_ord trt_ord trt_label big_n subject_n key1 key2 value1 value2;
+    keep analysis stat_order row_ord trt_ord subject_n key1 key2 value1 value2;
 run;
 
 
@@ -401,24 +369,22 @@ proc transpose data=pm_long out=work.pm_vertical_review(drop=_name_ row_ord) pre
     var row_value;
 run;
 
-/* Apply readable group labels to the generated columns */
-proc sql noprint;
-    select cats("col", trt_ord, "=", quote(trim(trt_label) ||
-           case when missing(big_n) then "" else cats(" (N=", put(big_n, comma12.), ")") end))
-        into :col_labels separated by " "
-    from trt_n
-    order by trt_ord;
-quit;
-
-proc datasets library=work nolist;
-    modify pm_vertical_review;
-    label item = "Item" stat = "Statistic" &col_labels col%eval(&n_trt + 1) = "Total (N=&nt)";
-quit;
+data work.pm_vertical_review;
+    set work.pm_vertical_review;
+    label
+        item = "Item"
+        stat = "Statistic"
+        col1 = "Placebo (N=&n1)"
+        col2 = "Drug A (N=&n2)"
+        col3 = "Drug B (N=&n3)"
+        col%eval(&n_trt + 1) = "Total (N=&nt)"
+;
+run;
 
 /* Clean up intermediate WORK tables */
 proc datasets library=work nolist;
     delete adlb adsl
-        trt0 trt trt_n pm_labels pm_decimals pm_values pm_display pm_long
+        trt0 trt pm_labels pm_decimals pm_values pm_display pm_long
         stat_age subj_age out_age values_age dec_age
         total_age total_age_n total_age_row
 ;

@@ -23,15 +23,6 @@ data {{ population_source.work_member | sas_name }};
 {% endif %}
 
 /* Population N */
-{% if population_treatment %}data _null_;
-    set {{ population_source.work_member | sas_name }}(keep={{ population_treatment | sas_name }});
-    if missing({{ population_treatment | sas_name }}) then do;
-        putlog "ERROR: Population treatment contains missing values.";
-        abort cancel;
-    end;
-run;
-{% endif %}
-
 proc sql noprint;
 {% for count in population_counts %}    select count(distinct {{ subject | sas_name }}) into :{{ count.macro }} trimmed from {{ population_source.work_member | sas_name }}{% if population_treatment %} where {{ population_treatment | sas_name }} = {{ count.population_literal }}{% endif %};
 {% endfor %}{% if population_treatment %}    select count(distinct {{ subject | sas_name }}) into :{{ total_n_macro }} trimmed from {{ population_source.work_member | sas_name }} where not missing({{ population_treatment | sas_name }});

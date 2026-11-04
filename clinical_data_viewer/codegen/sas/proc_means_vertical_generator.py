@@ -41,6 +41,10 @@ def _sas_name(value: object) -> str:
     return sas_name(value)
 
 
+def _sas_label(value: object) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
 def _sas_filter(expression: dict[str, object] | None) -> str:
     return sas_filter_expression(expression) if expression else ""
 
@@ -84,6 +88,7 @@ class SasProcMeansVerticalGenerator:
         )
         self.environment.filters["sas_string"] = _sas_string
         self.environment.filters["sas_name"] = _sas_name
+        self.environment.filters["sas_label"] = _sas_label
 
     def _prepare(self, configuration: dict[str, object]) -> dict[str, object]:
         if configuration.get("type") != "proc_means_vertical":
@@ -390,6 +395,7 @@ class SasProcMeansVerticalGenerator:
                 population_counts.append(
                     {
                         "macro": f"n{index}",
+                        "label": f"{value} (N=&n{index})",
                         "population_literal": _sas_literal(
                             value, population_treatment_kind
                         ),
@@ -401,6 +407,7 @@ class SasProcMeansVerticalGenerator:
             population_counts.append(
                 {
                     "macro": "n1",
+                    "label": "All (N=&n1)",
                     "population_literal": None,
                     "source_literal": None,
                 }
