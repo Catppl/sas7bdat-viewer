@@ -30,6 +30,13 @@ def _output_reference(value: object, label: str) -> str:
     return reference
 
 
+def _sas_dataset_reference(library: str, member: str) -> str:
+    """Render WORK members without a redundant library qualifier."""
+    if library.casefold() == "work":
+        return member
+    return f"{library}.{member}"
+
+
 def _literal(value: object, kind: str, label: str) -> str:
     if kind == "character":
         if value is None:
@@ -233,6 +240,10 @@ class SasBaselineCharacteristicsGenerator:
                 "member": sas_name(population_member),
             }
             population_is_source = False
+
+        population["reference"] = _sas_dataset_reference(
+            str(population["library"]), str(population["member"])
+        )
 
         population_metadata_names = {
             str(name).casefold(): str(name)
@@ -491,6 +502,9 @@ class SasBaselineCharacteristicsGenerator:
                 "library": source_library,
                 "member": sas_name(source_member),
                 "work_prefix": _work_prefix(source_member),
+                "reference": _sas_dataset_reference(
+                    source_library, sas_name(source_member)
+                ),
             },
             "subject": sas_name(subject),
             "where_expression": where_expression,
@@ -538,8 +552,8 @@ class SasBaselineCharacteristicsGenerator:
             "items": items,
             "continuous_statistics": continuous_statistics,
             "header_label": str(display.get("header_label") or "Overall"),
-            "output": output,
-            "long_output": long_output,
+            "output": _sas_dataset_reference(*output.split(".", 1)),
+            "long_output": _sas_dataset_reference(*long_output.split(".", 1)),
         }
 
     def generate(self, configuration: Mapping[str, object]) -> str:

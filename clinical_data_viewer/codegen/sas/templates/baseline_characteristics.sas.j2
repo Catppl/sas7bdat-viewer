@@ -3,19 +3,19 @@
 options validvarname=any;
 
 /* Prepare analysis source */
-data work.{{ source.work_prefix }}_source;
-  set {{ source.library }}.{{ source.member }};
+data {{ source.work_prefix }}_source;
+  set {{ source.reference }};
 {% if where_expression %}  where {{ where_expression }};
 {% endif %}run;
 
 %let duplicate_subject_ids=;
 proc sql noprint;
   select count(distinct {{ subject }}) into :n1 trimmed
-{% if population_is_source %}  from work.{{ source.work_prefix }}_source{% else %}  from {{ population.library }}.{{ population.member }}{% endif %}{% if population_where_expression %} where {{ population_where_expression }};{% else %};{% endif %}
-  select count(*) into :missing_subject trimmed from work.{{ source.work_prefix }}_source where missing({{ subject }});
-  select count(*)-count(distinct {{ subject }}) into :duplicate_subject trimmed from work.{{ source.work_prefix }}_source;
+{% if population_is_source %}  from {{ source.work_prefix }}_source{% else %}  from {{ population.reference }}{% endif %}{% if population_where_expression %} where {{ population_where_expression }};{% else %};{% endif %}
+  select count(*) into :missing_subject trimmed from {{ source.work_prefix }}_source where missing({{ subject }});
+  select count(*)-count(distinct {{ subject }}) into :duplicate_subject trimmed from {{ source.work_prefix }}_source;
   select {{ subject }} into :duplicate_subject_ids separated by ', '
-  from work.{{ source.work_prefix }}_source
+  from {{ source.work_prefix }}_source
   where ^missing({{ subject }})
   group by {{ subject }}
   having count(*) > 1
@@ -26,7 +26,7 @@ quit;
   %if &missing_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics contains missing {{ subject }}.;
     data _null_;
-      set work.{{ source.work_prefix }}_source;
+      set {{ source.work_prefix }}_source;
       if missing({{ subject }}) then
         put "ERROR: Missing {{ subject }} at source observation " _n_ ".";
     run;
@@ -55,17 +55,17 @@ quit;
     min_decimals=0,
     max_decimals=0
 );
-proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
+proc means data=&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_&order.
+  output out=&work_prefix._stat_&order.
 {% for statistic in continuous_statistics %}    {{ statistic }}={{ statistic }}{% if not loop.last %} {% endif %}{% endfor %};
 run;
 
-data work.&work_prefix._item_&order.;
+data &work_prefix._item_&order.;
   length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
          row_label $200 level_value $200 statistic_key $200
          raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200;
-  set work.&work_prefix._stat_&order.;
+  set &work_prefix._stat_&order.;
   if _n_=1 then do;
     item_order=&order.;
     item_kind="continuous";
@@ -74,7 +74,7 @@ data work.&work_prefix._item_&order.;
     unit=&unit.;
     denominator=&&&n_macro.;
     numerator=n;
-    row_order=&order.*100000;
+    row_order=&order.*1000;
     row_label=item_label;
     row_value="";
     statistic_key="";
@@ -157,9 +157,9 @@ run;
 {% for item in items %}
 {% if item.role == "categorical" %}
 /* Categorical item: {{ item.label }} */
-data work.{{ source.work_prefix }}_cat_source_{{ item.order }};
+data {{ source.work_prefix }}_cat_source_{{ item.order }};
   length level_value $200 sort_rank 8;
-  set work.{{ source.work_prefix }}_source;
+  set {{ source.work_prefix }}_source;
 {% if not item.include_missing %}  if ^missing({{ item.variable }});
 {% if item.storage_type == "numeric" %}  level_value=strip(put({{ item.variable }},best32.));
 {% else %}  level_value=strip({{ item.variable }});
@@ -173,23 +173,23 @@ data work.{{ source.work_prefix }}_cat_source_{{ item.order }};
 {% endif %}run;
 
 proc sql;
-  create table work.{{ source.work_prefix }}_cat_{{ item.order }} as
+  create table {{ source.work_prefix }}_cat_{{ item.order }} as
   select level_value, min(sort_rank) as sort_rank,
          count(distinct {{ subject }}) as numerator,
          &n1 as denominator,
          calculated numerator*100/calculated denominator as percent
-  from work.{{ source.work_prefix }}_cat_source_{{ item.order }}
+  from {{ source.work_prefix }}_cat_source_{{ item.order }}
   group by level_value
   order by sort_rank, level_value;
 quit;
 
-data work.{{ source.work_prefix }}_item_{{ item.order }};
+data {{ source.work_prefix }}_item_{{ item.order }};
   length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
          row_label $200 level_value $200 statistic_key $200
          raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200;
-  set work.{{ source.work_prefix }}_cat_{{ item.order }};
+  set {{ source.work_prefix }}_cat_{{ item.order }};
   if _n_=1 then do;
-    row_order={{ item.order }}*100000;
+    row_order={{ item.order }}*1000;
     item_order={{ item.order }};
     item_kind="categorical";
     variable={{ item.variable | sas_string }};
@@ -199,7 +199,7 @@ data work.{{ source.work_prefix }}_item_{{ item.order }};
     output;
 
   end;
-  row_order={{ item.order }}*100000+_n_;
+  row_order={{ item.order }}*1000+_n_;
   item_order={{ item.order }};
   item_kind="categorical";
   variable={{ item.variable | sas_string }};
@@ -233,18 +233,18 @@ run;
 {% endif %}
 {% endfor %}
 
-data {{ long_output }};
+data {{ source.work_prefix }}_long;
   set
-{% for item in items %}    work.{{ source.work_prefix }}_item_{{ item.order }}
+{% for item in items %}    {{ source.work_prefix }}_item_{{ item.order }}
 {% endfor %}  ;
 run;
 
-proc sort data={{ long_output }};
+proc sort data={{ source.work_prefix }}_long;
   by row_order;
 run;
 
-data {{ output }}(label={{ header_label | sas_string }});
-  set {{ long_output }};
+data {{ output }};
+  set {{ source.work_prefix }}_long;
   length value $200;
   value=row_value;
   keep row_label value;

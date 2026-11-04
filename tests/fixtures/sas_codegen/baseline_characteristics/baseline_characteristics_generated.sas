@@ -4,7 +4,7 @@
 options validvarname=any;
 
 /* Prepare analysis source */
-data work.adsl_source;
+data adsl_source;
   length trt_key trt_label $200;
   set analysis.adsl;
   where SAFFL = 'Y' and ^missing(TRT01A);
@@ -20,7 +20,7 @@ proc sql noprint;
 quit;
 
 /* Treatment order and population counts */
-data work.adsl_trt;
+data adsl_trt;
   length trt_key trt_label $200 trt_order big_n 8;
   trt_order=1;
   big_n=&n1;
@@ -42,10 +42,10 @@ run;
 /* Validate the analysis source subject structure */
 %let duplicate_subject_ids=;
 proc sql noprint;
-  select count(*) into :missing_subject trimmed from work.adsl_source where missing(USUBJID);
-  select count(*)-count(distinct USUBJID) into :duplicate_subject trimmed from work.adsl_source;
+  select count(*) into :missing_subject trimmed from adsl_source where missing(USUBJID);
+  select count(*)-count(distinct USUBJID) into :duplicate_subject trimmed from adsl_source;
   select USUBJID into :duplicate_subject_ids separated by ', '
-  from work.adsl_source
+  from adsl_source
   where ^missing(USUBJID)
   group by USUBJID
   having count(*) > 1
@@ -56,7 +56,7 @@ quit;
   %if &missing_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics contains missing USUBJID.;
     data _null_;
-      set work.adsl_source;
+      set adsl_source;
       if missing(USUBJID) then
         put "ERROR: Missing USUBJID at source observation " _n_ ".";
     run;
@@ -85,45 +85,45 @@ quit;
     min_decimals=0,
     max_decimals=0
 );
-proc means data=work.&work_prefix._source noprint nway missing
+proc means data=&work_prefix._source noprint nway missing
     vardef=df qntldef=5;
   class trt_key;
   var &var.;
-  output out=work.&work_prefix._stat_&order.
+  output out=&work_prefix._stat_&order.
     n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
 run;
-proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
+proc means data=&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_total_raw_&order.
+  output out=&work_prefix._stat_total_raw_&order.
     n=n mean=mean std=std median=median q1=q1 q3=q3 min=min max=max;
 run;
 
-data work.&work_prefix._stat_total_&order.;
+data &work_prefix._stat_total_&order.;
   length trt_key $200;
-  set work.&work_prefix._stat_total_raw_&order.;
+  set &work_prefix._stat_total_raw_&order.;
   trt_key="TOTAL";
 run;
 
-data work.&work_prefix._stat_all_&order.;
-  set work.&work_prefix._stat_&order. work.&work_prefix._stat_total_&order.;
+data &work_prefix._stat_all_&order.;
+  set &work_prefix._stat_&order. &work_prefix._stat_total_&order.;
 run;
 
 proc sql;
-  create table work.&work_prefix._cont_&order. as
+  create table &work_prefix._cont_&order. as
   select t.trt_order, t.trt_label, t.big_n
          , s.n, s.mean, s.std, s.median, s.q1, s.q3, s.min, s.max
-  from work.&work_prefix._trt as t
-  left join work.&work_prefix._stat_all_&order. as s
+  from &work_prefix._trt as t
+  left join &work_prefix._stat_all_&order. as s
     on t.trt_key=s.trt_key
   order by t.trt_order;
 quit;
 
-data work.&work_prefix._item_&order.;
+data &work_prefix._item_&order.;
   length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200 statistic_key $200 cnt1 cnt2 $200;
-  set work.&work_prefix._cont_&order.;
+  set &work_prefix._cont_&order.;
   if _n_=1 then do;
-    row_order=&order.*100000;
+    row_order=&order.*1000;
     item_order=&order.;
     row_label=&label.;
     row_value="";
@@ -135,34 +135,34 @@ data work.&work_prefix._item_&order.;
   end;
   item_order=&order.;
   trt_label=trt_label;
-  row_order=&order.*100000+1;
+  row_order=&order.*1000+1;
   statistic_key="n";
   row_label="    n";
   row_value=strip(put(n,best.));
   output;
 
-  row_order=&order.*100000+2;
+  row_order=&order.*1000+2;
   statistic_key="mean";
   row_label="    Mean";
   row_value=strip(put(mean,8.&mean_decimals.));
   if missing(mean) then row_value="-";
   output;
 
-  row_order=&order.*100000+3;
+  row_order=&order.*1000+3;
   statistic_key="std";
   row_label="    SD";
   row_value=strip(put(std,8.&std_decimals.));
   if missing(std) then row_value="-";
   output;
 
-  row_order=&order.*100000+4;
+  row_order=&order.*1000+4;
   statistic_key="median";
   row_label="    Median";
   row_value=strip(put(median,8.&median_decimals.));
   if missing(median) then row_value="-";
   output;
 
-  row_order=&order.*100000+5;
+  row_order=&order.*1000+5;
   statistic_key="q1_q3";
   row_label="    Q1, Q3";
   cnt1=strip(put(q1,8.&q1_decimals.));
@@ -172,7 +172,7 @@ data work.&work_prefix._item_&order.;
   row_value=cats(cnt1,", ",cnt2);
   output;
 
-  row_order=&order.*100000+6;
+  row_order=&order.*1000+6;
   statistic_key="min_max";
   row_label="    Min, Max";
   cnt1=strip(put(min,8.&min_decimals.));
@@ -188,9 +188,9 @@ run;
 %mend baseline_continuous;
 
 /* Categorical item: Sex */
-data work.adsl_cat_source_1;
+data adsl_cat_source_1;
   length level_value $200 sort_rank 8;
-  set work.adsl_source;
+  set adsl_source;
   if missing(SEX) then level_value="Missing";
   else level_value=strip(SEX);
   sort_rank=1000000;
@@ -200,48 +200,48 @@ data work.adsl_cat_source_1;
 run;
 
 proc sql;
-  create table work.adsl_cat_freq_1 as
+  create table adsl_cat_freq_1 as
   select trt_key, level_value, count(distinct USUBJID) as numerator
-  from work.adsl_cat_source_1
+  from adsl_cat_source_1
   group by trt_key, level_value;
-  insert into work.adsl_cat_freq_1
+  insert into adsl_cat_freq_1
   select "TOTAL", level_value, count(distinct USUBJID) as numerator
-  from work.adsl_cat_source_1
+  from adsl_cat_source_1
   group by level_value;
-  create table work.adsl_cat_levels_1 as
+  create table adsl_cat_levels_1 as
   select level_value, min(sort_rank) as sort_rank
-  from work.adsl_cat_source_1
+  from adsl_cat_source_1
   group by level_value;
 quit;
 
-proc sort data=work.adsl_cat_levels_1;
+proc sort data=adsl_cat_levels_1;
   by sort_rank level_value;
 run;
 
-data work.adsl_cat_levels_1;
-  set work.adsl_cat_levels_1;
+data adsl_cat_levels_1;
+  set adsl_cat_levels_1;
   level_order=_n_;
 run;
 
 proc sql;
-  create table work.adsl_cat_1 as
+  create table adsl_cat_1 as
   select t.trt_order, t.trt_label, t.big_n,
          l.level_order, l.level_value,
          coalesce(f.numerator,0) as numerator
-  from work.adsl_trt as t
-  cross join work.adsl_cat_levels_1 as l
-  left join work.adsl_cat_freq_1 as f
+  from adsl_trt as t
+  cross join adsl_cat_levels_1 as l
+  left join adsl_cat_freq_1 as f
     on t.trt_key=f.trt_key
    and l.level_value=f.level_value
   order by t.trt_order, l.level_order;
 quit;
 
-data work.adsl_item_1;
+data adsl_item_1;
   length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200 display_level $200 cnt1 cnt2 $200;
-  set work.adsl_cat_1;
+  set adsl_cat_1;
   if _n_=1 then do;
-    row_order=1*100000;
+    row_order=1*1000;
     item_order=1;
     row_label='Sex';
     row_value="";
@@ -250,7 +250,7 @@ data work.adsl_item_1;
     output;
 
   end;
-  row_order=1*100000+level_order;
+  row_order=1*1000+level_order;
   item_order=1;
   display_level=level_value;
   if level_value='F' then display_level='Female';
@@ -294,21 +294,21 @@ run;
     max_decimals=0
 );
 
-data work.adsl_long;
+data adsl_long;
   set
-    work.adsl_item_1
-    work.adsl_item_2
-    work.adsl_item_3
+    adsl_item_1
+    adsl_item_2
+    adsl_item_3
   ;
 run;
 
 /* Final wide result */
-proc sort data=work.adsl_long;
+proc sort data=adsl_long;
   by row_order trt_order;
 run;
 
 proc sql;
-  create table work.adsl_wide as
+  create table adsl_wide as
   select row_order, max(row_label) as row_label length=200
        , max(case when trt_order=1 then row_value else "" end)
            as TRT_1 length=200
@@ -316,25 +316,19 @@ proc sql;
            as TRT_2 length=200
        , max(case when trt_order=3 then row_value else "" end)
            as TRT_3 length=200
-  from work.adsl_long
+  from adsl_long
   group by row_order
   order by row_order;
 quit;
 
-data work.baseline_characteristics_test(label='Baseline Characteristics');
-  set work.adsl_wide;
-  label row_label="Characteristic"
+data final;
+  set adsl_wide;
+  label row_label=""
         TRT_1="Placebo (N=&n1)"
         TRT_2="Drug A (N=&n2)"
         TRT_3="Total (N=&nt)"
   ;
   keep row_label TRT_1 TRT_2 TRT_3;
-run;
-
-data work.baseline_characteristics_long_test;
-  set work.adsl_long;
-  value=row_value;
-  keep row_order row_label value trt_order trt_label;
 run;
 
 proc datasets library=work nolist;

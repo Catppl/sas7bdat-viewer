@@ -20,7 +20,7 @@ not change.
 | Result kind | `baseline_characteristics` |
 | Configuration file | `baseline_characteristics_config.json` |
 | Python reference engine | `python_baseline_characteristics_v1` |
-| SAS output | `work.baseline_characteristics` |
+| SAS output | `final` |
 | SAS long output | `work.baseline_characteristics_long` |
 
 ## Source and analysis universe

@@ -4,9 +4,9 @@
 options validvarname=any;
 
 /* Prepare analysis source */
-data work.{{ source.work_prefix }}_source;
+data {{ source.work_prefix }}_source;
   length trt_key trt_label $200;
-  set {{ source.library }}.{{ source.member }};
+  set {{ source.reference }};
   where {% if where_expression %}{{ where_expression }} and {% endif %}^missing({{ treatment.source }});
 {% if treatment.source_kind == "numeric" %}  trt_key=strip(put({{ treatment.source }},best32.));
 {% else %}  trt_key=strip({{ treatment.source }});
@@ -15,12 +15,12 @@ run;
 
 /* Population N */
 proc sql noprint;
-{% for count in population_counts %}  select count(distinct {{ subject }}) into :{{ count.macro }} trimmed from {{ population.library }}.{{ population.member }}{% if population_where_expression %} where {{ population_where_expression }} and {{ treatment.population }}={{ count.population_literal }};{% else %} where {{ treatment.population }}={{ count.population_literal }};{% endif %}
-{% endfor %}  select count(distinct {{ subject }}) into :{{ total_n_macro }} trimmed from {{ population.library }}.{{ population.member }}{% if population_where_expression %} where {{ population_where_expression }} and ^missing({{ treatment.population }});{% else %} where ^missing({{ treatment.population }});{% endif %}
+{% for count in population_counts %}  select count(distinct {{ subject }}) into :{{ count.macro }} trimmed from {{ population.reference }}{% if population_where_expression %} where {{ population_where_expression }} and {{ treatment.population }}={{ count.population_literal }};{% else %} where {{ treatment.population }}={{ count.population_literal }};{% endif %}
+{% endfor %}  select count(distinct {{ subject }}) into :{{ total_n_macro }} trimmed from {{ population.reference }}{% if population_where_expression %} where {{ population_where_expression }} and ^missing({{ treatment.population }});{% else %} where ^missing({{ treatment.population }});{% endif %}
 quit;
 
 /* Treatment order and population counts */
-data work.{{ source.work_prefix }}_trt;
+data {{ source.work_prefix }}_trt;
   length trt_key trt_label $200 trt_order big_n 8;
 {% for count in population_counts %}  trt_order={{ loop.index }};
   big_n=&{{ count.macro }};
@@ -38,10 +38,10 @@ data work.{{ source.work_prefix }}_trt;
 /* Validate the analysis source subject structure */
 %let duplicate_subject_ids=;
 proc sql noprint;
-  select count(*) into :missing_subject trimmed from work.{{ source.work_prefix }}_source where missing({{ subject }});
-  select count(*)-count(distinct {{ subject }}) into :duplicate_subject trimmed from work.{{ source.work_prefix }}_source;
+  select count(*) into :missing_subject trimmed from {{ source.work_prefix }}_source where missing({{ subject }});
+  select count(*)-count(distinct {{ subject }}) into :duplicate_subject trimmed from {{ source.work_prefix }}_source;
   select {{ subject }} into :duplicate_subject_ids separated by ', '
-  from work.{{ source.work_prefix }}_source
+  from {{ source.work_prefix }}_source
   where ^missing({{ subject }})
   group by {{ subject }}
   having count(*) > 1
@@ -52,7 +52,7 @@ quit;
   %if &missing_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics contains missing {{ subject }}.;
     data _null_;
-      set work.{{ source.work_prefix }}_source;
+      set {{ source.work_prefix }}_source;
       if missing({{ subject }}) then
         put "ERROR: Missing {{ subject }} at source observation " _n_ ".";
     run;
@@ -81,49 +81,49 @@ quit;
     min_decimals=0,
     max_decimals=0
 );
-proc means data=work.&work_prefix._source noprint nway missing
+proc means data=&work_prefix._source noprint nway missing
     vardef=df qntldef=5;
   class trt_key;
   var &var.;
-  output out=work.&work_prefix._stat_&order.
+  output out=&work_prefix._stat_&order.
 {% for statistic in continuous_statistics %}    {{ statistic }}={{ statistic }}{% if not loop.last %} {% endif %}{% endfor %};
 run;
 {% if include_total %}
-proc means data=work.&work_prefix._source noprint vardef=df qntldef=5;
+proc means data=&work_prefix._source noprint vardef=df qntldef=5;
   var &var.;
-  output out=work.&work_prefix._stat_total_raw_&order.
+  output out=&work_prefix._stat_total_raw_&order.
 {% for statistic in continuous_statistics %}    {{ statistic }}={{ statistic }}{% if not loop.last %} {% endif %}{% endfor %};
 run;
 
-data work.&work_prefix._stat_total_&order.;
+data &work_prefix._stat_total_&order.;
   length trt_key $200;
-  set work.&work_prefix._stat_total_raw_&order.;
+  set &work_prefix._stat_total_raw_&order.;
   trt_key="TOTAL";
 run;
 
-data work.&work_prefix._stat_all_&order.;
-  set work.&work_prefix._stat_&order. work.&work_prefix._stat_total_&order.;
+data &work_prefix._stat_all_&order.;
+  set &work_prefix._stat_&order. &work_prefix._stat_total_&order.;
 run;
 {% endif %}
 
 proc sql;
-  create table work.&work_prefix._cont_&order. as
+  create table &work_prefix._cont_&order. as
   select t.trt_order, t.trt_label, t.big_n
 {% for statistic in continuous_statistics %}         , s.{{ statistic }}
-{% endfor %}  from work.&work_prefix._trt as t
-{% if include_total %}  left join work.&work_prefix._stat_all_&order. as s
-{% else %}  left join work.&work_prefix._stat_&order. as s
+{% endfor %}  from &work_prefix._trt as t
+{% if include_total %}  left join &work_prefix._stat_all_&order. as s
+{% else %}  left join &work_prefix._stat_&order. as s
 {% endif %}
     on t.trt_key=s.trt_key
   order by t.trt_order;
 quit;
 
-data work.&work_prefix._item_&order.;
+data &work_prefix._item_&order.;
   length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200 statistic_key $200 cnt1 cnt2 $200;
-  set work.&work_prefix._cont_&order.;
+  set &work_prefix._cont_&order.;
   if _n_=1 then do;
-    row_order=&order.*100000;
+    row_order=&order.*1000;
     item_order=&order.;
     row_label=&label.;
     row_value="";
@@ -135,34 +135,34 @@ data work.&work_prefix._item_&order.;
   end;
   item_order=&order.;
   trt_label=trt_label;
-{% if "n" in continuous_statistics %}  row_order=&order.*100000+1;
+{% if "n" in continuous_statistics %}  row_order=&order.*1000+1;
   statistic_key="n";
   row_label="    n";
   row_value=strip(put(n,best.));
   output;
 
-{% endif %}{% if "mean" in continuous_statistics %}  row_order=&order.*100000+2;
+{% endif %}{% if "mean" in continuous_statistics %}  row_order=&order.*1000+2;
   statistic_key="mean";
   row_label="    Mean";
   row_value=strip(put(mean,8.&mean_decimals.));
   if missing(mean) then row_value="-";
   output;
 
-{% endif %}{% if "std" in continuous_statistics %}  row_order=&order.*100000+3;
+{% endif %}{% if "std" in continuous_statistics %}  row_order=&order.*1000+3;
   statistic_key="std";
   row_label="    SD";
   row_value=strip(put(std,8.&std_decimals.));
   if missing(std) then row_value="-";
   output;
 
-{% endif %}{% if "median" in continuous_statistics %}  row_order=&order.*100000+4;
+{% endif %}{% if "median" in continuous_statistics %}  row_order=&order.*1000+4;
   statistic_key="median";
   row_label="    Median";
   row_value=strip(put(median,8.&median_decimals.));
   if missing(median) then row_value="-";
   output;
 
-{% endif %}{% if "q1" in continuous_statistics %}  row_order=&order.*100000+5;
+{% endif %}{% if "q1" in continuous_statistics %}  row_order=&order.*1000+5;
   statistic_key="q1_q3";
   row_label="    Q1, Q3";
   cnt1=strip(put(q1,8.&q1_decimals.));
@@ -172,7 +172,7 @@ data work.&work_prefix._item_&order.;
   row_value=cats(cnt1,", ",cnt2);
   output;
 
-{% endif %}{% if "min" in continuous_statistics %}  row_order=&order.*100000+6;
+{% endif %}{% if "min" in continuous_statistics %}  row_order=&order.*1000+6;
   statistic_key="min_max";
   row_label="    Min, Max";
   cnt1=strip(put(min,8.&min_decimals.));
@@ -191,9 +191,9 @@ run;
 {% for item in items %}
 {% if item.role == "categorical" %}
 /* Categorical item: {{ item.label }} */
-data work.{{ source.work_prefix }}_cat_source_{{ item.order }};
+data {{ source.work_prefix }}_cat_source_{{ item.order }};
   length level_value $200 sort_rank 8;
-  set work.{{ source.work_prefix }}_source;
+  set {{ source.work_prefix }}_source;
 {% if not item.include_missing %}  if ^missing({{ item.variable }});
 {% if item.storage_type == "numeric" %}  level_value=strip(put({{ item.variable }},best32.));
 {% else %}  level_value=strip({{ item.variable }});
@@ -207,48 +207,48 @@ data work.{{ source.work_prefix }}_cat_source_{{ item.order }};
 {% endif %}run;
 
 proc sql;
-  create table work.{{ source.work_prefix }}_cat_freq_{{ item.order }} as
+  create table {{ source.work_prefix }}_cat_freq_{{ item.order }} as
   select trt_key, level_value, count(distinct {{ subject }}) as numerator
-  from work.{{ source.work_prefix }}_cat_source_{{ item.order }}
+  from {{ source.work_prefix }}_cat_source_{{ item.order }}
   group by trt_key, level_value;
-{% if include_total %}  insert into work.{{ source.work_prefix }}_cat_freq_{{ item.order }}
+{% if include_total %}  insert into {{ source.work_prefix }}_cat_freq_{{ item.order }}
   select "TOTAL", level_value, count(distinct {{ subject }}) as numerator
-  from work.{{ source.work_prefix }}_cat_source_{{ item.order }}
+  from {{ source.work_prefix }}_cat_source_{{ item.order }}
   group by level_value;
-{% endif %}  create table work.{{ source.work_prefix }}_cat_levels_{{ item.order }} as
+{% endif %}  create table {{ source.work_prefix }}_cat_levels_{{ item.order }} as
   select level_value, min(sort_rank) as sort_rank
-  from work.{{ source.work_prefix }}_cat_source_{{ item.order }}
+  from {{ source.work_prefix }}_cat_source_{{ item.order }}
   group by level_value;
 quit;
 
-proc sort data=work.{{ source.work_prefix }}_cat_levels_{{ item.order }};
+proc sort data={{ source.work_prefix }}_cat_levels_{{ item.order }};
   by sort_rank level_value;
 run;
 
-data work.{{ source.work_prefix }}_cat_levels_{{ item.order }};
-  set work.{{ source.work_prefix }}_cat_levels_{{ item.order }};
+data {{ source.work_prefix }}_cat_levels_{{ item.order }};
+  set {{ source.work_prefix }}_cat_levels_{{ item.order }};
   level_order=_n_;
 run;
 
 proc sql;
-  create table work.{{ source.work_prefix }}_cat_{{ item.order }} as
+  create table {{ source.work_prefix }}_cat_{{ item.order }} as
   select t.trt_order, t.trt_label, t.big_n,
          l.level_order, l.level_value,
          coalesce(f.numerator,0) as numerator
-  from work.{{ source.work_prefix }}_trt as t
-  cross join work.{{ source.work_prefix }}_cat_levels_{{ item.order }} as l
-  left join work.{{ source.work_prefix }}_cat_freq_{{ item.order }} as f
+  from {{ source.work_prefix }}_trt as t
+  cross join {{ source.work_prefix }}_cat_levels_{{ item.order }} as l
+  left join {{ source.work_prefix }}_cat_freq_{{ item.order }} as f
     on t.trt_key=f.trt_key
    and l.level_value=f.level_value
   order by t.trt_order, l.level_order;
 quit;
 
-data work.{{ source.work_prefix }}_item_{{ item.order }};
+data {{ source.work_prefix }}_item_{{ item.order }};
   length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200 display_level $200 cnt1 cnt2 $200;
-  set work.{{ source.work_prefix }}_cat_{{ item.order }};
+  set {{ source.work_prefix }}_cat_{{ item.order }};
   if _n_=1 then do;
-    row_order={{ item.order }}*100000;
+    row_order={{ item.order }}*1000;
     item_order={{ item.order }};
     row_label={{ item.label | sas_string }};
     row_value="";
@@ -257,7 +257,7 @@ data work.{{ source.work_prefix }}_item_{{ item.order }};
     output;
 
   end;
-  row_order={{ item.order }}*100000+level_order;
+  row_order={{ item.order }}*1000+level_order;
   item_order={{ item.order }};
   display_level=level_value;
 {% if item.level_order == "custom" %}{% for level in item.custom_levels %}{% if item.storage_type == "numeric" %}  if level_value=strip(put({{ level.literal }},best32.)) then display_level={{ level.display | sas_string }};
@@ -289,39 +289,33 @@ run;
 {% endif %}
 {% endfor %}
 
-data work.{{ source.work_prefix }}_long;
+data {{ source.work_prefix }}_long;
   set
-{% for item in items %}    work.{{ source.work_prefix }}_item_{{ item.order }}
+{% for item in items %}    {{ source.work_prefix }}_item_{{ item.order }}
 {% endfor %}  ;
 run;
 
 /* Final wide result */
-proc sort data=work.{{ source.work_prefix }}_long;
+proc sort data={{ source.work_prefix }}_long;
   by row_order trt_order;
 run;
 
 proc sql;
-  create table work.{{ source.work_prefix }}_wide as
+  create table {{ source.work_prefix }}_wide as
   select row_order, max(row_label) as row_label length=200
 {% for label in treatment_labels %}       , max(case when trt_order={{ loop.index }} then row_value else "" end)
            as {{ label.column }} length=200
-{% endfor %}  from work.{{ source.work_prefix }}_long
+{% endfor %}  from {{ source.work_prefix }}_long
   group by row_order
   order by row_order;
 quit;
 
-data {{ output }}(label={{ header_label | sas_string }});
-  set work.{{ source.work_prefix }}_wide;
-  label row_label="Characteristic"
+data {{ output }};
+  set {{ source.work_prefix }}_wide;
+  label row_label=""
 {% for label in treatment_labels %}        {{ label.column }}={{ label.text | sas_double_string }}
 {% endfor %}  ;
   keep row_label{% for label in treatment_labels %} {{ label.column }}{% endfor %};
-run;
-
-data {{ long_output }};
-  set work.{{ source.work_prefix }}_long;
-  value=row_value;
-  keep row_order row_label value trt_order trt_label;
 run;
 
 proc datasets library=work nolist;

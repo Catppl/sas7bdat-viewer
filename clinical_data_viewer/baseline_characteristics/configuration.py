@@ -166,7 +166,7 @@ def build_baseline_characteristics_configuration(
             "sas": {
                 "source_library": "analysis",
                 "source_member": source_member,
-                "output_dataset": "work.baseline_characteristics",
+                "output_dataset": "work.final",
                 "long_output_dataset": "work.baseline_characteristics_long",
             }
         },

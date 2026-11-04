@@ -63,10 +63,10 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertNotIn("set work.adsl_item_2_all", folded)
         self.assertNotIn("include_n=", folded)
         self.assertIn(
-            "set work.&work_prefix._stat_&order.;\n  if _n_=1 then do;",
+            "set &work_prefix._stat_&order.;\n  if _n_=1 then do;",
             folded,
         )
-        self.assertIn("set work.adsl_cat_1;\n  if _n_=1 then do;", folded)
+        self.assertIn("set adsl_cat_1;\n  if _n_=1 then do;", folded)
         self.assertIn("vardef=df qntldef=5", folded)
         self.assertIn("if sex='f' then sort_rank=1", folded)
         self.assertIn("if ^missing(sex);", folded)
@@ -80,6 +80,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         for legacy_length in ("$12", "$16", "$32", "$80", "$256", "$320", "$400"):
             self.assertNotIn(legacy_length, folded)
         self.assertNotIn("10**(-", folded)
+        self.assertNotIn("*100000", folded)
         self.assertIn('if missing(raw_value_1) then row_value="-";', folded)
         self.assertNotIn("display_value", folded)
         self.assertNotIn("ifc(missing(raw_value_1)", folded)
@@ -87,13 +88,16 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("cnt1", folded)
         self.assertNotIn("then delete;", folded)
         self.assertNotIn("libname ", folded)
-        self.assertIn("work.baseline_characteristics_long", folded)
-        self.assertIn("work.baseline_characteristics", folded)
+        self.assertIn("data adsl_long;", folded)
+        self.assertNotIn("data baseline_characteristics_long;", folded)
+        self.assertIn("data final;", folded)
+        self.assertNotIn("data final(label=", folded)
+        self.assertNotIn("work.", folded.replace("proc datasets library=work", ""))
         self.assertNotIn("delete baseline_characteristics", folded)
         self.assertNotIn("proc append", folded)
         self.assertNotIn("stop;", folded)
         self.assertIn(
-            "set\n    work.adsl_item_1\n    work.adsl_item_2",
+            "set\n    adsl_item_1\n    adsl_item_2",
             folded,
         )
 
@@ -167,6 +171,8 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn('trt_1="placebo (n=&n1)"', folded)
         self.assertIn('trt_2="drug a (n=&n2)"', folded)
         self.assertIn('trt_3="total (n=&nt)"', folded)
+        self.assertIn('label row_label=""', folded)
+        self.assertIn("data final;", folded)
         self.assertIn("where saffl = 'y' and ^missing(trt);", folded)
         self.assertNotIn("if ^missing(trt);", folded)
         self.assertIn("noprint nway missing", folded)
@@ -178,7 +184,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("%baseline_continuous(", folded)
         self.assertNotIn("include_total=", folded)
         self.assertIn(
-            "set work.&work_prefix._cont_&order.;\n  if _n_=1 then do;",
+            "set &work_prefix._cont_&order.;\n  if _n_=1 then do;",
             folded,
         )
         self.assertIn("select usubjid into :duplicate_subject_ids separated by ', '", folded)
@@ -193,15 +199,17 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn("big_n=&n1", folded)
         self.assertIn("big_n=&n2", folded)
         self.assertIn('"total"', folded)
+        self.assertNotIn("*100000", folded)
         self.assertIn("&work_prefix._stat_total_&order.", folded)
         self.assertIn("&work_prefix._stat_all_&order.", folded)
         self.assertIn('"total"', folded)
         self.assertNotIn("proc append", folded)
         self.assertNotIn("stop;", folded)
         self.assertIn(
-            "set\n    work.adsl_item_1",
+            "set\n    adsl_item_1",
             folded,
         )
+        self.assertNotIn("work.", folded.replace("proc datasets library=work", ""))
         self.assertIn("from analysis.adsl", folded)
         self.assertNotIn("_bc_population", folded)
         self.assertNotIn("treatment columns is not available", folded)

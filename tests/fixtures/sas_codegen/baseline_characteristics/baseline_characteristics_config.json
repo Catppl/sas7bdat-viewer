@@ -202,7 +202,7 @@
     "sas": {
       "source_library": "analysis",
       "source_member": "adsl",
-      "output_dataset": "work.baseline_characteristics_test",
+      "output_dataset": "work.final",
       "long_output_dataset": "work.baseline_characteristics_long_test"
     }
   },
