@@ -189,6 +189,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertNotIn('if key2 = "" then do;', code)
         self.assertNotIn("value1_text", code)
         self.assertNotIn("value2_text", code)
+        self.assertNotIn('then\n        row_value', code)
         self.assertIn("data pm_labels;", code)
         self.assertIn("vardef=df qntldef=5 alpha=0.05", code)
         self.assertNotIn("data long_aval_", code)
@@ -294,6 +295,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("length statistic row_value $200;", code)
         self.assertIn("var row_value;", code)
         self.assertNotIn('if key2 = "" then do;', code)
+        self.assertNotIn('then\n        row_value', code)
         self.assertNotIn("data long_aval_", code)
         self.assertNotIn("resolved_hierarchy", code)
 
@@ -346,6 +348,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
             code,
         )
         self.assertNotIn('if key2 = "" then do;', code)
+        self.assertNotIn('then\n        row_value', code)
         self.assertNotIn("display_dec =", code)
         self.assertNotIn("stat_label = 'Lclm';", code)
         self.assertNotIn("stat_label = 'Uclm';", code)
@@ -373,6 +376,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
             code,
         )
         self.assertNotIn('if key2 = "" then do;', code)
+        self.assertNotIn('then\n        row_value', code)
         self.assertNotIn("display_dec =", code)
 
 

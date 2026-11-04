@@ -265,36 +265,21 @@ data pm_long;
     length stat row_value $200;
     set pm_display;
     stat = stat_label;
-    if key1 in ("subjects", "n", "nmiss") and missing(value1) then
-        row_value = "—";
-    else if key1 in ("subjects", "n", "nmiss") then
-        row_value = strip(put(value1, 3.));
-    else if analysis = 'age' and key1 = 'mean' and missing(value1) then
-        row_value = "—";
-    else if analysis = 'age' and key1 = 'mean' then
-        row_value = strip(put(value1, 8.1));
-    else if analysis = 'age' and key1 = 'std' and missing(value1) then
-        row_value = "—";
-    else if analysis = 'age' and key1 = 'std' then
-        row_value = strip(put(value1, 8.2));
-    else if analysis = 'age' and key1 = 'median' and missing(value1) then
-        row_value = "—";
-    else if analysis = 'age' and key1 = 'median' then
-        row_value = strip(put(value1, 8.1));
-    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' and missing(value1) and missing(value2) then
-        row_value = "—, —";
-    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' then
-        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
-    else if analysis = 'age' and key1 = 'min' and key2 = 'max' and missing(value1) and missing(value2) then
-        row_value = "—, —";
-    else if analysis = 'age' and key1 = 'min' and key2 = 'max' then
-        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.0))), ifc(missing(value2), "—", strip(put(value2, 8.0))));
-    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' and missing(value1) and missing(value2) then
-        row_value = "—, —";
-    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' then
-        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
-    else
-        row_value = "—";
+    if key1 in ("subjects", "n", "nmiss") and missing(value1) then row_value = "—";
+    else if key1 in ("subjects", "n", "nmiss") then row_value = strip(put(value1, 3.));
+    else if analysis = 'age' and key1 = 'mean' and missing(value1) then row_value = "—";
+    else if analysis = 'age' and key1 = 'mean' then row_value = strip(put(value1, 8.1));
+    else if analysis = 'age' and key1 = 'std' and missing(value1) then row_value = "—";
+    else if analysis = 'age' and key1 = 'std' then row_value = strip(put(value1, 8.2));
+    else if analysis = 'age' and key1 = 'median' and missing(value1) then row_value = "—";
+    else if analysis = 'age' and key1 = 'median' then row_value = strip(put(value1, 8.1));
+    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' and missing(value1) and missing(value2) then row_value = "—, —";
+    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
+    else if analysis = 'age' and key1 = 'min' and key2 = 'max' and missing(value1) and missing(value2) then row_value = "—, —";
+    else if analysis = 'age' and key1 = 'min' and key2 = 'max' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.0))), ifc(missing(value2), "—", strip(put(value2, 8.0))));
+    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' and missing(value1) and missing(value2) then row_value = "—, —";
+    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' then row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
+    else row_value = "—";
     keep row_ord item stat trt_ord row_value;
 run;
 
