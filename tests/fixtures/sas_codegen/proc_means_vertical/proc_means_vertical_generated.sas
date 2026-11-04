@@ -54,9 +54,6 @@ proc sql noprint;
 quit;
 
 
-%let base_age = 0;
-
-
 /* Statistics for AGE */
 proc means data=adlb noprint nway missing
     vardef=df qntldef=5 alpha=0.05;
@@ -248,72 +245,6 @@ data pm_labels;
     keep analysis stat_order item stat_label key1 key2;
 run;
 
-/* Centralized decimal rules for all analysis variables and statistics */
-data pm_decimals;
-    length analysis $32 stat_key $32 base_dec add_dec display_dec 8;
-    analysis = 'age';
-    stat_key = 'n';
-    base_dec = &base_age;
-    add_dec = 0;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'mean';
-    base_dec = &base_age;
-    add_dec = 1;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'std';
-    base_dec = &base_age;
-    add_dec = 2;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'median';
-    base_dec = &base_age;
-    add_dec = 1;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'q1';
-    base_dec = &base_age;
-    add_dec = 1;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'q3';
-    base_dec = &base_age;
-    add_dec = 1;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'min';
-    base_dec = &base_age;
-    add_dec = 0;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'max';
-    base_dec = &base_age;
-    add_dec = 0;
-    display_dec = min(4, base_dec + add_dec);
-    output;
-    analysis = 'age';
-    stat_key = 'lclm';
-    base_dec = &base_age;
-    add_dec = 0;
-    display_dec = 1;
-    output;
-    analysis = 'age';
-    stat_key = 'uclm';
-    base_dec = &base_age;
-    add_dec = 0;
-    display_dec = 1;
-    output;
-    keep analysis stat_key base_dec add_dec display_dec;
-run;
-
 data pm_values;
     set
         values_age
@@ -322,40 +253,85 @@ run;
 
 proc sql;
     create table pm_display as
-    select v.*, l.item, l.stat_label,
-           d1.display_dec as dec1,
-           d2.display_dec as dec2
+    select v.*, l.item, l.stat_label
     from pm_values as v
     left join pm_labels as l
         on v.analysis = l.analysis
-       and v.stat_order = l.stat_order
-    left join pm_decimals as d1
-        on v.analysis = d1.analysis
-       and v.key1 = d1.stat_key
-    left join pm_decimals as d2
-        on v.analysis = d2.analysis
-       and v.key2 = d2.stat_key;
+       and v.stat_order = l.stat_order;
 quit;
 
-/* Format every statistic in one display step. PUTN is intentional because AUTO decimals are resolved at run time. */
+/* Format every statistic using backend-resolved PUT formats. */
 data pm_long;
-    length stat row_value $200;
+    length stat row_value value1_text value2_text $200;
     set pm_display;
     stat = stat_label;
     if key2 = "" then do;
         if key1 in ("subjects", "n", "nmiss") then
-            row_value = strip(put(value1, 12.));
+            row_value = strip(put(value1, 3.));
         else if missing(value1) then
             row_value = "—";
-        else
-            row_value = strip(putn(value1, cats("32.", dec1)));
+        else if analysis = 'age' and key1 = 'mean' then
+            row_value = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'std' then
+            row_value = strip(put(value1, 8.2));
+        else if analysis = 'age' and key1 = 'median' then
+            row_value = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'q1' then
+            row_value = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'q3' then
+            row_value = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'min' then
+            row_value = strip(put(value1, 8.0));
+        else if analysis = 'age' and key1 = 'max' then
+            row_value = strip(put(value1, 8.0));
+        else if analysis = 'age' and key1 = 'lclm' then
+            row_value = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'uclm' then
+            row_value = strip(put(value1, 8.1));
     end;
     else if missing(value1) and missing(value2) then
         row_value = "—, —";
-    else
-        row_value = catx(", ",
-            ifc(missing(value1), "—", strip(putn(value1, cats("32.", dec1)))),
-            ifc(missing(value2), "—", strip(putn(value2, cats("32.", dec2)))));
+    else do;
+        if missing(value1) then value1_text = "—";
+        else if analysis = 'age' and key1 = 'mean' then
+            value1_text = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'std' then
+            value1_text = strip(put(value1, 8.2));
+        else if analysis = 'age' and key1 = 'median' then
+            value1_text = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'q1' then
+            value1_text = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'q3' then
+            value1_text = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'min' then
+            value1_text = strip(put(value1, 8.0));
+        else if analysis = 'age' and key1 = 'max' then
+            value1_text = strip(put(value1, 8.0));
+        else if analysis = 'age' and key1 = 'lclm' then
+            value1_text = strip(put(value1, 8.1));
+        else if analysis = 'age' and key1 = 'uclm' then
+            value1_text = strip(put(value1, 8.1));
+        if missing(value2) then value2_text = "—";
+        else if analysis = 'age' and key2 = 'mean' then
+            value2_text = strip(put(value2, 8.1));
+        else if analysis = 'age' and key2 = 'std' then
+            value2_text = strip(put(value2, 8.2));
+        else if analysis = 'age' and key2 = 'median' then
+            value2_text = strip(put(value2, 8.1));
+        else if analysis = 'age' and key2 = 'q1' then
+            value2_text = strip(put(value2, 8.1));
+        else if analysis = 'age' and key2 = 'q3' then
+            value2_text = strip(put(value2, 8.1));
+        else if analysis = 'age' and key2 = 'min' then
+            value2_text = strip(put(value2, 8.0));
+        else if analysis = 'age' and key2 = 'max' then
+            value2_text = strip(put(value2, 8.0));
+        else if analysis = 'age' and key2 = 'lclm' then
+            value2_text = strip(put(value2, 8.1));
+        else if analysis = 'age' and key2 = 'uclm' then
+            value2_text = strip(put(value2, 8.1));
+        row_value = catx(", ", value1_text, value2_text);
+    end;
     keep row_ord item stat trt_ord row_value;
 run;
 
@@ -384,8 +360,8 @@ run;
 /* Clean up intermediate WORK tables */
 proc datasets library=work nolist;
     delete adlb adsl
-        trt0 trt pm_labels pm_decimals pm_values pm_display pm_long
-        stat_age subj_age out_age values_age dec_age
+        trt0 trt pm_labels pm_values pm_display pm_long
+        stat_age subj_age out_age values_age
         total_age total_age_n total_age_row
 ;
 quit;

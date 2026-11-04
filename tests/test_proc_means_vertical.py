@@ -115,6 +115,29 @@ class ProcMeansVerticalTests(unittest.TestCase):
 
             self.assertEqual(levels, ("A", "B"))
 
+    def test_resolve_base_decimals_materializes_auto_values_for_codegen(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = make_vertical_handle(
+                root,
+                "ADLB",
+                (("S1", "A", 1.1, 2.22), ("S2", "B", 2.22, 3.333)),
+            )
+            config = ProcMeansVerticalConfig(
+                analysis_variables=("AVAL", "CHG"),
+                group_variables=("TRT01A",),
+                treatment_variable="TRT01A",
+                population_treatment_variable="TRT01A",
+                statistics=("mean",),
+                base_decimals=(("AVAL", None), ("CHG", None)),
+            )
+
+            decimals = ProcMeansVerticalEngine(
+                TempManager(root / "temp")
+            ).resolve_base_decimals(source, config)
+
+            self.assertEqual(decimals, {"AVAL": 2, "CHG": 3})
+
     def test_groups_as_rows_materialize_context_as_result_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

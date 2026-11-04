@@ -414,6 +414,33 @@ class SasProcMeansVerticalGenerator:
             )
             total_n_macro = "n1"
 
+        runtime_base_decimals = {
+            str(key).casefold(): int(value)
+            for key, value in dict(runtime.get("base_decimals", {})).items()
+        }
+        for analysis in rows:
+            base_decimal = analysis["base_decimal"]
+            if base_decimal is None:
+                base_decimal = runtime_base_decimals.get(
+                    str(analysis["name"]).casefold()
+                )
+            if base_decimal is None:
+                raise ValueError(
+                    "SAS generation requires resolved base decimals for "
+                    f"{analysis['name']}. Set Base Decimal Places or provide "
+                    "runtime base decimals."
+                )
+            analysis["display_decimals"] = {
+                key: (
+                    row["fixed_decimals"]
+                    if row["fixed_decimals"] is not None
+                    else min(4, int(base_decimal) + offsets.get(key, 0))
+                )
+                for row in statistic_rows
+                for key in row["keys"]
+                if key not in {"subjects", "n", "nmiss"}
+            }
+
         return {
             "version": 1,
             "source": {

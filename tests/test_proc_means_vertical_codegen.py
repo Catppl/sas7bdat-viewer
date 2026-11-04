@@ -177,10 +177,12 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("data work.pm_vertical;", code)
         self.assertIn('col1 = "A (N=&n1)"', code)
         self.assertIn("where not missing(AVAL)", code)
-        self.assertIn("base_aval", code)
-        self.assertIn("base_chg", code)
-        self.assertIn("data pm_decimals;", code)
-        self.assertIn("display_dec = min(4, base_dec + add_dec);", code)
+        self.assertNotIn("base_aval", code)
+        self.assertNotIn("base_chg", code)
+        self.assertNotIn("data pm_decimals;", code)
+        self.assertNotIn("putn(", code)
+        self.assertIn("row_value = strip(put(value1, 8.2));", code)
+        self.assertIn("value1_text = strip(put(value1, 8.1));", code)
         self.assertIn("data pm_labels;", code)
         self.assertIn("vardef=df qntldef=5 alpha=0.05", code)
         self.assertNotIn("data long_aval_", code)
@@ -192,6 +194,28 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         configuration.pop("_runtime")
 
         with self.assertRaisesRegex(ValueError, "No Population treatment levels"):
+            SasProcMeansVerticalGenerator().generate(configuration)
+
+    def test_generator_uses_backend_resolved_base_decimals(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = self._configuration(Path(temporary))
+        configuration["display"]["base_decimals"] = {"AVAL": None, "CHG": None}
+        configuration["_runtime"]["base_decimals"] = {"AVAL": 1, "CHG": 2}
+
+        code = SasProcMeansVerticalGenerator().generate(configuration)
+
+        self.assertNotIn("base_aval", code)
+        self.assertNotIn("base_chg", code)
+        self.assertIn("row_value = strip(put(value1, 8.2));", code)
+        self.assertIn("row_value = strip(put(value1, 8.3));", code)
+
+    def test_generator_requires_resolved_base_decimals_for_auto(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = self._configuration(Path(temporary))
+        configuration["display"]["base_decimals"] = {"AVAL": None, "CHG": None}
+        configuration["_runtime"].pop("base_decimals", None)
+
+        with self.assertRaisesRegex(ValueError, "requires resolved base decimals"):
             SasProcMeansVerticalGenerator().generate(configuration)
 
     def test_generator_uses_numeric_population_literals(self) -> None:
@@ -260,8 +284,10 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("coalesce(s.n, 0) as n", code)
         self.assertIn("by output_row group item statistic", code)
         self.assertIn("prefix=col", code)
-        self.assertIn("data pm_decimals;", code)
-        self.assertIn("length statistic row_value $200;", code)
+        self.assertNotIn("data pm_decimals;", code)
+        self.assertIn(
+            "length statistic row_value value1_text value2_text $200;", code
+        )
         self.assertIn("var row_value;", code)
         self.assertNotIn("data long_aval_", code)
         self.assertNotIn("resolved_hierarchy", code)
@@ -292,7 +318,7 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertEqual(code.count("data values_aval;"), 1)
         self.assertNotIn("data values_chg;", code)
         self.assertEqual(code.count("data pm_labels;"), 1)
-        self.assertEqual(code.count("data pm_decimals;"), 1)
+        self.assertNotIn("data pm_decimals;", code)
         self.assertEqual(code.count("data pm_long;"), 1)
         self.assertNotIn("data long_aval_", code)
 
@@ -310,7 +336,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("stat_label = '90% CI Mean';", code)
         self.assertIn("key1 = 'lclm';", code)
         self.assertIn("key2 = 'uclm';", code)
-        self.assertEqual(code.count("display_dec = 1;"), 4)
+        self.assertIn("row_value = strip(put(value1, 8.1));", code)
+        self.assertNotIn("display_dec =", code)
         self.assertNotIn("stat_label = 'Lclm';", code)
         self.assertNotIn("stat_label = 'Uclm';", code)
 
@@ -332,7 +359,8 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("stat_label = '95% CI Mean';", code)
         self.assertIn("key1 = 'lclm';", code)
         self.assertIn("key2 = 'uclm';", code)
-        self.assertEqual(code.count("display_dec = 1;"), 4)
+        self.assertIn("row_value = strip(put(value1, 8.1));", code)
+        self.assertNotIn("display_dec =", code)
 
 
 if __name__ == "__main__":

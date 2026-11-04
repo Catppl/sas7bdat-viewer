@@ -152,6 +152,58 @@ class ProcMeansVerticalEngine:
             return ()
         return tuple(sorted(counts, key=lambda value: _group_sort_key((value,))))
 
+    def resolve_base_decimals(
+        self,
+        source: DatasetHandle,
+        config: ProcMeansVerticalConfig,
+    ) -> dict[str, int]:
+        """Resolve Auto base decimals before rendering SAS code."""
+        config.validate(source.metadata)
+        configured = {
+            key.casefold(): value
+            for key, value in config.base_decimals
+            if value is not None
+        }
+        unresolved = {
+            name.casefold()
+            for name in config.analysis_variables
+            if name.casefold() not in configured
+        }
+        if not unresolved:
+            return {
+                name: int(configured[name.casefold()])
+                for name in config.analysis_variables
+            }
+
+        fields = {
+            variable.name.casefold(): variable for variable in source.metadata.variables
+        }
+        analyses = tuple(fields[name.casefold()] for name in config.analysis_variables)
+        where, parameters = self._where(config.compiled_filter)
+        sql = "SELECT " + ", ".join(
+            quote_identifier(variable.name) for variable in analyses
+        )
+        sql += f" FROM dataset{where}"
+        observed = {variable.name.casefold(): 0 for variable in analyses}
+        with closing(
+            sqlite3.connect(
+                source.database_path.resolve().as_uri() + "?mode=ro", uri=True
+            )
+        ) as connection:
+            for row in connection.execute(sql, parameters):
+                for index, variable in enumerate(analyses):
+                    value = row[index]
+                    if value is None:
+                        continue
+                    observed[variable.name.casefold()] = max(
+                        observed[variable.name.casefold()],
+                        min(4, observed_decimal_places(float(value))),
+                    )
+        return {
+            name: int(configured.get(name.casefold(), observed[name.casefold()]))
+            for name in config.analysis_variables
+        }
+
     def _run_rows(
         self,
         source: DatasetHandle,

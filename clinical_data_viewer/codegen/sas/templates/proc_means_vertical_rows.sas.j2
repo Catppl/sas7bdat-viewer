@@ -127,29 +127,6 @@ data row_pop;
 run;
 
 {% for analysis in analysis %}
-{% if analysis.base_decimal is none %}
-/* Determine base decimals for {{ analysis.name }} from the current source */
-data dec_{{ analysis.token }};
-    set {{ source.work_member | sas_name }}(keep={{ analysis.name | sas_name }});
-    if not missing({{ analysis.name | sas_name }});
-    base_dec = 0;
-    do dec = 0 to 4;
-        unit = 10 ** (-dec);
-        if abs({{ analysis.name | sas_name }} - round({{ analysis.name | sas_name }}, unit))
-           <= max(1E-12, abs({{ analysis.name | sas_name }}) * 1E-12) then do;
-            base_dec = dec;
-            leave;
-        end;
-    end;
-    keep base_dec;
-run;
-proc sql noprint;
-    select coalesce(max(base_dec), 0) into :base_{{ analysis.token }} trimmed
-    from dec_{{ analysis.token }};
-quit;
-{% else %}%let base_{{ analysis.token }} = {{ analysis.base_decimal }};
-{% endif %}
-
 /* Statistics for {{ analysis.name }} */
 proc means data={{ source.work_member | sas_name }} noprint nway missing
     vardef=df qntldef=5 alpha={{ alpha }};
@@ -267,19 +244,6 @@ data pm_labels;
 {% endfor %}{% endfor %}    keep analysis stat_order item stat_label key1 key2;
 run;
 
-/* Centralized decimal rules for all analysis variables and statistics */
-data pm_decimals;
-    length analysis $32 stat_key $32 base_dec add_dec display_dec 8;
-{% for analysis in analysis %}{% for row in statistics %}{% for key in row["keys"] %}    analysis = {{ analysis.token | sas_string }};
-    stat_key = {{ key | sas_string }};
-    base_dec = &base_{{ analysis.token }};
-    add_dec = {{ offsets.get(key, 0) }};
-{% if row.fixed_decimals is not none %}    display_dec = {{ row.fixed_decimals }};
-{% else %}    display_dec = min(4, base_dec + add_dec);
-{% endif %}    output;
-{% endfor %}{% endfor %}{% endfor %}    keep analysis stat_key base_dec add_dec display_dec;
-run;
-
 data pm_values;
     set
 {% for analysis in analysis %}        values_{{ analysis.token }}
@@ -288,40 +252,38 @@ run;
 
 proc sql;
     create table pm_display as
-    select v.*, l.item, l.stat_label,
-           d1.display_dec as dec1,
-           d2.display_dec as dec2
+    select v.*, l.item, l.stat_label
     from pm_values as v
     left join pm_labels as l
         on v.analysis = l.analysis
-       and v.stat_order = l.stat_order
-    left join pm_decimals as d1
-        on v.analysis = d1.analysis
-       and v.key1 = d1.stat_key
-    left join pm_decimals as d2
-        on v.analysis = d2.analysis
-       and v.key2 = d2.stat_key;
+       and v.stat_order = l.stat_order;
 quit;
 
-/* Format every statistic in one display step */
+/* Format every statistic using backend-resolved PUT formats. */
 data pm_long;
-    length statistic row_value $200;
+    length statistic row_value value1_text value2_text $200;
     set pm_display;
     statistic = stat_label;
     if key2 = "" then do;
         if key1 in ("subjects", "n", "nmiss") then
-            row_value = strip(put(value1, 12.));
+            row_value = strip(put(value1, 3.));
         else if missing(value1) then
             row_value = "—";
-        else
-            row_value = strip(putn(value1, cats("32.", dec1)));
+{% for analysis in analysis %}{% for key, decimals in analysis.display_decimals.items() %}        else if analysis = {{ analysis.token | sas_string }} and key1 = {{ key | sas_string }} then
+            row_value = strip(put(value1, 8.{{ decimals }}));
+{% endfor %}{% endfor %}
     end;
     else if missing(value1) and missing(value2) then
         row_value = "—, —";
-    else
-        row_value = catx(", ",
-            ifc(missing(value1), "—", strip(putn(value1, cats("32.", dec1)))),
-            ifc(missing(value2), "—", strip(putn(value2, cats("32.", dec2)))));
+    else do;
+        if missing(value1) then value1_text = "—";
+{% for analysis in analysis %}{% for key, decimals in analysis.display_decimals.items() %}        else if analysis = {{ analysis.token | sas_string }} and key1 = {{ key | sas_string }} then
+            value1_text = strip(put(value1, 8.{{ decimals }}));
+{% endfor %}{% endfor %}        if missing(value2) then value2_text = "—";
+{% for analysis in analysis %}{% for key, decimals in analysis.display_decimals.items() %}        else if analysis = {{ analysis.token | sas_string }} and key2 = {{ key | sas_string }} then
+            value2_text = strip(put(value2, 8.{{ decimals }}));
+{% endfor %}{% endfor %}        row_value = catx(", ", value1_text, value2_text);
+    end;
     keep output_row group item statistic col_ord row_value;
 run;
 
@@ -353,8 +315,8 @@ quit;
 proc datasets library=work nolist;
     delete {{ source.work_member | sas_name }}{% if not population_source.reuse_analysis_data %} {{ population_source.work_member | sas_name }}{% endif %}
         row0 row row_pop col0 col col_n
-        pm_labels pm_decimals pm_values pm_display pm_long
-{% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} grid_{{ analysis.token }} out_{{ analysis.token }} values_{{ analysis.token }} dec_{{ analysis.token }}
+        pm_labels pm_values pm_display pm_long
+{% for analysis in analysis %}        stat_{{ analysis.token }} subj_{{ analysis.token }} grid_{{ analysis.token }} out_{{ analysis.token }} values_{{ analysis.token }}
 {% if include_total %}        stat_total_{{ analysis.token }} subj_total_{{ analysis.token }} out_total_{{ analysis.token }}
 {% endif %}{% endfor %};
 quit;

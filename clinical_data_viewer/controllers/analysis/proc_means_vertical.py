@@ -380,7 +380,10 @@ class ProcMeansVerticalController(AnalysisModuleController):
                         config,
                         population_tab.handle if population_tab else None,
                     )
-                )
+                ),
+                "base_decimals": self._engine.resolve_base_decimals(
+                    source_tab.handle, config
+                ),
             }
             code = self._sas_generator.generate(configuration)
         except (KeyError, TypeError, ValueError) as error:
