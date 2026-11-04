@@ -7,8 +7,7 @@ options validvarname=any;
 data work.adsl_source;
   length trt_key trt_label $200;
   set analysis.adsl;
-  where SAFFL = 'Y';
-  if ^missing(TRT01A);
+  where SAFFL = 'Y' and ^missing(TRT01A);
   trt_key=strip(TRT01A);
   trt_label=trt_key;
 run;
@@ -41,18 +40,31 @@ data work.adsl_trt;
 run;
 
 /* Validate the analysis source subject structure */
+%let duplicate_subject_ids=;
 proc sql noprint;
   select count(*) into :missing_subject trimmed from work.adsl_source where missing(USUBJID);
   select count(*)-count(distinct USUBJID) into :duplicate_subject trimmed from work.adsl_source;
+  select USUBJID into :duplicate_subject_ids separated by ', '
+  from work.adsl_source
+  where ^missing(USUBJID)
+  group by USUBJID
+  having count(*) > 1
+  order by USUBJID;
 quit;
 
 %macro validate_subjects;
   %if &missing_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics contains missing USUBJID.;
+    data _null_;
+      set work.adsl_source;
+      if missing(USUBJID) then
+        put "ERROR: Missing USUBJID at source observation " _n_ ".";
+    run;
     %abort cancel;
   %end;
   %if &duplicate_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics requires one row per USUBJID.;
+    %put ERROR: Duplicate USUBJID values: &duplicate_subject_ids.;
     %abort cancel;
   %end;
 %mend;
@@ -60,16 +72,14 @@ quit;
 
 /* Long rows are calculated once, then transposed to treatment columns. */
 data work.adsl_long;
-  length row_order item_order 8 row_label $320 row_value $80
+  length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200;
   stop;
 run;
 
-
-
 /* Categorical item: Sex */
 data work.adsl_cat_source_1;
-  length level_value $400 sort_rank 8;
+  length level_value $200 sort_rank 8;
   set work.adsl_source;
   if missing(SEX) then level_value="Missing";
   else level_value=strip(SEX);
@@ -117,8 +127,8 @@ proc sql;
 quit;
 
 data work.adsl_item_1;
-  length row_order item_order 8 row_label $320 row_value $80
-         trt_order 8 trt_label $200 display_level $400 cnt1 cnt2 $32;
+  length row_order item_order 8 row_label $200 row_value $200
+         trt_order 8 trt_label $200 display_level $200 cnt1 cnt2 $200;
   row_order=1*100000; item_order=1;
   row_label='Sex'; row_value="";
   trt_order=1; trt_label=""; output;
@@ -137,8 +147,6 @@ data work.adsl_item_1;
 run;
 
 proc append base=work.adsl_long data=work.adsl_item_1 force; run;
-
-
 
 /* Continuous item: Age (years) */
 proc means data=work.adsl_source noprint vardef=df qntldef=5;
@@ -163,7 +171,6 @@ data work.adsl_stat_all_2;
   set work.adsl_stat_2 work.adsl_stat_total_2;
 run;
 
-
 proc sql;
   create table work.adsl_cont_2 as
   select t.trt_order, t.trt_label, t.big_n,
@@ -175,7 +182,7 @@ proc sql;
 quit;
 
 data work.adsl_item_2;
-  length row_order item_order 8 row_label $320 row_value $80
+  length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200;
   row_order=2*100000; item_order=2;
   row_label='Age (years)'; row_value="";
@@ -213,8 +220,6 @@ run;
 
 proc append base=work.adsl_long data=work.adsl_item_2 force; run;
 
-
-
 /* Continuous item: Body Mass Index (kg/m2) */
 proc means data=work.adsl_source noprint vardef=df qntldef=5;
   class trt_key;
@@ -238,7 +243,6 @@ data work.adsl_stat_all_3;
   set work.adsl_stat_3 work.adsl_stat_total_3;
 run;
 
-
 proc sql;
   create table work.adsl_cont_3 as
   select t.trt_order, t.trt_label, t.big_n,
@@ -250,7 +254,7 @@ proc sql;
 quit;
 
 data work.adsl_item_3;
-  length row_order item_order 8 row_label $320 row_value $80
+  length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200;
   row_order=3*100000; item_order=3;
   row_label='Body Mass Index (kg/m2)'; row_value="";
@@ -276,8 +280,6 @@ run;
 
 proc append base=work.adsl_long data=work.adsl_item_3 force; run;
 
-
-
 /* Final wide result */
 proc sort data=work.adsl_long;
   by row_order trt_order;
@@ -285,13 +287,13 @@ run;
 
 proc sql;
   create table work.adsl_wide as
-  select row_order, max(row_label) as row_label length=320
+  select row_order, max(row_label) as row_label length=200
        , max(case when trt_order=1 then row_value else "" end)
-           as TRT_1 length=80
+           as TRT_1 length=200
        , max(case when trt_order=2 then row_value else "" end)
-           as TRT_2 length=80
+           as TRT_2 length=200
        , max(case when trt_order=3 then row_value else "" end)
-           as TRT_3 length=80
+           as TRT_3 length=200
   from work.adsl_long
   group by row_order
   order by row_order;

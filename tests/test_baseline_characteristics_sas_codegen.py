@@ -53,6 +53,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
     def test_renders_filter_subject_count_and_fixed_continuous_contract(self) -> None:
         code = SasBaselineCharacteristicsGenerator().generate(self.configuration())
         folded = code.casefold()
+        self.assertNotIn("\n\n\n", code)
         self.assertIn("where saffl = 'y'", folded)
         self.assertIn("count(distinct", folded)
         self.assertIn("proc means", folded)
@@ -64,6 +65,11 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertNotIn("vvalue(", folded)
         self.assertNotIn("putn(", folded)
         self.assertIn("put(round(raw_value_1,0.1),8.1)", folded)
+        self.assertIn("select usubjid into :duplicate_subject_ids separated by ', '", folded)
+        self.assertIn("duplicate usubjid values: &duplicate_subject_ids.", folded)
+        self.assertIn("missing usubjid at source observation", folded)
+        for legacy_length in ("$12", "$16", "$32", "$80", "$256", "$320", "$400"):
+            self.assertNotIn(legacy_length, folded)
         self.assertNotIn("10**(-", folded)
         self.assertIn('if missing(raw_value_1) then row_value="-";', folded)
         self.assertNotIn("display_value", folded)
@@ -138,6 +144,7 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         configuration["_runtime"] = {"population_levels": ["Placebo", "Drug A"]}
         code = SasBaselineCharacteristicsGenerator().generate(configuration)
         folded = code.casefold()
+        self.assertNotIn("\n\n\n", code)
         self.assertIn("into :n1 trimmed", folded)
         self.assertIn("into :n2 trimmed", folded)
         self.assertIn("count(distinct usubjid)", folded)
@@ -145,8 +152,13 @@ class BaselineCharacteristicsSasCodegenTests(unittest.TestCase):
         self.assertIn('trt_1="placebo (n=&n1)"', folded)
         self.assertIn('trt_2="drug a (n=&n2)"', folded)
         self.assertIn('trt_3="total (n=&nt)"', folded)
-        self.assertIn("if ^missing(trt);", folded)
-        self.assertNotIn("data _null_;", folded)
+        self.assertIn("where saffl = 'y' and ^missing(trt);", folded)
+        self.assertNotIn("if ^missing(trt);", folded)
+        self.assertIn("select usubjid into :duplicate_subject_ids separated by ', '", folded)
+        self.assertIn("duplicate usubjid values: &duplicate_subject_ids.", folded)
+        for legacy_length in ("$12", "$16", "$32", "$80", "$256", "$320", "$400"):
+            self.assertNotIn(legacy_length, folded)
+        self.assertIn("data _null_;", folded)
         self.assertNotIn("vvalue(", folded)
         self.assertNotIn("putn(", folded)
         self.assertIn("put(round(mean,0.1),8.1)", folded)

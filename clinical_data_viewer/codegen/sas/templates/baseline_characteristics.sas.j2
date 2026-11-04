@@ -8,30 +8,43 @@ data work.{{ source.work_prefix }}_source;
 {% if where_expression %}  where {{ where_expression }};
 {% endif %}run;
 
+%let duplicate_subject_ids=;
 proc sql noprint;
   select count(distinct {{ subject }}) into :n1 trimmed
 {% if population_is_source %}  from work.{{ source.work_prefix }}_source{% else %}  from {{ population.library }}.{{ population.member }}{% endif %}{% if population_where_expression %} where {{ population_where_expression }};{% else %};{% endif %}
   select count(*) into :missing_subject trimmed from work.{{ source.work_prefix }}_source where missing({{ subject }});
   select count(*)-count(distinct {{ subject }}) into :duplicate_subject trimmed from work.{{ source.work_prefix }}_source;
+  select {{ subject }} into :duplicate_subject_ids separated by ', '
+  from work.{{ source.work_prefix }}_source
+  where ^missing({{ subject }})
+  group by {{ subject }}
+  having count(*) > 1
+  order by {{ subject }};
 quit;
 
 %macro validate_subjects;
   %if &missing_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics contains missing {{ subject }}.;
+    data _null_;
+      set work.{{ source.work_prefix }}_source;
+      if missing({{ subject }}) then
+        put "ERROR: Missing {{ subject }} at source observation " _n_ ".";
+    run;
     %abort cancel;
   %end;
   %if &duplicate_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics requires one row per {{ subject }}.;
+    %put ERROR: Duplicate {{ subject }} values: &duplicate_subject_ids.;
     %abort cancel;
   %end;
 %mend;
 %validate_subjects;
 
 data {{ long_output }};
-  length row_order item_order 8 item_kind $12 variable $32 item_label $256 unit $80
-         row_label $320 level_value display_level $400 statistic_key $16
-         raw_value_1 raw_value_2 numerator denominator percent 8 row_value $80
-         cnt1 cnt2 $32;
+  length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
+         row_label $200 level_value display_level $200 statistic_key $200
+         raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200
+         cnt1 cnt2 $200;
   stop;
 run;
 
@@ -39,7 +52,7 @@ run;
 {% if item.role == "categorical" %}
 /* Categorical item: {{ item.label }} */
 data work.{{ source.work_prefix }}_cat_source_{{ item.order }};
-  length level_value $400 sort_rank 8;
+  length level_value $200 sort_rank 8;
   set work.{{ source.work_prefix }}_source;
 {% if not item.include_missing %}  if ^missing({{ item.variable }});
 {% if item.storage_type == "numeric" %}  level_value=strip(put({{ item.variable }},best32.));
@@ -65,9 +78,9 @@ proc sql;
 quit;
 
 data work.{{ source.work_prefix }}_item_{{ item.order }};
-  length row_order item_order 8 item_kind $12 variable $32 item_label $256 unit $80
-         row_label $320 level_value $400 statistic_key $16
-         raw_value_1 raw_value_2 numerator denominator percent 8 row_value $80;
+  length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
+         row_label $200 level_value $200 statistic_key $200
+         raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200;
   if _n_=1 then do;
     row_order={{ item.order }}*100000; item_order={{ item.order }};
     item_kind="categorical"; variable={{ item.variable | sas_string }};
@@ -94,9 +107,9 @@ proc means data=work.{{ source.work_prefix }}_source noprint vardef=df qntldef=5
 run;
 
 data work.{{ source.work_prefix }}_item_{{ item.order }};
-  length row_order item_order 8 item_kind $12 variable $32 item_label $256 unit $80
-         row_label $320 level_value $400 statistic_key $16
-         raw_value_1 raw_value_2 numerator denominator percent 8 row_value $80;
+  length row_order item_order 8 item_kind $200 variable $200 item_label $200 unit $200
+         row_label $200 level_value $200 statistic_key $200
+         raw_value_1 raw_value_2 numerator denominator percent 8 row_value $200;
   set work.{{ source.work_prefix }}_stat_{{ item.order }};
   item_order={{ item.order }}; item_kind="continuous";
   variable={{ item.variable | sas_string }}; item_label={{ item.label | sas_string }};
@@ -138,7 +151,7 @@ run;
 
 data {{ output }}(label={{ header_label | sas_string }});
   set {{ long_output }};
-  length value $80;
+  length value $200;
   value=row_value;
   keep row_label value;
 run;

@@ -7,11 +7,9 @@ options validvarname=any;
 data work.{{ source.work_prefix }}_source;
   length trt_key trt_label $200;
   set {{ source.library }}.{{ source.member }};
-{% if where_expression %}  where {{ where_expression }};
-{% endif %}{% if treatment.source_kind == "numeric" %}  if ^missing({{ treatment.source }});
-  trt_key=strip(put({{ treatment.source }},best32.));
-{% else %}  if ^missing({{ treatment.source }});
-  trt_key=strip({{ treatment.source }});
+  where {% if where_expression %}{{ where_expression }} and {% endif %}^missing({{ treatment.source }});
+{% if treatment.source_kind == "numeric" %}  trt_key=strip(put({{ treatment.source }},best32.));
+{% else %}  trt_key=strip({{ treatment.source }});
 {% endif %}  trt_label=trt_key;
 run;
 
@@ -38,18 +36,31 @@ data work.{{ source.work_prefix }}_trt;
 {% endif %}run;
 
 /* Validate the analysis source subject structure */
+%let duplicate_subject_ids=;
 proc sql noprint;
   select count(*) into :missing_subject trimmed from work.{{ source.work_prefix }}_source where missing({{ subject }});
   select count(*)-count(distinct {{ subject }}) into :duplicate_subject trimmed from work.{{ source.work_prefix }}_source;
+  select {{ subject }} into :duplicate_subject_ids separated by ', '
+  from work.{{ source.work_prefix }}_source
+  where ^missing({{ subject }})
+  group by {{ subject }}
+  having count(*) > 1
+  order by {{ subject }};
 quit;
 
 %macro validate_subjects;
   %if &missing_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics contains missing {{ subject }}.;
+    data _null_;
+      set work.{{ source.work_prefix }}_source;
+      if missing({{ subject }}) then
+        put "ERROR: Missing {{ subject }} at source observation " _n_ ".";
+    run;
     %abort cancel;
   %end;
   %if &duplicate_subject > 0 %then %do;
     %put ERROR: Baseline Characteristics requires one row per {{ subject }}.;
+    %put ERROR: Duplicate {{ subject }} values: &duplicate_subject_ids.;
     %abort cancel;
   %end;
 %mend;
@@ -57,7 +68,7 @@ quit;
 
 /* Long rows are calculated once, then transposed to treatment columns. */
 data work.{{ source.work_prefix }}_long;
-  length row_order item_order 8 row_label $320 row_value $80
+  length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200;
   stop;
 run;
@@ -66,7 +77,7 @@ run;
 {% if item.role == "categorical" %}
 /* Categorical item: {{ item.label }} */
 data work.{{ source.work_prefix }}_cat_source_{{ item.order }};
-  length level_value $400 sort_rank 8;
+  length level_value $200 sort_rank 8;
   set work.{{ source.work_prefix }}_source;
 {% if not item.include_missing %}  if ^missing({{ item.variable }});
 {% if item.storage_type == "numeric" %}  level_value=strip(put({{ item.variable }},best32.));
@@ -118,8 +129,8 @@ proc sql;
 quit;
 
 data work.{{ source.work_prefix }}_item_{{ item.order }};
-  length row_order item_order 8 row_label $320 row_value $80
-         trt_order 8 trt_label $200 display_level $400 cnt1 cnt2 $32;
+  length row_order item_order 8 row_label $200 row_value $200
+         trt_order 8 trt_label $200 display_level $200 cnt1 cnt2 $200;
   row_order={{ item.order }}*100000; item_order={{ item.order }};
   row_label={{ item.label | sas_string }}; row_value="";
   trt_order=1; trt_label=""; output;
@@ -174,7 +185,7 @@ proc sql;
 quit;
 
 data work.{{ source.work_prefix }}_item_{{ item.order }};
-  length row_order item_order 8 row_label $320 row_value $80
+  length row_order item_order 8 row_label $200 row_value $200
          trt_order 8 trt_label $200;
   row_order={{ item.order }}*100000; item_order={{ item.order }};
   row_label={{ item.label | sas_string }}; row_value="";
@@ -213,9 +224,9 @@ run;
 
 proc sql;
   create table work.{{ source.work_prefix }}_wide as
-  select row_order, max(row_label) as row_label length=320
+  select row_order, max(row_label) as row_label length=200
 {% for label in treatment_labels %}       , max(case when trt_order={{ loop.index }} then row_value else "" end)
-           as {{ label.column }} length=80
+           as {{ label.column }} length=200
 {% endfor %}  from work.{{ source.work_prefix }}_long
   group by row_order
   order by row_order;

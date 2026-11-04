@@ -532,7 +532,8 @@ class SasBaselineCharacteristicsGenerator:
                 if context["treatment"]["enabled"]
                 else "baseline_characteristics.sas.j2"
             )
-            return self.environment.get_template(template_name).render(**context)
+            rendered = self.environment.get_template(template_name).render(**context)
+            return re.sub(r"\n{3,}", "\n\n", rendered)
         except TemplateError as error:
             raise ValueError(
                 f"Baseline Characteristics SAS template failed: {error}"
