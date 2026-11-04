@@ -262,76 +262,39 @@ quit;
 
 /* Format every statistic using backend-resolved PUT formats. */
 data pm_long;
-    length stat row_value value1_text value2_text $200;
+    length stat row_value $200;
     set pm_display;
     stat = stat_label;
-    if key2 = "" then do;
-        if key1 in ("subjects", "n", "nmiss") then
-            row_value = strip(put(value1, 3.));
-        else if missing(value1) then
-            row_value = "—";
-        else if analysis = 'age' and key1 = 'mean' then
-            row_value = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'std' then
-            row_value = strip(put(value1, 8.2));
-        else if analysis = 'age' and key1 = 'median' then
-            row_value = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'q1' then
-            row_value = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'q3' then
-            row_value = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'min' then
-            row_value = strip(put(value1, 8.0));
-        else if analysis = 'age' and key1 = 'max' then
-            row_value = strip(put(value1, 8.0));
-        else if analysis = 'age' and key1 = 'lclm' then
-            row_value = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'uclm' then
-            row_value = strip(put(value1, 8.1));
-    end;
-    else if missing(value1) and missing(value2) then
+    if key1 in ("subjects", "n", "nmiss") and missing(value1) then
+        row_value = "—";
+    else if key1 in ("subjects", "n", "nmiss") then
+        row_value = strip(put(value1, 3.));
+    else if analysis = 'age' and key1 = 'mean' and missing(value1) then
+        row_value = "—";
+    else if analysis = 'age' and key1 = 'mean' then
+        row_value = strip(put(value1, 8.1));
+    else if analysis = 'age' and key1 = 'std' and missing(value1) then
+        row_value = "—";
+    else if analysis = 'age' and key1 = 'std' then
+        row_value = strip(put(value1, 8.2));
+    else if analysis = 'age' and key1 = 'median' and missing(value1) then
+        row_value = "—";
+    else if analysis = 'age' and key1 = 'median' then
+        row_value = strip(put(value1, 8.1));
+    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' and missing(value1) and missing(value2) then
         row_value = "—, —";
-    else do;
-        if missing(value1) then value1_text = "—";
-        else if analysis = 'age' and key1 = 'mean' then
-            value1_text = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'std' then
-            value1_text = strip(put(value1, 8.2));
-        else if analysis = 'age' and key1 = 'median' then
-            value1_text = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'q1' then
-            value1_text = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'q3' then
-            value1_text = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'min' then
-            value1_text = strip(put(value1, 8.0));
-        else if analysis = 'age' and key1 = 'max' then
-            value1_text = strip(put(value1, 8.0));
-        else if analysis = 'age' and key1 = 'lclm' then
-            value1_text = strip(put(value1, 8.1));
-        else if analysis = 'age' and key1 = 'uclm' then
-            value1_text = strip(put(value1, 8.1));
-        if missing(value2) then value2_text = "—";
-        else if analysis = 'age' and key2 = 'mean' then
-            value2_text = strip(put(value2, 8.1));
-        else if analysis = 'age' and key2 = 'std' then
-            value2_text = strip(put(value2, 8.2));
-        else if analysis = 'age' and key2 = 'median' then
-            value2_text = strip(put(value2, 8.1));
-        else if analysis = 'age' and key2 = 'q1' then
-            value2_text = strip(put(value2, 8.1));
-        else if analysis = 'age' and key2 = 'q3' then
-            value2_text = strip(put(value2, 8.1));
-        else if analysis = 'age' and key2 = 'min' then
-            value2_text = strip(put(value2, 8.0));
-        else if analysis = 'age' and key2 = 'max' then
-            value2_text = strip(put(value2, 8.0));
-        else if analysis = 'age' and key2 = 'lclm' then
-            value2_text = strip(put(value2, 8.1));
-        else if analysis = 'age' and key2 = 'uclm' then
-            value2_text = strip(put(value2, 8.1));
-        row_value = catx(", ", value1_text, value2_text);
-    end;
+    else if analysis = 'age' and key1 = 'q1' and key2 = 'q3' then
+        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
+    else if analysis = 'age' and key1 = 'min' and key2 = 'max' and missing(value1) and missing(value2) then
+        row_value = "—, —";
+    else if analysis = 'age' and key1 = 'min' and key2 = 'max' then
+        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.0))), ifc(missing(value2), "—", strip(put(value2, 8.0))));
+    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' and missing(value1) and missing(value2) then
+        row_value = "—, —";
+    else if analysis = 'age' and key1 = 'lclm' and key2 = 'uclm' then
+        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));
+    else
+        row_value = "—";
     keep row_ord item stat trt_ord row_value;
 run;
 

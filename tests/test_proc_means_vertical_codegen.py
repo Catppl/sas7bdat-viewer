@@ -182,7 +182,13 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertNotIn("data pm_decimals;", code)
         self.assertNotIn("putn(", code)
         self.assertIn("row_value = strip(put(value1, 8.2));", code)
-        self.assertIn("value1_text = strip(put(value1, 8.1));", code)
+        self.assertIn(
+            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',
+            code,
+        )
+        self.assertNotIn('if key2 = "" then do;', code)
+        self.assertNotIn("value1_text", code)
+        self.assertNotIn("value2_text", code)
         self.assertIn("data pm_labels;", code)
         self.assertIn("vardef=df qntldef=5 alpha=0.05", code)
         self.assertNotIn("data long_aval_", code)
@@ -285,10 +291,9 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("by output_row group item statistic", code)
         self.assertIn("prefix=col", code)
         self.assertNotIn("data pm_decimals;", code)
-        self.assertIn(
-            "length statistic row_value value1_text value2_text $200;", code
-        )
+        self.assertIn("length statistic row_value $200;", code)
         self.assertIn("var row_value;", code)
+        self.assertNotIn('if key2 = "" then do;', code)
         self.assertNotIn("data long_aval_", code)
         self.assertNotIn("resolved_hierarchy", code)
 
@@ -336,7 +341,11 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("stat_label = '90% CI Mean';", code)
         self.assertIn("key1 = 'lclm';", code)
         self.assertIn("key2 = 'uclm';", code)
-        self.assertIn("row_value = strip(put(value1, 8.1));", code)
+        self.assertIn(
+            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',
+            code,
+        )
+        self.assertNotIn('if key2 = "" then do;', code)
         self.assertNotIn("display_dec =", code)
         self.assertNotIn("stat_label = 'Lclm';", code)
         self.assertNotIn("stat_label = 'Uclm';", code)
@@ -359,7 +368,11 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("stat_label = '95% CI Mean';", code)
         self.assertIn("key1 = 'lclm';", code)
         self.assertIn("key2 = 'uclm';", code)
-        self.assertIn("row_value = strip(put(value1, 8.1));", code)
+        self.assertIn(
+            'row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.1))), ifc(missing(value2), "—", strip(put(value2, 8.1))));',
+            code,
+        )
+        self.assertNotIn('if key2 = "" then do;', code)
         self.assertNotIn("display_dec =", code)
 
 

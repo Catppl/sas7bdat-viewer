@@ -195,28 +195,23 @@ quit;
 
 /* Format every statistic using backend-resolved PUT formats. */
 data pm_long;
-    length stat row_value value1_text value2_text $200;
+    length stat row_value $200;
     set pm_display;
     stat = stat_label;
-    if key2 = "" then do;
-        if key1 in ("subjects", "n", "nmiss") then
-            row_value = strip(put(value1, 3.));
-        else if missing(value1) then
-            row_value = "—";
-{% for analysis in analysis %}{% for key, decimals in analysis.display_decimals.items() %}        else if analysis = {{ analysis.token | sas_string }} and key1 = {{ key | sas_string }} then
-            row_value = strip(put(value1, 8.{{ decimals }}));
-{% endfor %}{% endfor %}    end;
-    else if missing(value1) and missing(value2) then
+    if key1 in ("subjects", "n", "nmiss") and missing(value1) then
+        row_value = "—";
+    else if key1 in ("subjects", "n", "nmiss") then
+        row_value = strip(put(value1, 3.));
+{% for analysis in analysis %}{% for row in analysis.format_rows %}{% if row["keys"]|length > 1 %}    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} and missing(value1) and missing(value2) then
         row_value = "—, —";
-    else do;
-        if missing(value1) then value1_text = "—";
-{% for analysis in analysis %}{% for key, decimals in analysis.display_decimals.items() %}        else if analysis = {{ analysis.token | sas_string }} and key1 = {{ key | sas_string }} then
-            value1_text = strip(put(value1, 8.{{ decimals }}));
-{% endfor %}{% endfor %}        if missing(value2) then value2_text = "—";
-{% for analysis in analysis %}{% for key, decimals in analysis.display_decimals.items() %}        else if analysis = {{ analysis.token | sas_string }} and key2 = {{ key | sas_string }} then
-            value2_text = strip(put(value2, 8.{{ decimals }}));
-{% endfor %}{% endfor %}        row_value = catx(", ", value1_text, value2_text);
-    end;
+    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and key2 = {{ row["keys"][1] | sas_string }} then
+        row_value = catx(", ", ifc(missing(value1), "—", strip(put(value1, 8.{{ row["decimals"][0] }}))), ifc(missing(value2), "—", strip(put(value2, 8.{{ row["decimals"][1] }}))));
+{% else %}    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} and missing(value1) then
+        row_value = "—";
+    else if analysis = {{ analysis.token | sas_string }} and key1 = {{ row["keys"][0] | sas_string }} then
+        row_value = strip(put(value1, 8.{{ row["decimals"][0] }}));
+{% endif %}{% endfor %}{% endfor %}    else
+        row_value = "—";
     keep row_ord item stat trt_ord row_value;
 run;
 

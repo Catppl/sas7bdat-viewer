@@ -440,6 +440,17 @@ class SasProcMeansVerticalGenerator:
                 for key in row["keys"]
                 if key not in {"subjects", "n", "nmiss"}
             }
+            analysis["format_rows"] = [
+                {
+                    "keys": row["keys"],
+                    "decimals": [
+                        analysis["display_decimals"].get(key)
+                        for key in row["keys"]
+                    ],
+                }
+                for row in statistic_rows
+                if row["keys"][0] not in {"subjects", "n", "nmiss"}
+            ]
 
         return {
             "version": 1,
