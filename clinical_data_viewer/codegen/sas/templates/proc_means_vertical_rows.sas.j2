@@ -133,7 +133,7 @@ run;
     var=,
     token=,
     label=,
-    row_base=,
+    order=,
     mean_decimals=,
     std_decimals=,
     stderr_decimals=,
@@ -145,7 +145,6 @@ run;
     lclm_decimals=,
     uclm_decimals=
 );
-%local stat_order;
 /* Statistics for &var. */
 proc means data={{ source.work_member | sas_name }} noprint nway missing
     vardef=df qntldef=5 alpha={{ alpha }};
@@ -233,10 +232,8 @@ data values_&token.;
     set out_&token.{% if include_total %} out_total_&token.{% endif %};
     length analysis $32 group $200 key1 key2 $32 value1 value2 8 row_value $200;
     analysis = "&token.";
-    %let stat_order = 0;
-{% for row in statistics %}    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    output_row = (row_ord - 1) * {{ analysis_count * (statistics|length) }} + %eval(&row_base. + &stat_order.);
+{% for row in statistics %}    stat_order = {{ loop.index }};
+    output_row = (row_ord - 1) * {{ analysis_count * (statistics|length) }} + %eval((&order. - 1) * {{ statistics|length }} + {{ loop.index }});
     key1 = {{ row["keys"][0] | sas_string }};
 {% if row["keys"]|length > 1 %}    key2 = {{ row["keys"][1] | sas_string }};
 {% else %}    key2 = "";
@@ -267,10 +264,8 @@ run;
 /* Centralized display labels for this analysis variable */
 data labels_&token.;
     length analysis $32 item $200 stat_label $40 key1 key2 $32;
-    %let stat_order = 0;
-{% for row in statistics %}    %let stat_order = %eval(&stat_order. + 1);
+{% for row in statistics %}    stat_order = {{ loop.index }};
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = {{ row.label | sas_string }};
     key1 = {{ row["keys"][0] | sas_string }};
@@ -285,7 +280,7 @@ run;
     var={{ analysis.name | sas_name }},
     token={{ analysis.token }},
     label=%str({{ analysis.label | sas_string }}),
-    row_base={{ (analysis.index - 1) * (statistics|length) }},
+    order={{ analysis.index }},
     mean_decimals={{ analysis.display_decimals.get("mean", 0) }},
     std_decimals={{ analysis.display_decimals.get("std", 0) }},
     stderr_decimals={{ analysis.display_decimals.get("stderr", 0) }},

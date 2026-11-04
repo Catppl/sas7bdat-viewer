@@ -59,11 +59,13 @@ class ProcMeansVerticalCodegenTests(unittest.TestCase):
         self.assertIn("work.proc_means_res", code)
         self.assertIn("trt_ord", code)
         self.assertEqual(code.count("%proc_means_vertical("), 2)
-        self.assertIn("row_base=0", code)
-        self.assertIn("row_base=5", code)
-        self.assertIn("%local stat_order;", code)
-        self.assertIn("%let stat_order = %eval(&stat_order. + 1);", code)
-        self.assertIn("stat_order = &stat_order.;", code)
+        self.assertIn("order=1", code)
+        self.assertIn("order=2", code)
+        self.assertIn(
+            "stat_order = 1;",
+            code,
+        )
+        self.assertIn("row_ord = %eval((&order. - 1) * 5 + 1);", code)
         self.assertIn("if TRT01A = 'A' then trt_ord = 1;", code)
         self.assertIn("else if TRT01A = 'B' then trt_ord = 2;", code)
         self.assertNotIn("select coalesce(max(trt_ord), 0) into :n_trt", code)

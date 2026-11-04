@@ -51,7 +51,7 @@ run;
     var=,
     token=,
     label=,
-    row_base=,
+    order=,
     mean_decimals=,
     std_decimals=,
     stderr_decimals=,
@@ -63,7 +63,6 @@ run;
     lclm_decimals=,
     uclm_decimals=
 );
-%local stat_order;
 /* Statistics for &var. */
 proc means data=adlb noprint nway missing
     vardef=df qntldef=5 alpha=0.05;
@@ -146,58 +145,50 @@ data values_&token.;
     set out_&token. total_&token._row;
     length analysis $32 key1 key2 $32 value1 value2 8 row_value $200;
     analysis = "&token.";
-    %let stat_order = 0;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 1;
+    row_ord = %eval((&order. - 1) * 7 + 1);
     key1 = 'n';
     key2 = "";
     value1 = n;
     value2 = .;
     output;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 2;
+    row_ord = %eval((&order. - 1) * 7 + 2);
     key1 = 'mean';
     key2 = "";
     value1 = mean;
     value2 = .;
     output;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 3;
+    row_ord = %eval((&order. - 1) * 7 + 3);
     key1 = 'std';
     key2 = "";
     value1 = std;
     value2 = .;
     output;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 4;
+    row_ord = %eval((&order. - 1) * 7 + 4);
     key1 = 'median';
     key2 = "";
     value1 = median;
     value2 = .;
     output;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 5;
+    row_ord = %eval((&order. - 1) * 7 + 5);
     key1 = 'q1';
     key2 = 'q3';
     value1 = q1;
     value2 = q3;
     output;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 6;
+    row_ord = %eval((&order. - 1) * 7 + 6);
     key1 = 'min';
     key2 = 'max';
     value1 = min;
     value2 = max;
     output;
-    %let stat_order = %eval(&stat_order. + 1);
-    stat_order = &stat_order.;
-    row_ord = %eval(&row_base. + &stat_order.);
+    stat_order = 7;
+    row_ord = %eval((&order. - 1) * 7 + 7);
     key1 = 'lclm';
     key2 = 'uclm';
     value1 = lclm;
@@ -231,58 +222,50 @@ run;
 /* Centralized display labels for this analysis variable */
 data labels_&token.;
     length analysis $32 item $200 stat_label $40 key1 key2 $32;
-    %let stat_order = 0;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 1;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = 'n';
     key1 = 'n';
     key2 = "";
     output;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 2;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = 'Mean';
     key1 = 'mean';
     key2 = "";
     output;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 3;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = 'Std';
     key1 = 'std';
     key2 = "";
     output;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 4;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = 'Median';
     key1 = 'median';
     key2 = "";
     output;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 5;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = 'Q1, Q3';
     key1 = 'q1';
     key2 = 'q3';
     output;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 6;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = 'Min, Max';
     key1 = 'min';
     key2 = 'max';
     output;
-    %let stat_order = %eval(&stat_order. + 1);
+    stat_order = 7;
     analysis = "&token.";
-    stat_order = &stat_order.;
     item = &label.;
     stat_label = '95% CI Mean';
     key1 = 'lclm';
@@ -296,7 +279,7 @@ run;
     var=AGE,
     token=age,
     label=%str('Age (years)'),
-    row_base=0,
+    order=1,
     mean_decimals=1,
     std_decimals=2,
     stderr_decimals=0,
