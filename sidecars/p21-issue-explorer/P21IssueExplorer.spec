@@ -35,7 +35,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=[str(repository_root / "assets" / "SASDataViewer.ico")],
+    icon=[str(repository_root / "assets" / "p21-issue-explorer.ico")],
 )
 
 bundle = COLLECT(

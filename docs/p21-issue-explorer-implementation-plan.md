@@ -146,7 +146,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 ### 工作内容
 
 - 建立 side-car 独立 package、入口和测试配置。
-- 实现 `Issue Details` worksheet 精确选择。
+- 实现跨 worksheets 的 `Issue Details` 逻辑名称选择，不依赖 tab 顺序。
 - 实现必需列驱动的表头发现，不依赖第 6 行。
 - 实现 Count/Record 第一版范围过滤。
 - 建立 typed issue model 和 import diagnostics。
@@ -165,7 +165,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 ### 实施结果（2026-11-05）
 
 - 已建立 `sidecars/p21-issue-explorer` 独立 package、console entry point 和独立依赖声明。
-- report reader 使用 openpyxl read-only/data-only 模式，只选择精确 `Issue Details`。
+- report reader 使用 openpyxl read-only/data-only 模式，只选择逻辑名称为 `Issue Details` 的 worksheet，并保留实际 tab 名。
 - required header 在前 100 行按 trim/case-insensitive 列名发现，不依赖固定行号。
 - 已实现 Count/Record 范围过滤、SHA-256 report fingerprint、typed issue model 和 import diagnostics。
 - 独立 PySide6 UI 支持选择 report、后台导入、错误显示及 AE/LB domain selector，不引用 SAS Viewer package。

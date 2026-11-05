@@ -47,11 +47,7 @@ class P21ReportReader:
                 data_only=True,
                 keep_links=False,
             )
-            if ISSUE_DETAILS_SHEET not in workbook.sheetnames:
-                raise MissingWorksheetError(
-                    f'Worksheet "{ISSUE_DETAILS_SHEET}" was not found.'
-                )
-            worksheet = workbook[ISSUE_DETAILS_SHEET]
+            worksheet = _find_issue_details_worksheet(workbook)
             header = find_required_header(
                 worksheet.iter_rows(
                     min_row=1,
@@ -60,7 +56,9 @@ class P21ReportReader:
                 ),
                 scan_limit=self.header_scan_limit,
             )
-            return self._read_issues(path, fingerprint, worksheet, header)
+            return self._read_issues(
+                path, fingerprint, worksheet, header, worksheet.title
+            )
         except (MissingWorksheetError, HeaderDetectionError):
             raise
         except (BadZipFile, InvalidFileException, OSError, ValueError) as exc:
@@ -69,7 +67,9 @@ class P21ReportReader:
             if workbook is not None:
                 workbook.close()
 
-    def _read_issues(self, path, fingerprint, worksheet, header) -> P21Report:
+    def _read_issues(
+        self, path, fingerprint, worksheet, header, worksheet_name: str
+    ) -> P21Report:
         issues: list[P21Issue] = []
         scanned_data_rows = 0
         blank_rows = 0
@@ -128,7 +128,7 @@ class P21ReportReader:
         return P21Report(
             source_path=path,
             fingerprint=fingerprint,
-            worksheet_name=ISSUE_DETAILS_SHEET,
+            worksheet_name=worksheet_name,
             issues=tuple(issues),
             diagnostics=diagnostics,
             domains=domains,
@@ -141,6 +141,33 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _find_issue_details_worksheet(workbook):
+    """Resolve the logical Issue Details sheet without relying on tab order."""
+
+    expected = _normalize_worksheet_name(ISSUE_DETAILS_SHEET)
+    matches = [
+        worksheet
+        for worksheet in workbook.worksheets
+        if _normalize_worksheet_name(worksheet.title) == expected
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        names = ", ".join(worksheet.title for worksheet in matches)
+        raise MissingWorksheetError(
+            f'Multiple worksheets match "{ISSUE_DETAILS_SHEET}": {names}.'
+        )
+    available = ", ".join(workbook.sheetnames) or "none"
+    raise MissingWorksheetError(
+        f'Worksheet "{ISSUE_DETAILS_SHEET}" was not found. '
+        f"Available worksheets: {available}."
+    )
+
+
+def _normalize_worksheet_name(value: Any) -> str:
+    return str(value).replace("\xa0", " ").strip().casefold()
 
 
 def _row_is_blank(row: tuple[Any, ...]) -> bool:

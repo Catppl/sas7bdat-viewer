@@ -32,7 +32,7 @@
 
 ### 3.1 Worksheet
 
-- 只读取名称完全等于 `Issue Details` 的 worksheet。
+- 在所有 worksheets 中定位逻辑名称为 `Issue Details` 的 worksheet；比较时忽略首尾空格、大小写和不间断空格。
 - 不读取或合并其他 worksheets。
 - 找不到时停止导入并给出明确错误。
 

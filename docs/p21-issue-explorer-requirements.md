@@ -27,7 +27,7 @@ P21 Issue Explorer 用于读取 Pinnacle 21（P21）验证报告，在每天更�
 
 第一版只处理同时满足以下条件的 P21 issue：
 
-- 来源 worksheet 名称完全匹配 `Issue Details`。
+- 来源 worksheet 的逻辑名称匹配 `Issue Details`；识别时忽略首尾空格、大小写和不间断空格。
 - `Count` 为空。
 - `Record` 有值。
 
@@ -51,7 +51,7 @@ P21 Issue Explorer 用于读取 Pinnacle 21（P21）验证报告，在每天更�
 
 ### 4.2 Worksheet 和表头
 
-- 只读取 `Issue Details` worksheet。
+- 在所有 worksheets 中定位逻辑名称为 `Issue Details` 的 worksheet，不依赖 tab 顺序；只读取该 worksheet。
 - 缺少该 worksheet 时显示明确错误，不从其他 worksheet 推断。
 - 程序根据必需列名发现表头，不依赖表头固定在 Excel 第 6 行。
 - 必需列缺失或重复时停止导入，并列出具体列名。

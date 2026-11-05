@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from openpyxl import Workbook
 from p21_issue_explorer.report import (
     HeaderDetectionError,
     MissingWorksheetError,
@@ -41,8 +42,42 @@ class P21ReportReaderTests(unittest.TestCase):
         )
 
     def test_requires_exact_issue_details_worksheet_name(self) -> None:
-        with self.assertRaisesRegex(MissingWorksheetError, "Issue Details"):
+        with self.assertRaisesRegex(
+            MissingWorksheetError, "Issue Details.*Available worksheets"
+        ):
             self.reader.read(FIXTURES / "p21_missing_issue_details.xlsx")
+
+    def test_finds_issue_details_by_logical_name_in_non_first_sheet(self) -> None:
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "multiple-sheets.xlsx"
+            workbook = Workbook()
+            workbook.active.title = "Summary"
+            workbook.create_sheet("Configuration")
+            worksheet = workbook.create_sheet("\u00a0Issue Details\u00a0")
+            worksheet.append(
+                [
+                    "Dataset",
+                    "Record",
+                    "Count",
+                    "Variables",
+                    "Values",
+                    "Rule ID",
+                    "Message",
+                    "Impact",
+                    "Type",
+                ]
+            )
+            worksheet.append(
+                ["AE", "1", None, "AETERM", "Headache", "RULE-1", "Demo", "", ""]
+            )
+            workbook.save(source)
+            workbook.close()
+
+            report = self.reader.read(source)
+
+        self.assertEqual(report.worksheet_name, "\u00a0Issue Details\u00a0")
+        self.assertEqual(len(report.issues), 1)
+        self.assertEqual(report.issues[0].rule_id, "RULE-1")
 
     def test_reports_missing_required_column(self) -> None:
         with self.assertRaises(HeaderDetectionError) as context:
