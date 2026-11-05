@@ -249,6 +249,12 @@ class DatasetTab(QWidget):
         self.schema_notice.setVisible(bool(messages))
         layout.addWidget(self.schema_notice)
 
+        self.context_notice = QLabel()
+        self.context_notice.setObjectName("contextNotice")
+        self.context_notice.setWordWrap(True)
+        self.context_notice.hide()
+        layout.addWidget(self.context_notice)
+
         self.find_frame = QFrame()
         self.find_frame.setObjectName("findBar")
         find_layout = QHBoxLayout(self.find_frame)
@@ -397,6 +403,18 @@ class DatasetTab(QWidget):
     def set_apply_sas_date_time_formats(self, enabled: bool) -> None:
         self.apply_sas_date_time_formats = enabled
         self.model.set_apply_sas_date_time_formats(enabled)
+
+    def set_context_notice(self, text: str) -> None:
+        self.context_notice.setText(text)
+        self.context_notice.setVisible(bool(text))
+
+    def set_source_row_highlights(self, colors: dict[int, str]) -> None:
+        self.model.set_source_row_highlights(colors)
+
+    def set_materialized_where_description(self, text: str) -> None:
+        self.where_editor.setPlainText(text)
+        self.where_editor.setReadOnly(True)
+        self.apply_button.setEnabled(False)
 
     def start(self) -> None:
         initial_count = (

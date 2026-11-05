@@ -1,6 +1,6 @@
 # P21 Issue Explorer 具体施工计划
 
-状态：P0–P3 已完成；P4–P6 待施工
+状态：P0–P4 已完成；P5–P6 待施工
 
 更新日期：2026-11-05
 
@@ -244,6 +244,8 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 
 ## 9. 阶段 4：Viewer Host 与结果视图集成
 
+状态：已完成（2026-11-05）
+
 ### 工作内容
 
 - 实现 QLocalServer/QLocalSocket length-prefixed JSON 协议。
@@ -268,6 +270,17 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 
 - P21 故障不影响 Viewer 打开和普通数据查看。
 - 主程序中不存在 P21 匹配规则。
+
+### 实施结果
+
+- Viewer Host 已使用随机 server name、256-bit token、协议版本和 4-byte big-endian length-prefixed JSON；错误 token、错误版本、半包、多包和非法长度均在边界拒绝。
+- `QProcess` 只管理 side-car 生命周期，`QLocalServer/QLocalSocket` 承担业务通信；side-car 退出或 Viewer 关闭时会回收 socket、server 和本会话 snapshots，重新点击菜单可重启。
+- Viewer 已实现 Dataset Snapshot v1 builder，只导出请求变量与可用的 `STUDYID`/`USUBJID`，并由 side-car 只读打开；正常关闭 snapshot 时发送 `release_snapshot`。
+- Tools 菜单只在 manifest、协议版本、executable 和 SHA-256 完整性全部有效时显示入口；基础版或损坏扩展保持隐藏。
+- 单条 issue 与 Rule ID 汇总均新建或复用唯一的 `P21 Result View`；单条 WHERE 可见、可编辑且自动执行，Rule 汇总按 `_source_row` 去重并显示 materialized selection 及汇总数字。
+- exact rows 使用淡绿色、review rows 使用淡黄色；Not Found 仍能打开空结果视图并保留 Expected WHERE，原始 dataset tab 的 WHERE、排序、列选择和位置不变。
+- P21 匹配、状态判断和 WHERE 生成仍全部位于 side-car；Viewer 新增代码只包含通用协议、snapshot、进程和结果视图 adapter。
+- 52 个 side-car tests 与 460 个 Viewer tests 已通过；另在沙箱外完成真实 `QLocalServer/QLocalSocket` handshake → snapshot → release 往返，以及 `QProcess` 启动 → 认证 → 关闭 side-car 的 smoke test。
 
 ## 10. 阶段 5：性能、缓存和稳定性
 

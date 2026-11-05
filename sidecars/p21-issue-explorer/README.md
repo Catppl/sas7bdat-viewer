@@ -1,6 +1,6 @@
 # P21 Issue Explorer side-car
 
-This package is the optional P21 Issue Explorer process. It remains independent from the SAS Viewer host and currently implements phases P0–P3:
+This package is the optional P21 Issue Explorer process. It remains independent from the SAS Viewer host and currently implements phases P0–P4:
 
 - synthetic report and current-data contracts;
 - exact `Issue Details` worksheet selection;
@@ -15,9 +15,11 @@ This package is the optional P21 Issue Explorer process. It remains independent 
 - Expected/Applied SAS-style WHERE generation and rule summaries;
 - independent Explorer UI with domain/Rule ID selection, traceable summary counts,
   colored issue rows, candidate details, cancellation, and stale-result protection;
-- injectable Snapshot Provider and typed issue/rule view requests for the P4 host boundary.
+- injectable Snapshot Provider and typed issue/rule view requests;
+- authenticated, versioned `QLocalSocket` IPC with Viewer-provided snapshots;
+- automatic snapshot release and issue/rule result-view requests.
 
-Host-side Snapshot creation and IPC, Viewer result tabs, packaging, and Excel issue export are not implemented in P0–P3.
+The Viewer host, Dataset Snapshot v1 builder, lazy manifest-gated launcher, and reusable P21 Result View are implemented in the main package. P5 performance/cache work, P6 packaging, and deferred Excel issue export are not implemented yet.
 
 ## Run from the repository
 

@@ -54,6 +54,7 @@ class DatasetTableModel(QAbstractTableModel):
         self.highlighted_columns: set[str] = set()
         self.highlighted_rows: set[int] = set()
         self.manual_row_highlights: dict[int, QColor] = {}
+        self.source_row_highlights: dict[int, QColor] = {}
         self.apply_sas_date_time_formats = apply_sas_date_time_formats
 
     def rowCount(self, parent: QModelIndex = INVALID_INDEX) -> int:
@@ -124,10 +125,27 @@ class DatasetTableModel(QAbstractTableModel):
             return QColor("#fff2b2")
         if role == Qt.BackgroundRole and is_categorical_header:
             return QColor("#edf5fc")
+        source_rows = self._page_source_rows.get(offset, ())
+        if role == Qt.BackgroundRole and local_row < len(source_rows):
+            source_color = self.source_row_highlights.get(source_rows[local_row])
+            if source_color is not None:
+                return source_color
         manual = self.manual_highlight_color(index.row())
         if role == Qt.BackgroundRole and manual is not None:
             return manual
         return None
+
+    def set_source_row_highlights(self, colors: dict[int, str | QColor]) -> None:
+        self.source_row_highlights = {
+            int(source_row): color if isinstance(color, QColor) else QColor(color)
+            for source_row, color in colors.items()
+        }
+        if self.filtered_count and self.columns:
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(self.filtered_count - 1, len(self.columns) - 1),
+                [Qt.BackgroundRole],
+            )
 
     def _is_categorical_header(self, row: tuple[object, ...]) -> bool:
         item_level = self.metadata.categorical_item_level_column

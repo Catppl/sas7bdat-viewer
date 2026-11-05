@@ -10,7 +10,9 @@ from .snapshot_reader import DatasetSnapshot, SnapshotReader
 class SnapshotProvider(Protocol):
     """P3 boundary that P4 can replace with the Viewer IPC client."""
 
-    def open_snapshot(self, domain: str) -> DatasetSnapshot:
+    def open_snapshot(
+        self, domain: str, variables: tuple[str, ...] = ()
+    ) -> DatasetSnapshot:
         """Open a fresh read-only snapshot for one domain."""
 
 
@@ -33,7 +35,9 @@ class MappingSnapshotProvider:
     def domains(self) -> tuple[str, ...]:
         return tuple(sorted(self._snapshots))
 
-    def open_snapshot(self, domain: str) -> DatasetSnapshot:
+    def open_snapshot(
+        self, domain: str, variables: tuple[str, ...] = ()
+    ) -> DatasetSnapshot:
         try:
             path = self._snapshots[domain.upper()]
         except KeyError as error:

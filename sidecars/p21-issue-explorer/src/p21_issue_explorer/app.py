@@ -8,6 +8,8 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from . import __version__
+from .integration.protocol import PROTOCOL_VERSION
+from .ipc_client import P21IpcClient, ViewerSnapshotProvider
 from .ui import P21IssueExplorerWindow
 
 STYLE = """
@@ -41,6 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use a standalone Dataset Snapshot v1 for a domain (repeatable)",
     )
     parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument("--server-name", help="Viewer local IPC server name")
+    parser.add_argument("--session-token", help="Viewer IPC session token")
+    parser.add_argument("--protocol-version", type=int, default=PROTOCOL_VERSION)
     return parser
 
 
@@ -49,9 +54,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("P21 Issue Explorer")
     application.setStyleSheet(STYLE)
+    ipc_client = None
+    snapshot_provider = None
+    if arguments.server_name or arguments.session_token:
+        if not arguments.server_name or not arguments.session_token:
+            raise SystemExit("--server-name and --session-token must be used together")
+        snapshot_provider = ViewerSnapshotProvider()
+        ipc_client = P21IpcClient(
+            arguments.server_name,
+            arguments.session_token,
+            arguments.protocol_version,
+        )
+        ipc_client.attach_provider(snapshot_provider)
     window = P21IssueExplorerWindow(
         initial_report=arguments.report,
+        snapshot_provider=snapshot_provider,
         snapshot_paths=dict(arguments.snapshot),
+        ipc_client=ipc_client,
     )
     window.show()
+    if ipc_client is not None:
+        ipc_client.connect_to_viewer()
     return application.exec()

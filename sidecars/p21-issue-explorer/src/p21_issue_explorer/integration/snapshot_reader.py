@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -22,9 +22,16 @@ class DatasetSnapshot:
     root: Path
     manifest: SnapshotManifest
     _connection: sqlite3.Connection
+    _on_close: Callable[[], None] | None = None
+    _closed: bool = False
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self._connection.close()
+        if self._on_close is not None:
+            self._on_close()
 
     def __enter__(self) -> Self:
         return self

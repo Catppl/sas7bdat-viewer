@@ -48,6 +48,9 @@ class RuleOpenRequest:
     rule_id: str
     source_rows: tuple[object, ...]
     row_styles: tuple[CandidateRowStyle, ...]
+    p21_issue_count: int = 0
+    exact_record_count: int = 0
+    review_record_count: int = 0
     selection_description: str = "Materialized P21 candidate selection"
 
     @classmethod
@@ -71,4 +74,7 @@ class RuleOpenRequest:
                 CandidateRowStyle(source_row, status_by_row[source_row])
                 for source_row in summary.candidate_source_rows
             ),
+            p21_issue_count=summary.p21_issue_count,
+            exact_record_count=summary.current_exact_record_count,
+            review_record_count=summary.current_review_record_count,
         )

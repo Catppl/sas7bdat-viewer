@@ -33,7 +33,19 @@ from ..domain import CacheProgress, DatasetHandle
 from ..excel_exporter import LARGE_EXPORT_BYTES, ExcelExporter, ExcelExportView
 from ..filter_engine import FilterEngine
 from ..filter_history import FilterHistory
+from ..integrations.p21 import (
+    P21HostController,
+    P21SidecarManifest,
+    discover_sidecar_manifest,
+)
+from ..integrations.p21.result_view import (
+    EXACT_COLOR,
+    REVIEW_COLOR,
+    P21ResultBuilder,
+    P21ResultSpec,
+)
 from ..merge_datasets import MergeDatasetsEngine
+from ..resources import resource_path
 from ..sas_reader import SasDatasetReader
 from ..settings import (
     MIN_FOLDER_PANEL_WIDTH,
@@ -87,6 +99,8 @@ class MainWindow(QMainWindow):
         history: FilterHistory,
         workspace_favorites: WorkspaceFavoritesStore | None = None,
         parent=None,
+        *,
+        p21_manifest: P21SidecarManifest | None = None,
     ) -> None:
         super().__init__(parent)
         self.settings = settings
@@ -121,6 +135,12 @@ class MainWindow(QMainWindow):
         self._recommendation_generation = 0
         self._folder_panel_width = self.settings.folder_panel_width
         self._variables_panel_width = self.settings.variables_panel_width
+        self._p21_manifest = p21_manifest or discover_sidecar_manifest(
+            resource_path(".")
+        )
+        self._p21_host: P21HostController | None = None
+        self._p21_result_tab: DatasetTab | None = None
+        self._p21_result_builder = P21ResultBuilder(temp_manager)
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
         self.setMinimumSize(850, 560)
@@ -149,6 +169,7 @@ class MainWindow(QMainWindow):
         self._create_compare_panel()
         self._create_merge_panel()
         self._create_status_bar()
+        self._create_p21_host()
         self._sync_active_tab()
 
     def _create_actions(self) -> None:
@@ -294,6 +315,12 @@ class MainWindow(QMainWindow):
         self.merge_datasets_action.setChecked(False)
         self.settings_action = QAction("Settings…", self)
         self.settings_action.triggered.connect(self.show_settings)
+        self.p21_issue_explorer_action: QAction | None = None
+        if self._p21_manifest is not None:
+            self.p21_issue_explorer_action = QAction("P21 Issue Explorer", self)
+            self.p21_issue_explorer_action.triggered.connect(
+                self._launch_p21_issue_explorer
+            )
 
     def _create_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -323,6 +350,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.open_shift_table_long_action)
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.table_shell_gallery_action)
+        if self.p21_issue_explorer_action is not None:
+            tools_menu.addAction(self.p21_issue_explorer_action)
         tools_menu.addSeparator()
         tools_menu.addAction(self.analysis_action)
         tools_menu.addAction(self.proc_means_builder_action)
@@ -552,6 +581,152 @@ class MainWindow(QMainWindow):
     def current_dataset_tab(self) -> DatasetTab | None:
         widget = self.tabs.currentWidget()
         return widget if isinstance(widget, DatasetTab) else None
+
+    def _create_p21_host(self) -> None:
+        if self._p21_manifest is None:
+            return
+        self._p21_host = P21HostController(
+            self._p21_manifest,
+            self.temp_manager,
+            self._resolve_p21_dataset,
+            self._p21_workspace_context,
+            self._handle_p21_result_request,
+            self,
+        )
+        self._p21_host.status_changed.connect(self.task_status.setText)
+        self._p21_host.launch_failed.connect(
+            lambda message: self._show_error(
+                "P21 Issue Explorer", f"The side-car could not be started: {message}"
+            )
+        )
+
+    def _launch_p21_issue_explorer(self) -> None:
+        if self._p21_host is not None:
+            self._p21_host.launch()
+
+    def _resolve_p21_dataset(self, domain: str) -> DatasetHandle | None:
+        folded = domain.strip().casefold()
+        current = self.current_dataset_tab()
+        if (
+            current is not None
+            and current.handle.kind == "sas"
+            and current.cache_complete
+            and current.handle.metadata.name.casefold() == folded
+        ):
+            return current.handle
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if (
+                isinstance(tab, DatasetTab)
+                and tab.handle.kind == "sas"
+                and tab.cache_complete
+                and tab.handle.metadata.name.casefold() == folded
+            ):
+                return tab.handle
+        return None
+
+    def _p21_workspace_context(self) -> dict[str, object]:
+        datasets = []
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            if isinstance(tab, DatasetTab) and tab.handle.kind == "sas":
+                datasets.append(
+                    {
+                        "domain": tab.handle.metadata.name,
+                        "source_name": tab.handle.source_path.name,
+                        "cache_complete": tab.cache_complete,
+                    }
+                )
+        return {"datasets": datasets}
+
+    def _handle_p21_result_request(
+        self, message_type: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        domain = payload.get("domain")
+        rule_id = payload.get("rule_id")
+        raw_rows = payload.get("source_rows", [])
+        raw_styles = payload.get("row_styles", [])
+        if not isinstance(domain, str) or not isinstance(rule_id, str):
+            raise TypeError("P21 result request requires domain and rule_id.")
+        if not isinstance(raw_rows, list):
+            raise TypeError("P21 result source_rows must be an array.")
+        try:
+            source_rows = tuple(dict.fromkeys(int(item) for item in raw_rows))
+        except (TypeError, ValueError) as error:
+            raise ValueError("P21 result source_rows must contain integers.") from error
+        source = self._resolve_p21_dataset(domain)
+        if source is None:
+            raise ValueError(
+                f"No open current dataset is available for domain {domain}."
+            )
+        colors: dict[int, str] = {}
+        if isinstance(raw_styles, list):
+            for item in raw_styles:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    source_row = int(item.get("source_row"))
+                except (TypeError, ValueError):
+                    continue
+                status = str(item.get("status", ""))
+                color = EXACT_COLOR if "Exact" in status else REVIEW_COLOR
+                if source_row not in colors or color == EXACT_COLOR:
+                    colors[source_row] = color
+        is_rule_summary = message_type == "update_result_view"
+        where_text = str(payload.get("where_text", ""))
+        expected_where = str(payload.get("expected_where", ""))
+        issue_id = str(payload.get("issue_id", ""))
+        description = str(
+            payload.get("selection_description", "Materialized P21 candidate selection")
+        )
+        spec = P21ResultSpec(
+            domain=domain,
+            rule_id=rule_id,
+            source_rows=source_rows,
+            row_colors=tuple(colors.items()),
+            where_text=where_text,
+            expected_where=expected_where,
+            issue_id=issue_id,
+            materialized_description=description if is_rule_summary else "",
+        )
+        handle = self._p21_result_builder.build(source, spec)
+        tab = self._replace_p21_result_tab(handle)
+        tab.set_source_row_highlights(colors)
+        if is_rule_summary:
+            issue_count = int(payload.get("p21_issue_count", 0))
+            exact_count = int(payload.get("exact_record_count", 0))
+            review_count = int(payload.get("review_record_count", 0))
+            tab.set_context_notice(
+                f"Domain: {domain} | Rule ID: {rule_id} | P21 issues: "
+                f"{issue_count} | Exact records: {exact_count} | "
+                f"Review records: {review_count} | Unique candidates: "
+                f"{len(source_rows)}"
+            )
+            tab.set_materialized_where_description(description)
+        else:
+            status = str(payload.get("status", ""))
+            tab.set_context_notice(
+                f"Domain: {domain} | Rule ID: {rule_id} | Issue: {issue_id} | "
+                f"Status: {status} | Candidates: {len(source_rows)}"
+            )
+            tab.where_editor.setPlainText(where_text or expected_where)
+            self._apply_filter(tab, where_text or expected_where)
+        return {"title": "P21 Result View", "record_count": len(source_rows)}
+
+    def _replace_p21_result_tab(self, handle: DatasetHandle) -> DatasetTab:
+        insert_at = self.tabs.count()
+        if self._p21_result_tab is not None:
+            current_index = self.tabs.indexOf(self._p21_result_tab)
+            if current_index >= 0:
+                insert_at = current_index
+                self.close_tab(current_index)
+        tab = self._make_dataset_tab(handle)
+        self._p21_result_tab = tab
+        self.tabs.insertTab(insert_at, tab, "P21 Result View")
+        self.tabs.setCurrentWidget(tab)
+        self._sync_active_tab()
+        tab.start()
+        return tab
 
     # WorkspaceController host surface. Workspace discovery and persistence
     # remain outside MainWindow; these adapters only expose existing UI/lifecycle
@@ -2216,6 +2391,8 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         widget = self.tabs.widget(index)
+        if widget is self._p21_result_tab:
+            self._p21_result_tab = None
         if widget in self._compare_input_tabs:
             QMessageBox.information(
                 self,
@@ -2432,6 +2609,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._closing = True
+        if self._p21_host is not None:
+            self._p21_host.shutdown()
         self._remember_navigation_panel_widths()
         for workers in self._workers.values():
             for worker in workers:

@@ -70,7 +70,10 @@ class _RuleMatchTask(QRunnable):
     def run(self) -> None:
         try:
             results: list[IssueMatchResult] = []
-            with self.provider.open_snapshot(self.domain) as snapshot:
+            requested_variables = _requested_snapshot_variables(self.issues)
+            with self.provider.open_snapshot(
+                self.domain, requested_variables
+            ) as snapshot:
                 total = len(self.issues)
                 for index, issue in enumerate(self.issues, start=1):
                     if self._cancelled.is_set():
@@ -95,6 +98,25 @@ class _RuleMatchTask(QRunnable):
                 self.signals.failed.emit(str(exc))
         finally:
             self.signals.finished.emit()
+
+
+def _requested_snapshot_variables(
+    issues: tuple[P21Issue, ...],
+) -> tuple[str, ...]:
+    """Return local P21 variables without applying any matching semantics."""
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for issue in issues:
+        for raw_name in issue.variables.split(","):
+            name = raw_name.strip()
+            if not name or ":" in name or name.casefold().endswith("seq"):
+                continue
+            folded = name.casefold()
+            if folded not in seen:
+                seen.add(folded)
+                names.append(name)
+    return tuple(names)
 
 
 class ExplorerPage(ImportPage):
