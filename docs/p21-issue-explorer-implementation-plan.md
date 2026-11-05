@@ -1,6 +1,6 @@
 # P21 Issue Explorer 具体施工计划
 
-状态：用户决策已确认，尚未开始编码
+状态：P0–P2 已完成；P3–P6 待施工
 
 更新日期：2026-11-05
 
@@ -14,7 +14,7 @@
 - [架构设计](p21-issue-explorer-design.md)
 - [匹配规范](p21-issue-matching-spec.md)
 
-本计划只描述施工，不代表已经开始实现。第 12 节记录用户已经确认的最终选择。
+本计划同时记录施工阶段、已完成结果和后续验收。第 12 节记录用户已经确认的最终选择。
 
 ### 施工前强制阅读
 
@@ -113,7 +113,7 @@ tests/integration/p21/
 
 side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `openpyxl` 以 read-only/data-only 方式读取 `.xlsx`；SQLite 使用 Python 标准库。依赖固定在 side-car 自己的 `pyproject.toml`，不无条件加入基础 Viewer 包。
 
-## 5. 阶段 0：冻结合同和合成样本
+## 5. 阶段 0：冻结合同和合成样本（已完成）
 
 ### 工作内容
 
@@ -133,7 +133,15 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 第 12 节影响第一版行为的项目全部确认。
 - fixture 预期结果可人工复核。
 
-## 6. 阶段 1：独立 side-car 骨架和 report reader
+### 实施结果（2026-11-05）
+
+- 已建立包含 9 条 eligible issues 的合成 `Issue Details` workbook，表头位于第 7 行。
+- 已建立缺少 worksheet、缺少 required column、重复 required column 三个错误 workbook。
+- 已建立 AE/LB 当前数据 CSV、变量类型 metadata 和 `expected_matches.json`。
+- 合同覆盖 strict exact、80% review、lenient review、Not Found、Cannot Evaluate、numeric/character null、字符逗号、cross-domain、SEQ 忽略和多 candidate。
+- 所有 identifier 和值均为合成内容，不包含真实临床数据。
+
+## 6. 阶段 1：独立 side-car 骨架和 report reader（已完成）
 
 ### 工作内容
 
@@ -154,7 +162,16 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - report reader 对所有合成输入给出确定结果。
 - 错误 report 不导致进程崩溃。
 
-## 7. 阶段 2：Snapshot 合同和匹配核心
+### 实施结果（2026-11-05）
+
+- 已建立 `sidecars/p21-issue-explorer` 独立 package、console entry point 和独立依赖声明。
+- report reader 使用 openpyxl read-only/data-only 模式，只选择精确 `Issue Details`。
+- required header 在前 100 行按 trim/case-insensitive 列名发现，不依赖固定行号。
+- 已实现 Count/Record 范围过滤、SHA-256 report fingerprint、typed issue model 和 import diagnostics。
+- 独立 PySide6 UI 支持选择 report、后台导入、错误显示及 AE/LB domain selector，不引用 SAS Viewer package。
+- 15 个 side-car tests、Ruff lint、side-car format check 和独立 wheel 安装 smoke test 已通过。
+
+## 7. 阶段 2：Snapshot 合同和匹配核心（已完成）
 
 ### 工作内容
 
@@ -178,6 +195,17 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 
 - 匹配核心不依赖 Qt UI。
 - 给定 report model + snapshot，输出可序列化且可完整解释。
+
+### 实施结果（2026-11-05）
+
+- 已固化 Dataset Snapshot v1 manifest，并实现 schema version、domain、变量类型、表/列、行数及 `_source_row` 唯一索引验证。
+- side-car 通过 SQLite URI `mode=ro` 和 `query_only` 读取 snapshot，不写入 Viewer 内部存储。
+- 已实现 metadata 驱动的 character/numeric/DTC/null 比较；numeric 使用十进制语义，character lenient 仅忽略大小写和首尾空格。
+- Values 对齐保留原始逗号与空格，运行所有受类型约束的合法映射，再由完整 record candidate 结果消歧；歧义映射全部保留并按 `_source_row` 去重。
+- 已实现 strict exact、`ceil(0.8 × N)` review、USUBJID anchor、SEQ/cross-domain 排除以及 Q15 exact 命中后停止。
+- 已实现 Expected WHERE、candidate-specific Applied WHERE、单 issue 计数、Rule ID 汇总和可序列化解释模型。
+- 40 个 side-car tests 已通过，覆盖冻结的 9 条端到端合同、阈值上下边界、多逗号、歧义、重复运行一致性和 Viewer WHERE parser/filter engine 兼容性。
+- matching、integration 和 models 核心不引用 Qt 或 `clinical_data_viewer`；Viewer 兼容仅存在于测试层。
 
 ## 8. 阶段 3：独立 Explorer UI
 

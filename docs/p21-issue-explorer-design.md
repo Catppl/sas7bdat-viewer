@@ -1,6 +1,6 @@
 # P21 Issue Explorer 架构设计
 
-状态：第一版设计基线已确认，尚未开始实现
+状态：第一版设计基线已确认；P0–P2 side-car 与匹配核心已实现，Host/IPC 尚未施工
 
 更新日期：2026-11-05
 
@@ -178,6 +178,29 @@ side-car 不应直接读取 Viewer 当前内部缓存数据库。内部数据库
 - `_source_row` 字段名
 - 变量名、SAS 类型、SQLite 类型和可空性
 - 包含的变量集合
+
+第一版固定字段结构如下；新增可选字段不得改变已有字段语义，破坏性变更必须提升 `snapshot_schema_version`：
+
+```json
+{
+  "snapshot_schema_version": 1,
+  "snapshot_id": "session-generated-id",
+  "created_at": "2026-11-05T00:00:00Z",
+  "domain": "AE",
+  "source_fingerprint": "host-generated-fingerprint",
+  "source_row_count": 100,
+  "table_name": "records",
+  "source_row_field": "_source_row",
+  "variables": [
+    {
+      "name": "USUBJID",
+      "sas_type": "character",
+      "sqlite_type": "TEXT",
+      "nullable": true
+    }
+  ]
+}
+```
 
 `records.sqlite`：
 

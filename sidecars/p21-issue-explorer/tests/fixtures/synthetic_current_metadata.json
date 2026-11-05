@@ -1,0 +1,20 @@
+{
+  "AE": {
+    "STUDYID": "character",
+    "USUBJID": "character",
+    "AESEQ": "numeric",
+    "AETERM": "character",
+    "AESEV": "character",
+    "AESTDTC": "character",
+    "AEENDY": "numeric",
+    "AEENDTC": "character"
+  },
+  "LB": {
+    "STUDYID": "character",
+    "USUBJID": "character",
+    "LBTESTCD": "character",
+    "LBORRES": "character",
+    "LBSTAT": "character"
+  }
+}
+

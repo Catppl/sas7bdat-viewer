@@ -1,0 +1,65 @@
+{
+  "contract_version": 1,
+  "report": "p21_synthetic_report.xlsx",
+  "issues": [
+    {
+      "sheet_row": 8,
+      "rule_id": "SYNTH-NULL-SEQ",
+      "status": "Matched – Exact",
+      "candidate_source_rows": [1],
+      "expected_where": "STUDYID = 'SYNTH-001' AND USUBJID = 'SUBJ-001' AND AETERM = 'Headache' AND MISSING(AEENDY)"
+    },
+    {
+      "sheet_row": 9,
+      "rule_id": "SYNTH-COMMA",
+      "status": "Matched – Exact",
+      "candidate_source_rows": [2]
+    },
+    {
+      "sheet_row": 10,
+      "rule_id": "SYNTH-LENIENT",
+      "status": "Review – Partial/Lenient Match",
+      "candidate_source_rows": [3],
+      "review_reasons": ["USUBJID case", "AETERM case"]
+    },
+    {
+      "sheet_row": 11,
+      "rule_id": "SYNTH-80-PCT",
+      "status": "Review – Partial/Lenient Match",
+      "candidate_source_rows": [4],
+      "mismatched_variables": ["AESEV"]
+    },
+    {
+      "sheet_row": 12,
+      "rule_id": "SYNTH-NOT-FOUND",
+      "status": "Not Found in Current Data",
+      "candidate_source_rows": []
+    },
+    {
+      "sheet_row": 13,
+      "rule_id": "SYNTH-MISSING-VAR",
+      "status": "Cannot Evaluate",
+      "candidate_source_rows": [],
+      "reason": "AENOTREAL is absent from current metadata"
+    },
+    {
+      "sheet_row": 14,
+      "rule_id": "SYNTH-CROSS-DOMAIN",
+      "status": "Matched – Exact",
+      "candidate_source_rows": [6]
+    },
+    {
+      "sheet_row": 15,
+      "rule_id": "SYNTH-MULTIPLE",
+      "status": "Matched – Exact",
+      "candidate_source_rows": [7, 8]
+    },
+    {
+      "sheet_row": 16,
+      "rule_id": "SYNTH-LB-NULL",
+      "status": "Matched – Exact",
+      "candidate_source_rows": [1]
+    }
+  ]
+}
+
