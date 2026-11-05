@@ -1,6 +1,6 @@
 # P21 Issue Explorer 第一版需求
 
-状态：第一版需求与用户决策已确认；P0–P2 已实现，P3–P6 待施工
+状态：第一版需求与用户决策已确认；P0–P3 已实现，P4–P6 待施工
 
 更新日期：2026-11-05
 
@@ -270,4 +270,4 @@ Export Info
 
 ## 16. 用户确认状态
 
-用户选择已记录在 [施工计划的确认结果](p21-issue-explorer-implementation-plan.md#12-用户确认结果)。所有问题均已单选确认；P0–P1 已完成，匹配和 Viewer 集成尚未开始。
+用户选择已记录在 [施工计划的确认结果](p21-issue-explorer-implementation-plan.md#12-用户确认结果)。所有问题均已单选确认；P0–P3 已完成，Viewer Host、结果视图和打包尚未施工。

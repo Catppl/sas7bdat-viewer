@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -52,6 +52,7 @@ class _ReportLoadTask(QRunnable):
 
 
 class ImportPage(QWidget):
+    import_started = Signal(object)
     report_loaded = Signal(object)
     import_failed = Signal(str)
 
@@ -74,6 +75,7 @@ class ImportPage(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        self.main_layout = layout
         title = QLabel("P21 Issue Explorer")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
@@ -112,7 +114,6 @@ class ImportPage(QWidget):
         self.domain_combo.setEnabled(False)
         form.addRow("Domain", self.domain_combo)
         layout.addLayout(form)
-        layout.addStretch(1)
 
     @Slot()
     def choose_report(self) -> None:
@@ -122,6 +123,7 @@ class ImportPage(QWidget):
 
     def load_report(self, source_path: str | Path) -> None:
         path = Path(source_path).expanduser().resolve()
+        self.import_started.emit(path)
         self._generation += 1
         generation = self._generation
         self._set_busy(True)
@@ -151,8 +153,9 @@ class ImportPage(QWidget):
 
         self.report = report
         self.report_label.setText(report.source_path.name)
-        self.domain_combo.clear()
-        self.domain_combo.addItems(report.domains)
+        with QSignalBlocker(self.domain_combo):
+            self.domain_combo.clear()
+            self.domain_combo.addItems(report.domains)
         self.domain_combo.setEnabled(bool(report.domains))
         diagnostics = report.diagnostics
         self.status_label.setText(

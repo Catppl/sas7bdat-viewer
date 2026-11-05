@@ -7,7 +7,8 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from p21_issue_explorer.ui import ImportPage, P21IssueExplorerWindow
+from p21_issue_explorer.report import P21ReportReader
+from p21_issue_explorer.ui import ExplorerPage, ImportPage, P21IssueExplorerWindow
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 
@@ -25,7 +26,23 @@ class P21UiSmokeTests(unittest.TestCase):
             window.show()
             self.application.processEvents()
             self.assertEqual(window.windowTitle(), "P21 Issue Explorer")
-            self.assertIsInstance(window.centralWidget(), ImportPage)
+            self.assertIsInstance(window.scroll_area.widget(), ExplorerPage)
+        finally:
+            window.close()
+            self.application.processEvents()
+
+    def test_explorer_remains_scrollable_at_compact_window_size(self) -> None:
+        window = P21IssueExplorerWindow()
+        try:
+            window.explorer_page.apply_report(
+                P21ReportReader().read(FIXTURES / "p21_synthetic_report.xlsx")
+            )
+            window.resize(900, 600)
+            window.show()
+            self.application.processEvents()
+            self.assertEqual(window.size().width(), 900)
+            self.assertEqual(window.size().height(), 600)
+            self.assertTrue(window.scroll_area.verticalScrollBar().isVisible())
         finally:
             window.close()
             self.application.processEvents()

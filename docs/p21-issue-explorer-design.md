@@ -1,6 +1,6 @@
 # P21 Issue Explorer 架构设计
 
-状态：第一版设计基线已确认；P0–P2 side-car 与匹配核心已实现，Host/IPC 尚未施工
+状态：第一版设计基线已确认；P0–P3 side-car、匹配核心与独立 UI 已实现，Host/IPC 尚未施工
 
 更新日期：2026-11-05
 

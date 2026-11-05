@@ -1,6 +1,6 @@
 # P21 Issue Explorer 具体施工计划
 
-状态：P0–P2 已完成；P3–P6 待施工
+状态：P0–P3 已完成；P4–P6 待施工
 
 更新日期：2026-11-05
 
@@ -207,7 +207,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 40 个 side-car tests 已通过，覆盖冻结的 9 条端到端合同、阈值上下边界、多逗号、歧义、重复运行一致性和 Viewer WHERE parser/filter engine 兼容性。
 - matching、integration 和 models 核心不引用 Qt 或 `clinical_data_viewer`；Viewer 兼容仅存在于测试层。
 
-## 8. 阶段 3：独立 Explorer UI
+## 8. 阶段 3：独立 Explorer UI（已完成）
 
 ### 工作内容
 
@@ -230,6 +230,17 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 
 - 使用合成 fixture 可完成完整浏览流程。
 - UI 中每个数字都能追溯到明确计数定义。
+
+### 实施结果（2026-11-05）
+
+- 已实现 domain 与 Rule ID 选择、手动重新运行匹配、Rule ID 八项汇总数字和 `Filter All Matched Records` 操作。
+- issue table 使用独立 `QAbstractTableModel`，支持排序、完整 tooltip、Exact/Review/Not Found/Cannot Evaluate 四种背景色及三类 candidate 数量。
+- selected issue detail 展示 P21 原始信息、所有 candidate/mapping/variable 的 expected、actual、comparison result、reason，以及 Expected/Applied WHERE。
+- 已定义可序列化语义明确的 `IssueOpenRequest` 和 materialized `RuleOpenRequest`，P3 只发出请求，不引用 Viewer UI 或内部数据库。
+- Rule ID 匹配使用 `QRunnable + QThreadPool`；切换 domain/Rule、重新导入和取消会提升 generation，迟到结果不能覆盖当前页面。
+- 无 snapshot 或 snapshot 失败时，当前 Rule ID 全部标记 `Cannot Evaluate`，不会误报为 `Not Found`。
+- standalone/fake-host 模式支持重复 `--snapshot DOMAIN=PATH` 参数；窗口在 1420×920 可完整浏览，并在 900×600 紧凑尺寸下使用外层滚动保持可访问。
+- 52 个 side-car tests 已通过，新增覆盖 UI model、排序、颜色、长文本、数字口径、candidate detail、standalone 参数、P4 request boundary、取消、generation stale-result protection 和紧凑窗口。
 
 ## 9. 阶段 4：Viewer Host 与结果视图集成
 
