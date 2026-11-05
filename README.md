@@ -715,14 +715,21 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\build_windows.ps1 -PythonExe "C:\Path\To\Python311\python.exe" -RecreateVenv
 ```
 
+默认命令只生成基础版。需要同时生成基础版和 P21 扩展版时：
+
+```powershell
+.\scripts\build_windows.ps1 -IncludeP21
+```
+
 脚本会依次：
 
 1. 创建 `.venv`（不存在时）。
-2. 安装 PySide6、pyreadstat、SciPy、Ruff 和 PyInstaller。
+2. 安装 PySide6、pyreadstat、SciPy、Ruff 和 PyInstaller；`-IncludeP21` 还会安装 side-car 自身声明的依赖。
 3. 运行 Ruff、格式、Python 编译和全部单元测试。
-4. 仅在检查全部通过后构建 `onedir` GUI 程序目录。
-5. 将整个 `SASDataViewer` 目录压缩为 Windows x64 ZIP。
-6. 输出 EXE 和 ZIP 的完整路径、大小与 SHA256。
+4. 仅在检查全部通过后构建 `onedir` GUI 程序目录，并验证基础包没有 P21 manifest。
+5. 将基础版压缩为 `SASDataViewer-Windows-x64.zip`。
+6. 使用 `-IncludeP21` 时独立构建和 smoke-test side-car，将完整 onedir 放到 Viewer `_internal`，生成 executable SHA256 manifest，再生成 P21 ZIP。
+7. 输出 Viewer、side-car 和 ZIP 的完整路径、大小与 SHA256。
 
 EXE、窗口标题栏和 Windows 任务栏图标使用 [assets/SASDataViewer.ico](assets/SASDataViewer.ico)。该文件由用户提供的 [原始 PNG](assets/SASDataViewer.png) 生成，内含 16、20、24、32、40、48、64、128 和 256 像素尺寸；正常构建无需再次手工转换图标。
 
@@ -737,6 +744,18 @@ dist\SASDataViewer-Windows-x64.zip
 ```
 
 发布时发送 `SASDataViewer-Windows-x64.zip`。用户必须先完整解压，然后从解压后的 `SASDataViewer\SASDataViewer.exe` 启动；不能只复制 EXE，也不要直接在 ZIP 预览窗口内运行。
+
+`-IncludeP21` 还会生成：
+
+```text
+dist\SASDataViewer\_internal\p21-sidecar-manifest.json
+dist\SASDataViewer\_internal\p21-sidecar\
+  P21IssueExplorer.exe
+  _internal\
+dist\SASDataViewer-P21-Windows-x64.zip
+```
+
+基础 ZIP 在注入 side-car 之前生成，因此不会包含 P21 manifest，`Tools` 菜单会隐藏入口。P21 ZIP 中只有 manifest 的协议版本、相对 executable 路径、启动参数和 SHA256，不包含患者数据或环境秘密。
 
 #### 方法二：手动打包
 

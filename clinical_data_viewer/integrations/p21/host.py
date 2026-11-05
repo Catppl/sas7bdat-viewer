@@ -5,11 +5,12 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QObject, QProcess, QThreadPool, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from ...domain import DatasetHandle
 from ...temp_manager import TempManager
+from ...workers import Worker
 from .manifest import P21SidecarManifest
 from .protocol import (
     PROTOCOL_VERSION,
@@ -18,7 +19,7 @@ from .protocol import (
     ProtocolMessage,
     encode_message,
 )
-from .snapshot import SnapshotBuilder, SnapshotRegistry
+from .snapshot import BuiltSnapshot, SnapshotBuilder, SnapshotRegistry
 
 
 class P21HostController(QObject):
@@ -45,6 +46,8 @@ class P21HostController(QObject):
         self.process = QProcess(self)
         self.snapshot_builder = SnapshotBuilder(temp_manager)
         self.snapshots = SnapshotRegistry(temp_manager)
+        self.pool = QThreadPool.globalInstance()
+        self._snapshot_workers: set[Worker] = set()
         self.socket: QLocalSocket | None = None
         self.decoder = FrameDecoder()
         self.server_name = ""
@@ -91,6 +94,7 @@ class P21HostController(QObject):
 
     def shutdown(self) -> None:
         self._shutting_down = True
+        self._cancel_snapshot_workers()
         if self.socket is not None and self._authenticated:
             self._send("shutdown", {})
             self.socket.flush()
@@ -174,8 +178,52 @@ class P21HostController(QObject):
             raise ValueError(
                 f"No open current dataset is available for domain {domain}."
             )
-        snapshot = self.snapshot_builder.build(source, domain, variables)
+        fingerprint = self.snapshot_builder.source_fingerprint(source)
+        selected = self.snapshot_builder.select_variables(source, variables)
+        selected_names = tuple(item.name for item in selected)
+        self.snapshots.invalidate_changed_source(domain, fingerprint)
+        cached = self.snapshots.acquire(domain, fingerprint, selected_names)
+        if cached is not None:
+            self._send_snapshot_ready(message.request_id, cached, cache_hit=True)
+            return
+        self.status_changed.emit(f"Preparing {domain.upper()} data snapshot…")
+        worker = Worker(
+            lambda owner: self.snapshot_builder.build(
+                source,
+                domain,
+                variables,
+                cancelled=lambda: owner.cancelled,
+                progress=lambda count: owner.report(
+                    f"Preparing {domain.upper()} snapshot… {count:,} rows"
+                ),
+            )
+        )
+        self._snapshot_workers.add(worker)
+        worker.signals.progress.connect(self.status_changed)
+        worker.signals.result.connect(
+            lambda snapshot, request_id=message.request_id: self._snapshot_built(
+                request_id, snapshot
+            )
+        )
+        worker.signals.error.connect(
+            lambda error, _details, request_id=message.request_id: self._send_error(
+                request_id, f"Snapshot generation failed: {error}"
+            )
+        )
+
+        def finished() -> None:
+            self._snapshot_workers.discard(worker)
+
+        worker.signals.finished.connect(finished)
+        self.pool.start(worker)
+
+    def _snapshot_built(self, request_id: str, snapshot: BuiltSnapshot) -> None:
         self.snapshots.add(snapshot)
+        self._send_snapshot_ready(request_id, snapshot, cache_hit=False)
+
+    def _send_snapshot_ready(
+        self, request_id: str, snapshot: BuiltSnapshot, *, cache_hit: bool
+    ) -> None:
         self._send(
             "snapshot_ready",
             {
@@ -183,8 +231,14 @@ class P21HostController(QObject):
                 "path": str(snapshot.root),
                 "source_fingerprint": snapshot.source_fingerprint,
                 "variables": list(snapshot.variables),
+                "cache_hit": cache_hit,
             },
-            message.request_id,
+            request_id,
+        )
+        self.status_changed.emit(
+            f"P21 snapshot ready: {snapshot.domain} "
+            f"({len(snapshot.variables)} variables, "
+            f"{'cache hit' if cache_hit else 'created'})."
         )
 
     def _result_requested(self, message: ProtocolMessage) -> None:
@@ -224,12 +278,17 @@ class P21HostController(QObject):
         self._authenticated = False
 
     def _process_finished(self, *_args: object) -> None:
+        self._cancel_snapshot_workers()
         self.snapshots.clear()
         self._reset_transport()
         if not self._shutting_down:
             self.status_changed.emit(
                 "P21 Issue Explorer stopped. Use Tools to start it again."
             )
+
+    def _cancel_snapshot_workers(self) -> None:
+        for worker in tuple(self._snapshot_workers):
+            worker.cancel()
 
     def _reset_transport(self) -> None:
         if self.socket is not None:

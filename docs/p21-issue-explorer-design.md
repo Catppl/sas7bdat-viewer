@@ -1,6 +1,6 @@
 # P21 Issue Explorer 架构设计
 
-状态：第一版设计基线已确认；P0–P4 side-car、匹配核心、独立 UI、Host/IPC 与结果视图已实现，P5–P6 待施工
+状态：第一版设计基线已确认；P0–P5 已实现，P6 双版本打包代码已实现、Windows 实机验收待完成
 
 更新日期：2026-11-05
 
@@ -269,6 +269,8 @@ side-car 不应直接读取 Viewer 当前内部缓存数据库。内部数据库
 ```text
 report fingerprint + domain + rule id + snapshot source fingerprint + matcher version
 ```
+
+P5 实现采用两个独立的有界 LRU：Viewer 管理可复用的只读 snapshot，side-car 管理 Rule 匹配结果。二者都以 source fingerprint 隔离源数据版本；report 重导入会清空 side-car 匹配缓存。候选软阈值只触发提示，不截断或静默丢弃记录。
 
 ## 9. 错误隔离
 

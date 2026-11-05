@@ -32,6 +32,7 @@ from clinical_data_viewer.integrations.p21.result_view import (
 )
 from clinical_data_viewer.integrations.p21.snapshot import (
     SnapshotBuilder,
+    SnapshotCancelled,
     SnapshotRegistry,
 )
 from clinical_data_viewer.temp_manager import TempManager
@@ -72,6 +73,44 @@ def make_source(root: Path) -> DatasetHandle:
             ),
         ),
         3,
+        True,
+    )
+
+
+def make_large_source(root: Path, row_count: int = 25_000) -> DatasetHandle:
+    directory = root / "large-source"
+    directory.mkdir()
+    database = directory / "dataset.sqlite"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            "CREATE TABLE dataset (_source_row INTEGER PRIMARY KEY, "
+            "STUDYID TEXT, USUBJID TEXT, PARAMCD TEXT, AVAL REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO dataset VALUES (?, ?, ?, ?, ?)",
+            (
+                (index, "STUDY", f"SUBJ-{index:06d}", "TEST", float(index))
+                for index in range(1, row_count + 1)
+            ),
+        )
+        connection.commit()
+    source_file = directory / "ADLB.sas7bdat"
+    source_file.touch()
+    return DatasetHandle(
+        source_file,
+        source_file,
+        database,
+        DatasetMetadata(
+            "ADLB",
+            row_count,
+            (
+                VariableMetadata("STUDYID", kind="character"),
+                VariableMetadata("USUBJID", kind="character"),
+                VariableMetadata("PARAMCD", kind="character"),
+                VariableMetadata("AVAL", kind="numeric"),
+            ),
+        ),
+        row_count,
         True,
     )
 
@@ -245,7 +284,49 @@ class P21ProtocolTests(unittest.TestCase):
             )
             socket.write(encode_message(release))
             socket.flush()
-            spin_until(lambda: len(host.snapshots) == 0)
+            spin_until(
+                lambda: (
+                    host.snapshots.lease_count(str(response.payload["snapshot_id"]))
+                    == 0
+                )
+            )
+            self.assertTrue(snapshot_root.exists())
+            second_request = ProtocolMessage(
+                PROTOCOL_VERSION,
+                "snapshot-2",
+                "request_dataset_snapshot",
+                host.session_token,
+                {"domain": "AE", "variables": ["AESER"]},
+            )
+            socket.write(encode_message(second_request))
+            socket.flush()
+            spin_until(lambda: socket.bytesAvailable() > 0)
+            second_response = FrameDecoder().feed(bytes(socket.readAll()))[0]
+            self.assertEqual(
+                second_response.payload["snapshot_id"], response.payload["snapshot_id"]
+            )
+            self.assertTrue(second_response.payload["cache_hit"])
+            socket.write(
+                encode_message(
+                    ProtocolMessage(
+                        PROTOCOL_VERSION,
+                        "release-2",
+                        "release_snapshot",
+                        host.session_token,
+                        {"snapshot_id": second_response.payload["snapshot_id"]},
+                    )
+                )
+            )
+            socket.flush()
+            spin_until(
+                lambda: (
+                    host.snapshots.lease_count(
+                        str(second_response.payload["snapshot_id"])
+                    )
+                    == 0
+                )
+            )
+            host.snapshots.clear()
             self.assertFalse(snapshot_root.exists())
             socket.abort()
             host._reset_transport()
@@ -264,19 +345,32 @@ class P21ProtocolTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            sidecar_source = (
-                Path(__file__).parents[1] / "sidecars" / "p21-issue-explorer" / "src"
-            )
-            bootstrap = (
-                "import sys;"
-                f"sys.path.insert(0, {str(sidecar_source)!r});"
-                "from p21_issue_explorer.app import main;"
-                "raise SystemExit(main())"
-            )
+            packaged = os.environ.get("P21_PACKAGED_EXECUTABLE")
+            if packaged:
+                executable = Path(packaged).resolve()
+                self.assertTrue(executable.is_file())
+                arguments: tuple[str, ...] = ()
+                startup_timeout = 60.0
+            else:
+                sidecar_source = (
+                    Path(__file__).parents[1]
+                    / "sidecars"
+                    / "p21-issue-explorer"
+                    / "src"
+                )
+                bootstrap = (
+                    "import sys;"
+                    f"sys.path.insert(0, {str(sidecar_source)!r});"
+                    "from p21_issue_explorer.app import main;"
+                    "raise SystemExit(main())"
+                )
+                executable = Path(sys.executable)
+                arguments = ("-c", bootstrap)
+                startup_timeout = 5.0
             manifest = P21SidecarManifest(
                 root / "manifest.json",
-                Path(sys.executable),
-                ("-c", bootstrap),
+                executable,
+                arguments,
                 PROTOCOL_VERSION,
                 "0" * 64,
             )
@@ -297,13 +391,83 @@ class P21ProtocolTests(unittest.TestCase):
                     + (failures[0] if failures else host.server.errorString())
                 )
             self.assertTrue(
-                spin_until(lambda: host._authenticated),
+                spin_until(lambda: host._authenticated, startup_timeout),
                 failures[0] if failures else host.process.errorString(),
             )
             self.assertTrue(host.running)
             host.shutdown()
             self.assertFalse(host.running)
             self.assertFalse(host.server.isListening())
+
+    def test_snapshot_generation_is_dispatched_without_blocking_viewer(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        application = QApplication.instance() or QApplication([])
+
+        class FakeSocket:
+            def __init__(self) -> None:
+                self.written = bytearray()
+
+            def write(self, value: bytes) -> int:
+                self.written.extend(value)
+                return len(value)
+
+            def flush(self) -> bool:
+                return True
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "sidecar"
+            executable.touch()
+            source = make_source(root)
+            host = P21HostController(
+                P21SidecarManifest(
+                    root / "manifest.json",
+                    executable,
+                    (),
+                    PROTOCOL_VERSION,
+                    "0" * 64,
+                ),
+                TempManager(root / "temp"),
+                lambda _domain: source,
+                dict,
+                lambda _kind, _payload: {},
+            )
+            real_builder = host.snapshot_builder
+
+            class SlowSnapshotBuilder:
+                source_fingerprint = staticmethod(real_builder.source_fingerprint)
+                select_variables = staticmethod(real_builder.select_variables)
+
+                def build(self, *args, **kwargs):
+                    time.sleep(0.2)
+                    return real_builder.build(*args, **kwargs)
+
+            host.snapshot_builder = SlowSnapshotBuilder()
+            socket = FakeSocket()
+            host.socket = socket  # type: ignore[assignment]
+            host._authenticated = True
+            host.session_token = "token"
+            request = ProtocolMessage(
+                PROTOCOL_VERSION,
+                "async-snapshot",
+                "request_dataset_snapshot",
+                "token",
+                {"domain": "AE", "variables": ["AESER"]},
+            )
+            started = time.monotonic()
+            host._snapshot_requested(request)
+            self.assertLess(time.monotonic() - started, 0.1)
+            self.assertFalse(socket.written)
+            deadline = time.monotonic() + 3
+            while not socket.written and time.monotonic() < deadline:
+                application.processEvents()
+                time.sleep(0.005)
+            self.assertTrue(socket.written)
+            response = FrameDecoder().feed(socket.written)[0]
+            self.assertEqual(response.message_type, "snapshot_ready")
+            host.socket = None
+            host.snapshots.clear()
 
 
 class P21ManifestTests(unittest.TestCase):
@@ -334,6 +498,21 @@ class P21ManifestTests(unittest.TestCase):
 
 
 class P21SnapshotTests(unittest.TestCase):
+    def test_cancelled_snapshot_removes_partial_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = TempManager(root / "temp")
+            source = make_large_source(root, 5_000)
+            with self.assertRaises(SnapshotCancelled):
+                SnapshotBuilder(manager).build(
+                    source,
+                    "ADLB",
+                    ["PARAMCD"],
+                    cancelled=lambda: True,
+                )
+            snapshot_root = manager.session_directory / "p21-snapshots"
+            self.assertFalse(snapshot_root.exists() and any(snapshot_root.iterdir()))
+
     def test_snapshot_contract_contains_only_requested_and_stable_variables(
         self,
     ) -> None:
@@ -364,6 +543,13 @@ class P21SnapshotTests(unittest.TestCase):
             registry = SnapshotRegistry(manager)
             registry.add(snapshot)
             registry.release(snapshot.snapshot_id)
+            self.assertTrue(snapshot.root.exists())
+            acquired = registry.acquire(
+                "AE", snapshot.source_fingerprint, snapshot.variables
+            )
+            self.assertIs(acquired, snapshot)
+            registry.release(snapshot.snapshot_id)
+            registry.invalidate_changed_source("AE", "changed-source-fingerprint")
             self.assertFalse(snapshot.root.exists())
 
     def test_result_builder_deduplicates_source_rows(self) -> None:
@@ -381,9 +567,86 @@ class P21SnapshotTests(unittest.TestCase):
                 ).fetchall()
             self.assertEqual(rows, [(1,), (2,)])
 
+    def test_25k_snapshot_and_result_materialization_performance_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = TempManager(root / "temp")
+            source = make_large_source(root)
+            started = time.monotonic()
+            snapshot = SnapshotBuilder(manager).build(
+                source, "ADLB", ["PARAMCD", "AVAL"]
+            )
+            snapshot_seconds = time.monotonic() - started
+            with closing(sqlite3.connect(snapshot.database_path)) as connection:
+                indexes = list(connection.execute("PRAGMA index_list(records)"))
+            self.assertGreaterEqual(len(indexes), 5)
+            self.assertLess(snapshot_seconds, 10.0)
+
+            started = time.monotonic()
+            result = P21ResultBuilder(manager).build(
+                source,
+                P21ResultSpec("ADLB", "RULE-PERF", tuple(range(1, 25_001)), ()),
+            )
+            result_seconds = time.monotonic() - started
+            self.assertEqual(result.metadata.row_count, 25_000)
+            self.assertLess(result_seconds, 10.0)
+
 
 @unittest.skipUnless(os.environ.get("QT_QPA_PLATFORM") == "offscreen", "Qt UI test")
 class P21ResultViewTests(unittest.TestCase):
+    def test_large_result_build_is_dispatched_without_blocking_viewer(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = TempManager(root / "temp")
+            window = MainWindow(
+                TestSettings(), manager, FilterHistory(root / "history.sqlite")
+            )
+            source_tab = window._make_dataset_tab(make_source(root))
+            window.tabs.addTab(source_tab, "AE")
+            source_tab.start()
+            real_builder = window._p21_result_builder
+
+            class SlowBuilder:
+                def build(self, source, spec, **options):
+                    time.sleep(0.2)
+                    return real_builder.build(source, spec, **options)
+
+            window._p21_result_builder = SlowBuilder()
+            payload = {
+                "domain": "AE",
+                "rule_id": "RULE-ASYNC",
+                "issue_id": "issue-async",
+                "status": "Matched – Exact",
+                "source_rows": [1],
+                "row_styles": [{"source_row": 1, "status": "Matched – Exact"}],
+                "where_text": 'USUBJID = "01"',
+                "expected_where": 'USUBJID = "01"',
+            }
+            started = time.monotonic()
+            response = window._handle_p21_result_request("open_result_view", payload)
+            dispatch_seconds = time.monotonic() - started
+            self.assertTrue(response["accepted"])
+            self.assertLess(dispatch_seconds, 0.1)
+            self.assertIsNone(window._p21_result_tab)
+            deadline = time.monotonic() + 3
+            while window._p21_result_tab is None and time.monotonic() < deadline:
+                application.processEvents()
+                time.sleep(0.005)
+            self.assertIsNotNone(window._p21_result_tab)
+            window.close()
+            application.processEvents()
+
     def test_issue_and_rule_requests_reuse_one_result_tab_and_preserve_source(
         self,
     ) -> None:
@@ -398,6 +661,14 @@ class P21ResultViewTests(unittest.TestCase):
                 return None
 
         application = QApplication.instance() or QApplication([])
+
+        def spin_until(predicate, timeout: float = 3.0) -> None:
+            deadline = time.monotonic() + timeout
+            while not predicate() and time.monotonic() < deadline:
+                application.processEvents()
+                time.sleep(0.001)
+            self.assertTrue(predicate())
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manager = TempManager(root / "temp")
@@ -420,7 +691,7 @@ class P21ResultViewTests(unittest.TestCase):
                 "expected_where": 'USUBJID = "01"',
             }
             window._handle_p21_result_request("open_result_view", exact)
-            application.processEvents()
+            spin_until(lambda: window._p21_result_tab is not None)
             result_tab = window._p21_result_tab
             self.assertIsNotNone(result_tab)
             assert result_tab is not None
@@ -445,7 +716,12 @@ class P21ResultViewTests(unittest.TestCase):
                 "selection_description": "Materialized P21 candidate selection",
             }
             window._handle_p21_result_request("update_result_view", summary)
-            application.processEvents()
+            spin_until(
+                lambda: (
+                    window._p21_result_tab is not None
+                    and window._p21_result_tab is not result_tab
+                )
+            )
             self.assertEqual(window.tabs.count(), 2)
             self.assertIsNot(window._p21_result_tab, result_tab)
             assert window._p21_result_tab is not None
@@ -460,8 +736,14 @@ class P21ResultViewTests(unittest.TestCase):
                     "row_styles": [],
                 }
             )
+            previous_tab = window._p21_result_tab
             window._handle_p21_result_request("open_result_view", not_found)
-            application.processEvents()
+            spin_until(
+                lambda: (
+                    window._p21_result_tab is not None
+                    and window._p21_result_tab is not previous_tab
+                )
+            )
             self.assertEqual(window.tabs.count(), 2)
             assert window._p21_result_tab is not None
             self.assertEqual(window._p21_result_tab.handle.metadata.row_count, 0)

@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -27,10 +28,10 @@ class _DelayedProvider:
         self.delayed_domain = delayed_domain
         self.gate = threading.Event()
 
-    def open_snapshot(self, domain: str):
+    def open_snapshot(self, domain: str, variables: tuple[str, ...] = ()):
         if domain.casefold() == self.delayed_domain.casefold():
             self.gate.wait(timeout=3)
-        return self.delegate.open_snapshot(domain)
+        return self.delegate.open_snapshot(domain, variables)
 
 
 class ExplorerUiTests(unittest.TestCase):
@@ -215,6 +216,30 @@ class ExplorerUiTests(unittest.TestCase):
             self._wait_until(lambda: page.current_summary is not None)
         finally:
             provider.gate.set()
+            page.close()
+
+    def test_repeated_rule_selection_reuses_fingerprint_cache(self) -> None:
+        page = ExplorerPage(snapshot_provider=self.provider)
+        try:
+            page.apply_report(self.report)
+            self._select_rule(page, "SYNTH-MULTIPLE")
+            first_results = page.current_results
+            page.run_match_button.click()
+            self._wait_until(lambda: "Cached result reused" in page.match_status.text())
+            self.assertIs(page.current_results, first_results)
+        finally:
+            page.close()
+
+    def test_candidate_soft_limit_warns_without_omitting_records(self) -> None:
+        page = ExplorerPage(snapshot_provider=self.provider)
+        try:
+            with patch("p21_issue_explorer.ui.explorer_page.CANDIDATE_SOFT_LIMIT", 1):
+                page.apply_report(self.report)
+                self._select_rule(page, "SYNTH-MULTIPLE")
+            self.assertIn("soft limit", page.match_status.text())
+            self.assertIn("no records were omitted", page.match_status.text())
+            self.assertEqual(len(page.current_results[0].candidates), 2)
+        finally:
             page.close()
 
     def _select_rule(self, page: ExplorerPage, rule_id: str) -> None:

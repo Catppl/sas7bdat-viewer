@@ -1,6 +1,6 @@
 # P21 Issue Explorer side-car
 
-This package is the optional P21 Issue Explorer process. It remains independent from the SAS Viewer host and currently implements phases P0–P4:
+This package is the optional P21 Issue Explorer process. It remains independent from the SAS Viewer host and currently implements phases P0–P6, with final Windows acceptance still pending:
 
 - synthetic report and current-data contracts;
 - exact `Issue Details` worksheet selection;
@@ -17,9 +17,11 @@ This package is the optional P21 Issue Explorer process. It remains independent 
   colored issue rows, candidate details, cancellation, and stale-result protection;
 - injectable Snapshot Provider and typed issue/rule view requests;
 - authenticated, versioned `QLocalSocket` IPC with Viewer-provided snapshots;
-- automatic snapshot release and issue/rule result-view requests.
+- automatic snapshot release and issue/rule result-view requests;
+- fingerprint-keyed bounded Rule-result caching and safe count-only diagnostics;
+- cancellable background matching with non-truncating large-candidate warnings.
 
-The Viewer host, Dataset Snapshot v1 builder, lazy manifest-gated launcher, and reusable P21 Result View are implemented in the main package. P5 performance/cache work, P6 packaging, and deferred Excel issue export are not implemented yet.
+The Viewer host, Dataset Snapshot v1 builder, lazy manifest-gated launcher, reusable snapshot cache, and background P21 Result View materialization are implemented in the main package. The independent PyInstaller onedir spec and dual-edition Windows build flow are implemented; clean Windows acceptance and deferred Excel issue export remain pending.
 
 ## Run from the repository
 

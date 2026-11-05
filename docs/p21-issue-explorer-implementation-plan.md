@@ -1,6 +1,6 @@
 # P21 Issue Explorer 具体施工计划
 
-状态：P0–P4 已完成；P5–P6 待施工
+状态：P0–P5 已完成；P6 打包实现已完成，等待干净 Windows 验收
 
 更新日期：2026-11-05
 
@@ -284,6 +284,8 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 
 ## 10. 阶段 5：性能、缓存和稳定性
 
+状态：已完成（2026-11-05）
+
 ### 工作内容
 
 - Snapshot 只复制所需变量并建立查询索引。
@@ -305,7 +307,30 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 性能基线和测试规模记录在文档中。
 - 所有耗时操作均不阻塞 Viewer 或 side-car UI。
 
+### 实施结果
+
+- Viewer 快照只复制本次需要的变量，并为 `_source_row` 和每个包含变量建立索引。
+- Viewer 以有界 LRU 复用同一 source fingerprint 且变量集合已覆盖的空闲快照；源指纹变化、side-car 结束或 Viewer 退出时使旧快照失效并清理。
+- side-car 使用 `report fingerprint + domain + rule id + source fingerprint + matcher version` 的有界线程安全 LRU 缓存 Rule 匹配结果；重新导入 report 时清空会话缓存。
+- Snapshot 生成、Rule 匹配和 P21 Result View materialization 均在后台 worker 执行，并有 generation/cancellation 防护，过期结果不会覆盖当前页面。
+- 大结果集通过临时 selection table 与 source 数据 JOIN，不受 SQLite 单条 `IN (...)` 参数数量限制。
+- 候选数超过软阈值时显示警告但不截断；12,000 条 review candidates 的合成测试确认全部保留。
+- 诊断日志只记录 domain、Rule ID、issue/candidate 计数和 cache hit，不记录 Values、WHERE 或患者数据。
+
+### 性能基线
+
+基线环境为 2026-11-05 当前 macOS 开发机，使用合成 SQLite 数据；这些数字用于防止明显回退，不代表 Windows 最终验收指标：
+
+| 场景 | 数据规模 | 本次观测 | 自动测试上限 |
+|---|---:|---:|---:|
+| Snapshot 生成并 materialize P21 Result View | 25,000 rows、4 个业务变量、25,000 个候选 | 约 0.09 秒 | 各阶段小于 10 秒 |
+| 无 exact 时的 broad review 搜索 | 12,000 rows、5 个匹配变量、12,000 个候选 | 约 0.18 秒 | 小于 15 秒 |
+
+P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 通过，其中两项本地 socket/QProcess 测试在沙箱外补跑通过。P6 仍需在干净 Windows 环境重新测量并验收。
+
 ## 11. 阶段 6：双版本打包和 Windows 验收
+
+状态：打包实现已完成（2026-11-05）；Windows 实机验收待执行
 
 ### 工作内容
 
@@ -333,6 +358,20 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 两个 ZIP 均可在干净 Windows 主机运行。
 - 扩展版 side-car 的启动、退出、临时文件清理通过。
 - 回归测试、静态检查和打包 smoke test 全部通过。
+
+### 已实施
+
+- 新增独立 `P21IssueExplorer.spec` 和冻结入口，side-car 继续保持独立 onedir runtime。
+- Windows build script 默认只生成基础 ZIP；显式 `-IncludeP21` 时先保留基础 ZIP，再构建、smoke-test、注入和验证 P21 side-car，生成第二个 P21 ZIP。
+- P21 side-car 位于 Viewer `_internal/p21-sidecar`；manifest 位于 Viewer `_internal`，包含协议版本、相对 executable 路径、空参数和 executable SHA256。
+- 新增跨平台 staging/verification helper：验证基础版不含 P21 文件，并验证 P21 onedir 完整性、路径边界和 SHA256；篡改 executable 的测试会失败。
+- macOS 开发机已完成 side-car PyInstaller onedir smoke build、无界面 executable smoke test，以及 packaged executable 的真实 QLocalSocket 握手/认证/退出测试。
+- Windows 验收清单已增加基础版/P21 版、无 Python/离线、完整 P21 流程、崩溃隔离和临时文件清理项目。
+- 当前自动回归：Viewer 467 项通过（沙箱内 2 项 local-socket 跳过后已在沙箱外 2/2 补跑通过）；side-car 59/59 通过；P21 staging/manifest/hash 合同测试 3/3 包含在 Viewer 测试中。
+
+### 尚未完成
+
+- 当前环境不能交叉生成或验收 Windows EXE，因此尚未生成最终 Windows ZIP，也未在干净 Windows 10/11 x64 主机执行第 28–32 项。完成这些实机检查前，P6 不能标记为完全验收通过。
 
 ## 12. 用户确认结果
 

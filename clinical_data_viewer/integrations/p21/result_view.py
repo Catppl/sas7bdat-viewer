@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 
@@ -28,7 +29,14 @@ class P21ResultBuilder:
     def __init__(self, temp_manager: TempManager) -> None:
         self.temp_manager = temp_manager
 
-    def build(self, source: DatasetHandle, spec: P21ResultSpec) -> DatasetHandle:
+    def build(
+        self,
+        source: DatasetHandle,
+        spec: P21ResultSpec,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> DatasetHandle:
         directory = self.temp_manager.create_dataset_directory()
         database = directory / "dataset.sqlite"
         variables = source.metadata.variables
@@ -49,21 +57,40 @@ class P21ResultBuilder:
             source_rows = tuple(dict.fromkeys(int(item) for item in spec.source_rows))
             row_count = 0
             if source_rows:
-                placeholders = ", ".join("?" for _ in source_rows)
                 source_uri = source.database_path.resolve().as_uri() + "?mode=ro"
                 with closing(sqlite3.connect(source_uri, uri=True)) as input_connection:
-                    rows = input_connection.execute(
-                        f"SELECT _source_row, {columns} FROM dataset "
-                        f"WHERE _source_row IN ({placeholders}) ORDER BY _source_row",
-                        source_rows,
-                    ).fetchall()
-                target.executemany(
-                    "INSERT INTO dataset VALUES ("
-                    + ", ".join("?" for _ in range(len(variables) + 1))
-                    + ")",
-                    rows,
-                )
-                row_count = len(rows)
+                    input_connection.execute(
+                        "CREATE TEMP TABLE selected_source_rows "
+                        "(_source_row INTEGER PRIMARY KEY)"
+                    )
+                    for offset in range(0, len(source_rows), 2_000):
+                        if cancelled is not None and cancelled():
+                            raise RuntimeError("P21 result creation cancelled.")
+                        input_connection.executemany(
+                            "INSERT INTO selected_source_rows VALUES (?)",
+                            (
+                                (source_row,)
+                                for source_row in source_rows[offset : offset + 2_000]
+                            ),
+                        )
+                    cursor = input_connection.execute(
+                        f"SELECT source._source_row, {columns} FROM dataset AS source "
+                        "INNER JOIN selected_source_rows AS selected "
+                        "ON selected._source_row = source._source_row "
+                        "ORDER BY source._source_row"
+                    )
+                    insert = (
+                        "INSERT INTO dataset VALUES ("
+                        + ", ".join("?" for _ in range(len(variables) + 1))
+                        + ")"
+                    )
+                    while rows := cursor.fetchmany(2_000):
+                        if cancelled is not None and cancelled():
+                            raise RuntimeError("P21 result creation cancelled.")
+                        target.executemany(insert, rows)
+                        row_count += len(rows)
+                        if progress is not None:
+                            progress(row_count)
             target.execute(
                 "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, "
                 "total_rows INTEGER, complete INTEGER NOT NULL)"

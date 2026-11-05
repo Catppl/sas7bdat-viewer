@@ -1,4 +1,10 @@
-from .matcher import IssueMatcher
+from .cache import (
+    MATCHER_VERSION,
+    CachedRuleMatch,
+    MatchCacheKey,
+    RuleMatchCache,
+)
+from .matcher import IssueMatcher, MatchCancelled
 from .value_alignment import (
     AlignmentError,
     ValueMapping,
@@ -8,12 +14,14 @@ from .value_alignment import (
     classify_variables,
 )
 
-MATCHER_VERSION = 1
-
 __all__ = [
     "MATCHER_VERSION",
     "AlignmentError",
+    "CachedRuleMatch",
     "IssueMatcher",
+    "MatchCacheKey",
+    "MatchCancelled",
+    "RuleMatchCache",
     "ValueMapping",
     "VariableKind",
     "VariableSpec",

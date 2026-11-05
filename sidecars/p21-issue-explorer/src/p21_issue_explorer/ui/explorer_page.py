@@ -14,8 +14,14 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
+from ..diagnostics import log_rule_match
 from ..integration import SnapshotProvider
-from ..matching import IssueMatcher
+from ..matching import (
+    CachedRuleMatch,
+    IssueMatcher,
+    MatchCacheKey,
+    RuleMatchCache,
+)
 from ..models import (
     IssueMatchResult,
     IssueOpenRequest,
@@ -38,6 +44,10 @@ class _MatchPayload:
     rule_id: str
     results: tuple[IssueMatchResult, ...]
     summary: RuleMatchSummary
+    cache_hit: bool = False
+
+
+CANDIDATE_SOFT_LIMIT = 10_000
 
 
 class _MatchSignals(QObject):
@@ -54,12 +64,16 @@ class _RuleMatchTask(QRunnable):
         domain: str,
         rule_id: str,
         issues: tuple[P21Issue, ...],
+        report_fingerprint: str,
+        cache: RuleMatchCache,
     ) -> None:
         super().__init__()
         self.provider = provider
         self.domain = domain
         self.rule_id = rule_id
         self.issues = issues
+        self.report_fingerprint = report_fingerprint
+        self.cache = cache
         self.signals = _MatchSignals()
         self._cancelled = threading.Event()
 
@@ -74,22 +88,44 @@ class _RuleMatchTask(QRunnable):
             with self.provider.open_snapshot(
                 self.domain, requested_variables
             ) as snapshot:
+                cache_key = MatchCacheKey(
+                    self.report_fingerprint,
+                    self.domain.upper(),
+                    self.rule_id,
+                    snapshot.manifest.source_fingerprint,
+                )
+                cached = self.cache.get(cache_key)
+                if cached is not None:
+                    self.signals.progress.emit(len(self.issues), len(self.issues))
+                    self.signals.succeeded.emit(
+                        _MatchPayload(
+                            self.domain,
+                            self.rule_id,
+                            cached.results,
+                            cached.summary,
+                            True,
+                        )
+                    )
+                    return
                 total = len(self.issues)
                 for index, issue in enumerate(self.issues, start=1):
                     if self._cancelled.is_set():
                         return
-                    results.append(IssueMatcher().match(issue, snapshot))
+                    results.append(
+                        IssueMatcher().match(
+                            issue,
+                            snapshot,
+                            cancelled=self._cancelled.is_set,
+                        )
+                    )
                     self.signals.progress.emit(index, total)
             if self._cancelled.is_set():
                 return
             frozen_results = tuple(results)
+            summary = summarize_rule(frozen_results)
+            self.cache.put(cache_key, CachedRuleMatch(frozen_results, summary))
             self.signals.succeeded.emit(
-                _MatchPayload(
-                    domain=self.domain,
-                    rule_id=self.rule_id,
-                    results=frozen_results,
-                    summary=summarize_rule(frozen_results),
-                )
+                _MatchPayload(self.domain, self.rule_id, frozen_results, summary)
             )
         # The background boundary converts snapshot and matcher failures into a
         # visible Cannot Evaluate state instead of terminating the GUI thread.
@@ -136,6 +172,7 @@ class ExplorerPage(ImportPage):
         self._active_match_tasks: set[_RuleMatchTask] = set()
         self.current_results: tuple[IssueMatchResult, ...] = ()
         self.current_summary: RuleMatchSummary | None = None
+        self.match_cache = RuleMatchCache()
         super().__init__(parent=parent, **import_options)
         self._build_explorer_ui()
         self.import_started.connect(self._reset_for_import)
@@ -193,6 +230,7 @@ class ExplorerPage(ImportPage):
     @Slot(object)
     def _reset_for_import(self, _path: object) -> None:
         self._invalidate_matching()
+        self.match_cache.clear()
         self._clear_results()
         with QSignalBlocker(self.rule_combo):
             self.rule_combo.clear()
@@ -264,7 +302,14 @@ class ExplorerPage(ImportPage):
                 f"Current data snapshot is unavailable for domain {domain}.",
             )
             return
-        task = _RuleMatchTask(self.snapshot_provider, domain, rule_id, issues)
+        task = _RuleMatchTask(
+            self.snapshot_provider,
+            domain,
+            rule_id,
+            issues,
+            self.report.fingerprint,
+            self.match_cache,
+        )
         self._current_task = task
         self._active_match_tasks.add(task)
         task.signals.progress.connect(
@@ -319,10 +364,25 @@ class ExplorerPage(ImportPage):
         if generation != self._match_generation:
             return
         self._apply_results(payload.results, payload.summary)
-        self.match_status.setText(
+        status = (
             f"Matched {payload.summary.p21_issue_count} issue(s); "
             f"found {payload.summary.current_candidate_record_count} unique current "
             "candidate record(s)."
+        )
+        if payload.cache_hit:
+            status += " Cached result reused."
+        if payload.summary.current_candidate_record_count > CANDIDATE_SOFT_LIMIT:
+            status += (
+                f" Review recommended: candidate count exceeds the "
+                f"{CANDIDATE_SOFT_LIMIT:,} soft limit; no records were omitted."
+            )
+        self.match_status.setText(status)
+        log_rule_match(
+            domain=payload.domain,
+            rule_id=payload.rule_id,
+            issue_count=payload.summary.p21_issue_count,
+            candidate_count=payload.summary.current_candidate_record_count,
+            cache_hit=payload.cache_hit,
         )
 
     def _apply_unavailable(

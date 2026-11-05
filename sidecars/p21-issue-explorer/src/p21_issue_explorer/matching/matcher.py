@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Callable
 
 from p21_issue_explorer.integration import DatasetSnapshot
 from p21_issue_explorer.models import (
@@ -26,10 +27,20 @@ from .value_alignment import (
 from .where_builder import combine_and, combine_or, where_condition
 
 
+class MatchCancelled(RuntimeError):
+    pass
+
+
 class IssueMatcher:
     """Pure matching core; it intentionally has no Qt or Viewer dependency."""
 
-    def match(self, issue: P21Issue, snapshot: DatasetSnapshot) -> IssueMatchResult:
+    def match(
+        self,
+        issue: P21Issue,
+        snapshot: DatasetSnapshot,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> IssueMatchResult:
         if issue.dataset.casefold() != snapshot.manifest.domain.casefold():
             return self._cannot_evaluate(
                 issue,
@@ -59,13 +70,20 @@ class IssueMatcher:
         except AlignmentError as error:
             return self._cannot_evaluate(issue, str(error))
 
-        records = tuple(snapshot.records([item.name for item in local_variables]))
+        records: list[dict[str, object]] = []
+        for index, record in enumerate(
+            snapshot.records([item.name for item in local_variables])
+        ):
+            if index % 512 == 0 and cancelled is not None and cancelled():
+                raise MatchCancelled()
+            records.append(record)
 
         exact_paths = self._search_exact(
             records,
             classified.variables,
             mappings,
             snapshot.manifest.source_row_field,
+            cancelled,
         )
         if exact_paths:
             used_mappings = self._used_mappings(mappings, exact_paths)
@@ -88,6 +106,7 @@ class IssueMatcher:
             classified.variables,
             mappings,
             snapshot.manifest.source_row_field,
+            cancelled,
         )
         used_mappings = self._used_mappings(mappings, review_paths)
         ambiguous = len(used_mappings) > 1 if review_paths else len(mappings) > 1
@@ -129,14 +148,17 @@ class IssueMatcher:
 
     def _search_exact(
         self,
-        records: tuple[dict[str, object], ...],
+        records: list[dict[str, object]],
         variables: tuple[VariableSpec, ...],
         mappings: tuple[ValueMapping, ...],
         source_row_field: str,
+        cancelled: Callable[[], bool] | None,
     ) -> dict[object, list[CandidatePath]]:
         matches: dict[object, list[CandidatePath]] = defaultdict(list)
         for mapping in mappings:
-            for record in records:
+            for index, record in enumerate(records):
+                if index % 512 == 0 and cancelled is not None and cancelled():
+                    raise MatchCancelled()
                 comparisons = self._comparisons(record, variables, mapping)
                 if comparisons and all(
                     item.result is ComparisonResult.STRICT for item in comparisons
@@ -149,16 +171,19 @@ class IssueMatcher:
 
     def _search_review(
         self,
-        records: tuple[dict[str, object], ...],
+        records: list[dict[str, object]],
         variables: tuple[VariableSpec, ...],
         mappings: tuple[ValueMapping, ...],
         source_row_field: str,
+        cancelled: Callable[[], bool] | None,
     ) -> dict[object, list[CandidatePath]]:
         local_count = sum(item.kind is VariableKind.LOCAL for item in variables)
         required = math.ceil(0.8 * local_count)
         matches: dict[object, list[CandidatePath]] = defaultdict(list)
         for mapping in mappings:
-            for record in records:
+            for index, record in enumerate(records):
+                if index % 512 == 0 and cancelled is not None and cancelled():
+                    raise MatchCancelled()
                 comparisons = self._comparisons(record, variables, mapping)
                 anchor = next(
                     (

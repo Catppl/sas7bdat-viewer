@@ -29,3 +29,8 @@
 25. 使用包含重复 Group、顺序交换、错误 `AVISITN/ASEQ`、数值 tolerance 范围内/外差异、Main/QC 独有记录和近似候选的数据验证 Dataset Compare。确认 Hungarian 匹配不重复使用 observation，threshold 产生 Unmatched，近似候选产生 Ambiguous，状态使用 Main/QC 而不是 A/B 代码。
 26. Compare Result 只保留差异或匹配异常 observation；正常匹配按 Main 后 QC 相邻显示，差异变量的两侧单元格均为浅黄色。指定 Key Variables 后，key 不同时只正式标记 key；key 相同时再标记其余差异。
 27. 在 Compare Result 使用 Variables、手写 WHERE、表头筛选、排序、Ctrl+F、Ctrl+G、复制和 CSV。任一侧命中筛选应保留整个匹配对，排序后 Main/QC 不得拆散；CSV 行、列和顺序与当前结果一致。Reload、PROC MEANS 和把 Compare Result 再作为 Compare 输入应禁用。关闭结果 Tab 后对应临时 SQLite 目录应删除。
+28. 不带参数运行 `scripts\build_windows.ps1`，解压 `SASDataViewer-Windows-x64.zip`；确认 `_internal` 中没有 `p21-sidecar-manifest.json` 和 `p21-sidecar`，`Tools` 菜单不显示 P21 Issue Explorer。
+29. 运行 `scripts\build_windows.ps1 -IncludeP21`，确认同时生成基础 ZIP 和 `SASDataViewer-P21-Windows-x64.zip`；P21 包包含 `_internal\p21-sidecar-manifest.json`、`_internal\p21-sidecar\P21IssueExplorer.exe` 及其 `_internal` runtime，manifest SHA256 与 executable 一致。
+30. 将两个 ZIP 分别复制到没有 Python、没有项目源码且断开外网的干净 Windows 10/11 x64 机器，完整解压；确认两版 Viewer 都能打开 SAS 数据，基础版隐藏 P21 菜单，P21 版显示菜单并可启动/关闭 side-car。
+31. 在 P21 版打开对应 domain 的当前数据，导入 worksheet 名为 `Issue Details` 的最新 report；验证 Rule ID 汇总、issue 数与当前候选数、绿色 exact、黄色 review、红色 Not Found、单 issue 新结果视图、Rule 全部候选视图和可见 WHERE。多条候选必须全部保留。
+32. P21 Explorer 运行时强制结束 `P21IssueExplorer.exe`，确认 Viewer 和已打开的数据仍可使用；重新从 Tools 启动后应恢复。正常退出 Viewer 后，P21 snapshot/result 临时目录应清理。

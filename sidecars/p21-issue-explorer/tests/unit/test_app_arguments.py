@@ -5,7 +5,7 @@ import io
 import unittest
 from pathlib import Path
 
-from p21_issue_explorer.app import build_parser
+from p21_issue_explorer.app import build_parser, main
 
 
 class AppArgumentTests(unittest.TestCase):
@@ -29,6 +29,9 @@ class AppArgumentTests(unittest.TestCase):
     def test_snapshot_argument_requires_domain_equals_path(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             build_parser().parse_args(["--snapshot", "AE"])
+
+    def test_packaged_smoke_mode_exits_without_starting_qt(self) -> None:
+        self.assertEqual(main(["--smoke-test"]), 0)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use a standalone Dataset Snapshot v1 for a domain (repeatable)",
     )
     parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--server-name", help="Viewer local IPC server name")
     parser.add_argument("--session-token", help="Viewer IPC session token")
     parser.add_argument("--protocol-version", type=int, default=PROTOCOL_VERSION)
@@ -51,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    if arguments.smoke_test:
+        return 0
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("P21 Issue Explorer")
     application.setStyleSheet(STYLE)

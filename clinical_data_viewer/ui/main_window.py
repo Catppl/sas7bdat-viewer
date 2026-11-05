@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
         )
         self._p21_host: P21HostController | None = None
         self._p21_result_tab: DatasetTab | None = None
+        self._p21_result_generation = 0
         self._p21_result_builder = P21ResultBuilder(temp_manager)
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
@@ -689,7 +690,58 @@ class MainWindow(QMainWindow):
             issue_id=issue_id,
             materialized_description=description if is_rule_summary else "",
         )
-        handle = self._p21_result_builder.build(source, spec)
+        self._p21_result_generation += 1
+        generation = self._p21_result_generation
+        source_directory = source.temporary_path.parent
+        self._retain_directory(source_directory)
+        self.task_status.setText(f"Building P21 Result View for {domain} / {rule_id}…")
+
+        def completed(handle: DatasetHandle) -> None:
+            self._release_directory(source_directory)
+            if generation != self._p21_result_generation or self._closing:
+                self._remove_dataset_directory(handle.temporary_path.parent)
+                return
+            self._show_p21_result(
+                handle,
+                payload,
+                spec,
+                colors,
+                is_rule_summary=is_rule_summary,
+            )
+
+        def failed(message: str, details: str) -> None:
+            self._release_directory(source_directory)
+            if generation == self._p21_result_generation and not self._closing:
+                self._show_error("P21 Result View Failed", message, details)
+
+        self._submit(
+            self,
+            lambda worker: self._p21_result_builder.build(
+                source,
+                spec,
+                cancelled=lambda: worker.cancelled,
+                progress=lambda count: worker.report(
+                    f"Building P21 Result View… {count:,} records"
+                ),
+            ),
+            completed,
+            failed,
+        )
+        return {
+            "title": "P21 Result View",
+            "record_count": len(source_rows),
+            "accepted": True,
+        }
+
+    def _show_p21_result(
+        self,
+        handle: DatasetHandle,
+        payload: dict[str, object],
+        spec: P21ResultSpec,
+        colors: dict[int, str],
+        *,
+        is_rule_summary: bool,
+    ) -> None:
         tab = self._replace_p21_result_tab(handle)
         tab.set_source_row_highlights(colors)
         if is_rule_summary:
@@ -697,21 +749,21 @@ class MainWindow(QMainWindow):
             exact_count = int(payload.get("exact_record_count", 0))
             review_count = int(payload.get("review_record_count", 0))
             tab.set_context_notice(
-                f"Domain: {domain} | Rule ID: {rule_id} | P21 issues: "
+                f"Domain: {spec.domain} | Rule ID: {spec.rule_id} | P21 issues: "
                 f"{issue_count} | Exact records: {exact_count} | "
                 f"Review records: {review_count} | Unique candidates: "
-                f"{len(source_rows)}"
+                f"{len(spec.source_rows)}"
             )
-            tab.set_materialized_where_description(description)
+            tab.set_materialized_where_description(spec.materialized_description)
         else:
             status = str(payload.get("status", ""))
             tab.set_context_notice(
-                f"Domain: {domain} | Rule ID: {rule_id} | Issue: {issue_id} | "
-                f"Status: {status} | Candidates: {len(source_rows)}"
+                f"Domain: {spec.domain} | Rule ID: {spec.rule_id} | "
+                f"Issue: {spec.issue_id} | Status: {status} | "
+                f"Candidates: {len(spec.source_rows)}"
             )
-            tab.where_editor.setPlainText(where_text or expected_where)
-            self._apply_filter(tab, where_text or expected_where)
-        return {"title": "P21 Result View", "record_count": len(source_rows)}
+            tab.where_editor.setPlainText(spec.where_text or spec.expected_where)
+            self._apply_filter(tab, spec.where_text or spec.expected_where)
 
     def _replace_p21_result_tab(self, handle: DatasetHandle) -> DatasetTab:
         insert_at = self.tabs.count()
