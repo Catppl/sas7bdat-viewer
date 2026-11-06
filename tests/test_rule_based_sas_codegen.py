@@ -194,6 +194,7 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertNotIn("abort cancel", code)
         self.assertIn("data adae;", code)
         self.assertNotRegex(code, r"\n[ \t]*\n[ \t]*\n")
+        self.assertNotIn("where not missing(USUBJID)", code)
         self.assertIn("create table adae_denom as", code)
         self.assertIn("create table adae_row1 as", code)
         self.assertIn("create table adae_row2 as", code)
@@ -206,7 +207,12 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertNotIn("length col1-col4 $200;", code)
         self.assertIn("array col {*} $200 col1-col4;", code)
         self.assertIn("keep item col1-col4;", code)
-        self.assertIn('col{i} = "   " || strip(put(cnt{i}, best.)) ||', code)
+        self.assertIn(
+            'col{i} = "   " || strip(put(cnt{i}, best.)) || \' (\' || '
+            'strip(put(round(_pct, 0.1), 5.1)) || \')\';',
+            code,
+        )
+        self.assertIn("if den{i} = 0 then col{i} = '0 (—)';", code)
         self.assertNotIn("cats(", code)
         self.assertIn("item = 'Event'", code)
         self.assertIn("label", code)
@@ -542,7 +548,7 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             "quit;", 1
         )[0]
         self.assertIn("not missing(AVAL)", denominator_section)
-        self.assertIn("not missing(USUBJID)", denominator_section)
+        self.assertNotIn("not missing(USUBJID)", denominator_section)
 
     def test_xpt_source_uses_xport_libname(self) -> None:
         configuration = _base_configuration()

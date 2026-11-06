@@ -42,8 +42,7 @@ proc sql;
         count(distinct (case when TRT01A = 'Placebo' then USUBJID end)) as denom2,
         count(distinct (case when TRT01A = 'Drug A' then USUBJID end)) as denom3,
         count(distinct (case when not missing(TRT01A) then USUBJID end)) as denom4
-    from adsl_pop
-    where not missing(USUBJID);
+    from adsl_pop;
 quit;
 
 /* Calculate each configured Rule row independently. */
@@ -57,8 +56,7 @@ proc sql;
         count(distinct (case when TRT01A = 'Placebo' then USUBJID end)) as count2,
         count(distinct (case when TRT01A = 'Drug A' then USUBJID end)) as count3,
         count(distinct (case when not missing(TRT01A) then USUBJID end)) as count4
-    from adae
-    where not missing(USUBJID);
+    from adae;
 quit;
 
 /* Row 2: Serious TEAE */
@@ -70,8 +68,7 @@ proc sql;
         count(distinct (case when TRT01A = 'Placebo' then USUBJID end)) as count2,
         count(distinct (case when TRT01A = 'Drug A' then USUBJID end)) as count3,
         count(distinct (case when not missing(TRT01A) then USUBJID end)) as count4
-    from adae(where=(AESER = 'Y'))
-    where not missing(USUBJID);
+    from adae(where=(AESER = 'Y'));
 quit;
 
 /* Combine all row counts before calculating percentages. */
@@ -93,14 +90,10 @@ data work.rule_based_result;
     array col {*} $200 col1-col4;
 
     do i = 1 to dim(cnt);
-        if den{i} = 0 then
-            col{i} = '0 (—)';
+        if den{i} = 0 then col{i} = '0 (—)';
         else do;
             _pct = cnt{i} / den{i} * 100;
-            col{i} = "   " || strip(put(cnt{i}, best.)) ||
-                ' (' ||
-                strip(put(round(_pct, 0.1), 5.1)) ||
-                ')';
+            col{i} = "   " || strip(put(cnt{i}, best.)) || ' (' || strip(put(round(_pct, 0.1), 5.1)) || ')';
         end;
     end;
 
@@ -110,9 +103,7 @@ data work.rule_based_result;
         col2 = "Placebo (N=&n2) n (%)"
         col3 = "Drug A (N=&n3) n (%)"
         col4 = "Total (N=&nt) n (%)"
-
     ;
-
     keep item col1-col4;
 run;
 

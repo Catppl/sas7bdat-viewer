@@ -46,9 +46,8 @@ proc sql;
     select
 {% for level in levels %}        count(distinct (case when {{ denominator_treatment }} = {{ level.literal }} then {{ denominator_subject }} end)) as denom{{ level.order }}{% if not loop.last or total_enabled %},{% endif %}
 {% endfor %}{% if total_enabled %}        count(distinct (case when not missing({{ denominator_treatment }}) then {{ denominator_subject }} end)) as denom{{ total_order }}
-{% endif %}    from {{ denominator_source }}
-    where not missing({{ denominator_subject }}){% if denominator.type == "nonmissing" %}
-      and not missing({{ denominator.analysis_value }}){% endif %};
+{% endif %}    from {{ denominator_source }}{% if denominator.type == "nonmissing" %}
+    where not missing({{ denominator.analysis_value }});{% else %};{% endif %}
 quit;
 {% else %}
 data {{ work_denominator }};
@@ -65,8 +64,7 @@ proc sql;
         {{ row.display_item | sas_string }} as item length=200,
 {% for level in levels %}        count(distinct (case when {{ treatment }} = {{ level.literal }} then {{ subject }} end)) as count{{ level.order }}{% if not loop.last or total_enabled %},{% endif %}
 {% endfor %}{% if total_enabled %}        count(distinct (case when not missing({{ treatment }}) then {{ subject }} end)) as count{{ total_order }}
-{% endif %}    from {% if row.has_filter %}{{ work_source }}(where=({{ row.filter }})){% else %}{{ work_source }}{% endif %}
-    where not missing({{ subject }});
+{% endif %}    from {% if row.has_filter %}{{ work_source }}(where=({{ row.filter }})){% else %}{{ work_source }}{% endif %};
 {% else %}    select distinct
         {{ row.display_item | sas_string }} as item length=200
     from dictionary.tables(obs=1);
@@ -91,14 +89,10 @@ data {{ output_dataset }};
     array col {*} $200 col1-col{{ output_columns }};
 
     do i = 1 to dim(cnt);
-        if den{i} = 0 then
-            col{i} = '0 (—)';
+        if den{i} = 0 then col{i} = '0 (—)';
         else do;
             _pct = cnt{i} / den{i} * 100;
-            col{i} = "   " || strip(put(cnt{i}, best.)) ||
-                ' (' ||
-                strip(put(round(_pct, {{ round_increment }}), {{ 4 + digits }}.{{ digits }})) ||
-                ')';
+            col{i} = "   " || strip(put(cnt{i}, best.)) || ' (' || strip(put(round(_pct, {{ round_increment }}), {{ 4 + digits }}.{{ digits }})) || ')';
         end;
     end;
 
@@ -107,9 +101,7 @@ data {{ output_dataset }};
 {% for level in levels %}        col{{ level.order }} = {% if denominator.type == "population" %}{{ (level.label ~ " (N=&n" ~ level.order ~ ") n (%)") | sas_double_string }}{% else %}{{ (level.label ~ " n (%)") | sas_string }}{% endif %}
 {% endfor %}{% if total_enabled %}{% if denominator.type == "population" %}        col{{ total_order }} = "Total (N=&{{ total_n_macro }}) n (%)"
 {% else %}        col{{ total_order }} = 'Total n (%)'
-{% endif %}
-{% endif %}    ;
-
+{% endif %}{% endif %}    ;
     keep item col1-col{{ output_columns }};
 {% else %}
     keep item;
