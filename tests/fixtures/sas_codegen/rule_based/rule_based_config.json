@@ -1,0 +1,179 @@
+{
+  "type": "rule_based_table",
+  "version": 1,
+  "input": {
+    "kind": "sas",
+    "format": "sas7bdat",
+    "dataset": "ADAE",
+    "source_path": "/data/analysis/adam/adae.sas7bdat",
+    "source_directory": "/data/analysis/adam"
+  },
+  "variables": {
+    "USUBJID": {
+      "type": "character",
+      "label": "Subject Identifier",
+      "length": 40,
+      "format": ""
+    },
+    "TRT01A": {
+      "type": "character",
+      "label": "Treatment",
+      "length": 40,
+      "format": ""
+    },
+    "TRTEMFL": {
+      "type": "character",
+      "label": "Treatment Emergent Flag",
+      "length": 1,
+      "format": ""
+    },
+    "AESER": {
+      "type": "character",
+      "label": "Serious Event Flag",
+      "length": 1,
+      "format": ""
+    }
+  },
+  "dataset_filter": {
+    "language": "sas_like",
+    "text": "TRTEMFL = \"Y\"",
+    "ast": {
+      "type": "comparison",
+      "variable": "TRTEMFL",
+      "operator": "=",
+      "prefix": false,
+      "operand": {
+        "type": "literal",
+        "value_type": "character",
+        "value": "Y"
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "row_001",
+      "item": "Any TEAE",
+      "indent": 0,
+      "filter": {
+        "language": "sas_like",
+        "text": "",
+        "ast": null
+      }
+    },
+    {
+      "id": "row_002",
+      "item": "Serious TEAE",
+      "indent": 1,
+      "filter": {
+        "language": "sas_like",
+        "text": "AESER = \"Y\"",
+        "ast": {
+          "type": "comparison",
+          "variable": "AESER",
+          "operator": "=",
+          "prefix": false,
+          "operand": {
+            "type": "literal",
+            "value_type": "character",
+            "value": "Y"
+          }
+        }
+      }
+    }
+  ],
+  "count": {
+    "type": "distinct",
+    "variable": "USUBJID"
+  },
+  "treatment": {
+    "variable": "TRT01A",
+    "missing_policy": "error",
+    "level_order": "resolved",
+    "resolved_levels": [
+      {
+        "value": "Drug B",
+        "label": "Drug B"
+      },
+      {
+        "value": "Placebo",
+        "label": "Placebo"
+      },
+      {
+        "value": "Drug A",
+        "label": "Drug A"
+      }
+    ]
+  },
+  "denominator": {
+    "type": "population",
+    "population": {
+      "input": {
+        "kind": "sas",
+        "format": "sas7bdat",
+        "dataset": "ADSL",
+        "source_path": "/data/analysis/adam/adsl.sas7bdat",
+        "source_directory": "/data/analysis/adam"
+      },
+      "filter": {
+        "language": "sas_like",
+        "text": "SAFFL = \"Y\"",
+        "ast": {
+          "type": "comparison",
+          "variable": "SAFFL",
+          "operator": "=",
+          "prefix": false,
+          "operand": {
+            "type": "literal",
+            "value_type": "character",
+            "value": "Y"
+          }
+        }
+      },
+      "variables": {
+        "USUBJID": {
+          "type": "character",
+          "label": "Subject Identifier",
+          "length": 40,
+          "format": ""
+        },
+        "TRT01A": {
+          "type": "character",
+          "label": "Treatment",
+          "length": 40,
+          "format": ""
+        },
+        "SAFFL": {
+          "type": "character",
+          "label": "Safety Population Flag",
+          "length": 1,
+          "format": ""
+        }
+      },
+      "treatment_variable": "TRT01A"
+    }
+  },
+  "total": {
+    "enabled": true,
+    "method": "recompute_distinct_subjects"
+  },
+  "calculation": {
+    "reference_engine": "python_rule_based_v1",
+    "numerator": "distinct_subjects",
+    "subject_missing": "exclude",
+    "treatment_missing": "error",
+    "percent_method": "freq_divided_by_denom_times_100",
+    "total_method": "recompute_distinct_subjects"
+  },
+  "display": {
+    "percent_digits": 1,
+    "rounding": "half_up",
+    "zero_denominator_display": "0 (—)"
+  },
+  "targets": {
+    "sas": {
+      "source_library": "analysis",
+      "source_member": "adae",
+      "output_dataset": "work.rule_based_result"
+    }
+  }
+}

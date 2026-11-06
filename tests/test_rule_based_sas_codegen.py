@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import json
 import unittest
+from pathlib import Path
 
 from clinical_data_viewer.codegen.sas import SasRuleBasedGenerator
 
@@ -128,29 +130,83 @@ def _base_configuration() -> dict[str, object]:
     }
 
 
+def _population_configuration() -> dict[str, object]:
+    configuration = _base_configuration()
+    configuration["denominator"] = {
+        "type": "population",
+        "population": {
+            "input": {
+                "kind": "sas",
+                "format": "sas7bdat",
+                "dataset": "ADSL",
+                "source_path": r"C:\project\data\adsl.sas7bdat",
+                "source_directory": r"C:\project\data",
+            },
+            "filter": _filter(None),
+            "variables": {
+                "USUBJID": {
+                    "type": "character",
+                    "label": "Subject",
+                    "length": 20,
+                    "format": "",
+                },
+                "TRT01A": {
+                    "type": "character",
+                    "label": "Treatment",
+                    "length": 40,
+                    "format": "",
+                },
+            },
+            "treatment_variable": "TRT01A",
+        },
+    }
+    return configuration
+
+
 class RuleBasedSasCodegenTests(unittest.TestCase):
     def setUp(self) -> None:
         self.generator = SasRuleBasedGenerator()
+
+    def test_review_fixture_matches_the_formal_generator(self) -> None:
+        fixture_dir = (
+            Path(__file__).parent
+            / "fixtures"
+            / "sas_codegen"
+            / "rule_based"
+        )
+        configuration = json.loads(
+            (fixture_dir / "rule_based_config.json").read_text()
+        )
+        expected = (fixture_dir / "rule_based_generated.sas").read_text()
+
+        self.assertEqual(self.generator.generate(configuration), expected)
 
     def test_template_renders_row_counts_then_set_then_display(self) -> None:
         code = self.generator.generate(_base_configuration())
 
         self.assertIn("Reference engine: python_rule_based_v1", code)
-        self.assertIn(r"libname analysis 'C:\project\data';", code)
+        self.assertNotIn(r"libname analysis 'C:\project\data';", code)
+        self.assertNotIn("libname analysis clear;", code)
         self.assertIn("set analysis.adae;", code)
-        self.assertIn("if not (TRTEMFL = 'Y') then delete;", code)
-        self.assertIn("data rb_src;", code)
-        self.assertIn("create table denom as", code)
-        self.assertIn("create table row1 as", code)
-        self.assertIn("create table row2 as", code)
-        self.assertIn("from row2_src(where=(AESER = 'Y'))", code)
-        self.assertIn("data counts;", code)
-        self.assertIn("set\n        row1\n        row2", code)
+        self.assertIn("if TRTEMFL = 'Y';", code)
+        self.assertNotIn("Validate treatment values", code)
+        self.assertNotIn("contains missing treatment values", code)
+        self.assertNotIn("abort cancel", code)
+        self.assertIn("data adae;", code)
+        self.assertNotRegex(code, r"\n[ \t]*\n[ \t]*\n")
+        self.assertIn("create table adae_denom as", code)
+        self.assertIn("create table adae_row1 as", code)
+        self.assertIn("create table adae_row2 as", code)
+        self.assertIn("from adae(where=(AESER = 'Y'))", code)
+        self.assertNotIn("_row1_src", code)
+        self.assertNotIn("_row2_src", code)
+        self.assertIn("data adae_counts;", code)
+        self.assertIn("set\n        adae_row1\n        adae_row2", code)
         self.assertIn("data work.rule_based_result;", code)
-        self.assertIn("length col1-col4 $200;", code)
+        self.assertNotIn("length col1-col4 $200;", code)
+        self.assertIn("array col {*} $200 col1-col4;", code)
         self.assertIn("keep item col1-col4;", code)
-        self.assertIn("col{i} = cat(", code)
-        self.assertIn("strip(put(cnt{i}, 3.))", code)
+        self.assertIn('col{i} = "   " || strip(put(cnt{i}, best.)) ||', code)
         self.assertNotIn("cats(", code)
         self.assertIn("item = 'Event'", code)
         self.assertIn("label", code)
@@ -165,9 +221,12 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertNotIn("TRT_1", code)
         self.assertNotIn("as TOTAL", code)
 
-        self.assertLess(code.index("create table row1 as"), code.index("data counts;"))
         self.assertLess(
-            code.index("data counts;"), code.index("data work.rule_based_result;")
+            code.index("create table adae_row1 as"), code.index("data adae_counts;")
+        )
+        self.assertLess(
+            code.index("data adae_counts;"),
+            code.index("data work.rule_based_result;"),
         )
 
         count_lines = [
@@ -175,6 +234,35 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         ]
         self.assertTrue(count_lines)
         self.assertTrue(all("end)) as" in line for line in count_lines))
+
+    def test_population_denominator_selects_big_n_macros_from_population_dataset(self) -> None:
+        code = self.generator.generate(_population_configuration())
+
+        self.assertIn("data adsl_pop;", code)
+        self.assertIn("proc sql noprint;", code)
+        self.assertLess(
+            code.index("/* Population N by treatment group */"),
+            code.index("/* Prepare source data */"),
+        )
+        self.assertIn(
+            "select count(distinct USUBJID) into :n1 trimmed from adsl_pop where TRT01A = 'Drug B';",
+            code,
+        )
+        self.assertIn(
+            "select count(distinct USUBJID) into :n2 trimmed from adsl_pop where TRT01A = 'Placebo';",
+            code,
+        )
+        self.assertIn(
+            "select count(distinct USUBJID) into :n3 trimmed from adsl_pop where TRT01A = 'Drug A';",
+            code,
+        )
+        self.assertIn(
+            "select count(distinct USUBJID) into :nt trimmed from adsl_pop where not missing(TRT01A);",
+            code,
+        )
+        self.assertNotIn("Population denominator contains missing treatment values", code)
+        self.assertIn('col1 = "Drug B (N=&n1) n (%)"', code)
+        self.assertIn('col4 = "Total (N=&nt) n (%)"', code)
 
     def test_conditional_counts_preserve_resolved_treatment_order_and_total_semantics(
         self,
@@ -225,7 +313,7 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         )
         code = self.generator.generate(configuration)
         self.assertIn(
-            "if not ((TRTEMFL = 'Y' and TRT01A in ('A', 'B'))) then delete;",
+            "if (TRTEMFL = 'Y' and TRT01A in ('A', 'B'));",
             code,
         )
         self.assertIn("'Patient''s TEAE'", code)
@@ -257,11 +345,11 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         )
         code = self.generator.generate(configuration)
         self.assertIn(
-            "if not ((TRTEMFL ne 'Y' or AVAL between 1 and 3)) then delete;",
+            "if (TRTEMFL ne 'Y' or AVAL between 1 and 3);",
             code,
         )
         self.assertIn(
-            "from row1_src(where=((AEDECOD =: 'HEAD' and missing(AESER))))",
+            "from adae(where=((AEDECOD =: 'HEAD' and missing(AESER))))",
             code,
         )
         self.assertNotIn("where (TRTEMFL ne 'Y'", code)
@@ -274,9 +362,9 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
             "method": "recompute_distinct_subjects",
         }
         code = self.generator.generate(configuration)
-        self.assertIn("data denom;", code)
+        self.assertIn("data adae_denom;", code)
         self.assertIn("select distinct", code)
-        self.assertIn("data counts;", code)
+        self.assertIn("data adae_counts;", code)
         self.assertIn("keep item;", code)
         self.assertNotIn("array cnt", code)
         self.assertNotIn("col1", code)
@@ -292,7 +380,8 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         )
         self.assertIn(f"{total_expression} as denom1", code)
         self.assertIn(f"{total_expression} as count1", code)
-        self.assertIn("length col1-col1 $200;", code)
+        self.assertNotIn("length col1-col1 $200;", code)
+        self.assertIn("array col {*} $200 col1-col1;", code)
         self.assertIn("col1 = 'Total n (%)'", code)
         self.assertNotIn("col2", code)
 
@@ -302,7 +391,7 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         denominator_section = code.split("/* Calculate denominators", 1)[1].split(
             "quit;", 1
         )[0]
-        self.assertIn("from rb_src", denominator_section)
+        self.assertIn("from adae", denominator_section)
         self.assertNotIn("AESER", denominator_section)
 
     def test_percent_digits_render_dynamic_width_and_precision(self) -> None:
@@ -394,14 +483,53 @@ class RuleBasedSasCodegenTests(unittest.TestCase):
         self.assertIn(r"libname pop xport 'C:\project\data\adsl.xpt';", code)
         self.assertNotIn("libname population", code)
         self.assertIn("set pop.ADSL;", code)
-        self.assertIn("if not (TRT_POP = 'A') then delete;", code)
-        self.assertIn("if missing(TRT_POP)", code)
-        self.assertIn("from rb_pop", code)
+        self.assertIn("if TRT_POP = 'A';", code)
+        self.assertNotIn("if missing(TRT_POP)", code)
+        self.assertIn("from adsl_pop", code)
         denominator_section = code.split("/* Calculate denominators", 1)[1].split(
             "quit;", 1
         )[0]
         self.assertIn("TRT_POP", denominator_section)
         self.assertNotIn("TRTEMFL", denominator_section)
+
+    def test_sas7bdat_population_uses_existing_source_library_without_libname(
+        self,
+    ) -> None:
+        configuration = _base_configuration()
+        configuration["denominator"] = {
+            "type": "population",
+            "population": {
+                "input": {
+                    "kind": "sas",
+                    "format": "sas7bdat",
+                    "dataset": "ADSL",
+                    "source_path": r"C:\project\data\adsl.sas7bdat",
+                    "source_directory": r"C:\project\data",
+                },
+                "variables": {
+                    "USUBJID": {
+                        "type": "character",
+                        "label": "Subject",
+                        "length": 20,
+                        "format": "",
+                    },
+                    "TRT_POP": {
+                        "type": "character",
+                        "label": "Treatment",
+                        "length": 40,
+                        "format": "",
+                    },
+                },
+                "treatment_variable": "TRT_POP",
+                "filter": _filter(None),
+            },
+        }
+
+        code = self.generator.generate(configuration)
+
+        self.assertNotIn("libname pop", code)
+        self.assertIn("set analysis.ADSL;", code)
+        self.assertNotIn("libname pop clear;", code)
 
     def test_nonmissing_denominator_has_analysis_value_condition(self) -> None:
         configuration = _base_configuration()

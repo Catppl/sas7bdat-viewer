@@ -83,6 +83,16 @@ def _sas_literal(value: object, kind: str, label: str) -> str:
     return _sas_numeric(value, label)
 
 
+def _sas_double_string(value: object) -> str:
+    """Render a SAS double-quoted string, preserving macro references."""
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _normalize_sas_spacing(code: str) -> str:
+    """Keep at most one blank line between generated SAS code blocks."""
+    return re.sub(r"(?:[ \t]*\n){3,}", "\n\n", code)
+
+
 def _filter_text(block: object, label: str) -> str:
     mapping = _mapping(block, label)
     if mapping.get("language") != "sas_like":
@@ -150,6 +160,7 @@ class SasRuleBasedGenerator:
         )
         self.environment.filters["sas_name"] = sas_name
         self.environment.filters["sas_string"] = sas_string
+        self.environment.filters["sas_double_string"] = _sas_double_string
 
     def _prepare(self, configuration: Mapping[str, object]) -> dict[str, object]:
         if configuration.get("type") != "rule_based_table":
@@ -266,17 +277,6 @@ class SasRuleBasedGenerator:
             raise ValueError("Rule-based configuration rows must be a non-empty array.")
         denominator = _mapping(configuration["denominator"], "denominator")
         used_members: set[str] = set()
-        # Keep generated WORK members short and descriptive.  The program
-        # header documents the real source, so repeating it in every member
-        # name only makes the generated SAS harder to read.
-        work_source = _work_member("rb_src", used_members)
-        work_population = (
-            _work_member("rb_pop", used_members)
-            if denominator.get("type") == "population"
-            else ""
-        )
-        work_denominator = _work_member("denom", used_members)
-        work_counts = _work_member("counts", used_members)
         rows: list[dict[str, object]] = []
         row_ids: set[str] = set()
         for index, row in enumerate(rows_value, start=1):
@@ -307,8 +307,6 @@ class SasRuleBasedGenerator:
                     "filter": _filter_text(
                         row_mapping.get("filter"), f"rows[{index - 1}].filter"
                     ),
-                    "source_member": _work_member(f"row{index}_src", used_members),
-                    "member": _work_member(f"row{index}", used_members),
                 }
             )
 
@@ -391,11 +389,29 @@ class SasRuleBasedGenerator:
             f"{source_library}.{source_member}", "targets.sas source"
         )
 
+        # Prefix every WORK member with the dataset used by its SET statement.
+        # This keeps generated programs easy to scan when several tables are
+        # reviewed together, for example ADAE_SRC and ADSL_POP.
+        source_prefix = _safe_token(source_member)
+        work_source = _work_member(source_prefix, used_members)
+        work_population = ""
+        if denominator_type == "population":
+            population_member = denominator_context["population"]["member"]
+            work_population = _work_member(
+                f"{_safe_token(population_member)}_pop", used_members
+            )
+        work_denominator = _work_member(f"{source_prefix}_denom", used_members)
+        work_counts = _work_member(f"{source_prefix}_counts", used_members)
+        for row in rows:
+            row_index = row["order"]
+            row["member"] = _work_member(
+                f"{source_prefix}_row{row_index}", used_members
+            )
+
         output_columns = len(levels) + (1 if total["enabled"] else 0)
         for row in rows:
-            # The row source is intentionally a lightweight copy of rb_src.
-            # The actual row filter is attached to the FROM item in the
-            # template, keeping the SQL aggregate itself easy to read.
+            # Attach the row filter to the FROM item in the template, keeping
+            # the SQL aggregate itself easy to read without extra staging data.
             row["has_filter"] = bool(row["filter"])
 
         denominator_source = (
@@ -406,6 +422,10 @@ class SasRuleBasedGenerator:
             if denominator_type == "population"
             else sas_name(treatment_variable)
         )
+        population_counts = [
+            {"macro": f"n{level['order']}", "literal": level["literal"]}
+            for level in levels
+        ] if denominator_type == "population" else []
 
         return {
             "version": 1,
@@ -423,6 +443,8 @@ class SasRuleBasedGenerator:
             "denominator_source": denominator_source,
             "denominator_treatment": denominator_treatment,
             "denominator_subject": sas_name("USUBJID"),
+            "population_counts": population_counts,
+            "total_n_macro": "nt",
             "total_enabled": total["enabled"],
             "total_order": len(levels) + 1,
             "output_columns": output_columns,
@@ -444,7 +466,10 @@ class SasRuleBasedGenerator:
             )
         try:
             context = self._prepare(configuration)
-            return self.environment.get_template("rule_based.sas.j2").render(**context)
+            rendered = self.environment.get_template("rule_based.sas.j2").render(
+                **context
+            )
+            return _normalize_sas_spacing(rendered)
         except (KeyError, TypeError, TemplateError) as error:
             raise ValueError(
                 f"Unable to render the Rule-based SAS template: {error}"

@@ -11,59 +11,35 @@
 */
 options validvarname=any;
 
+{% if denominator.type == "population" %}
+/* Prepare the independent population denominator. */
+{% if denominator.population.input.format == "xpt" %}
+libname pop xport {{ denominator.population.input.source_path | sas_string }};
+{% endif %}
+
+data {{ work_population }};
+    set {% if denominator.population.input.format == "xpt" %}pop{% else %}{{ source_library }}{% endif %}.{{ denominator.population.member }};
+{% if denominator.population.filter %}    if {{ denominator.population.filter }};
+{% endif %}run;
+
+/* Population N by treatment group */
+proc sql noprint;
+{% for count in population_counts %}    select count(distinct {{ denominator_subject }}) into :{{ count.macro }} trimmed from {{ work_population }} where {{ denominator_treatment }} = {{ count.literal }};
+{% endfor %}{% if total_enabled %}    select count(distinct {{ denominator_subject }}) into :{{ total_n_macro }} trimmed from {{ work_population }} where not missing({{ denominator_treatment }});
+{% endif %}quit;
+{% endif %}
+
 /* Prepare source data */
 {% if source.format == "xpt" %}
 libname {{ source_library }} xport {{ source.source_path | sas_string }};
-{% else %}
-libname {{ source_library }} {{ source.source_directory | sas_string }};
 {% endif %}
 
 data {{ work_source }};
     set {{ source_reference }};
-{% if dataset_filter %}    if not ({{ dataset_filter }}) then delete;
+{% if dataset_filter %}    if {{ dataset_filter }};
 {% endif %}run;
 
-/* Validate treatment values in each configured analysis universe */
-{% for row in rows %}
-{% if row.has_filter %}
-data {{ row.source_member }};
-    set {{ work_source }};
-run;
-
-data _null_;
-    set {{ row.source_member }}(where=({{ row.filter }}));
-{% else %}
-data _null_;
-    set {{ work_source }};
-{% endif %}    if missing({{ treatment }}) then do;
-        put "ERROR: Rule-based row {{ row.id }} ({{ row.item | replace('"', '""') }}) contains missing treatment values.";
-        abort cancel;
-    end;
-run;
-{% endfor %}
-{% if denominator.type == "population" %}
-/* Prepare the independent population denominator */
-{% if denominator.population.input.format == "xpt" %}
-libname pop xport {{ denominator.population.input.source_path | sas_string }};
-{% else %}
-libname pop {{ denominator.population.input.source_directory | sas_string }};
-{% endif %}
-
-data {{ work_population }};
-    set pop.{{ denominator.population.member }};
-{% if denominator.population.filter %}    if not ({{ denominator.population.filter }}) then delete;
-{% endif %}run;
-
-data _null_;
-    set {{ work_population }};
-    if missing({{ denominator.population.treatment }}) then do;
-        put "ERROR: Population denominator contains missing treatment values.";
-        abort cancel;
-    end;
-run;
-{% endif %}
-
-/* Calculate denominators.  Row Filters are deliberately not applied here. */
+/* Calculate denominators. Row filters are deliberately not applied here. */
 {% if output_columns %}
 proc sql;
     create table {{ work_denominator }} as
@@ -80,7 +56,7 @@ data {{ work_denominator }};
 run;
 {% endif %}
 
-/* Calculate each configured Rule row independently */
+/* Calculate each configured Rule row independently. */
 {% for row in rows %}
 /* Row {{ row.order }}: {{ row.item }} */
 proc sql;
@@ -89,7 +65,7 @@ proc sql;
         {{ row.display_item | sas_string }} as item length=200,
 {% for level in levels %}        count(distinct (case when {{ treatment }} = {{ level.literal }} then {{ subject }} end)) as count{{ level.order }}{% if not loop.last or total_enabled %},{% endif %}
 {% endfor %}{% if total_enabled %}        count(distinct (case when not missing({{ treatment }}) then {{ subject }} end)) as count{{ total_order }}
-{% endif %}    from {% if row.has_filter %}{{ row.source_member }}(where=({{ row.filter }})){% else %}{{ work_source }}{% endif %}
+{% endif %}    from {% if row.has_filter %}{{ work_source }}(where=({{ row.filter }})){% else %}{{ work_source }}{% endif %}
     where not missing({{ subject }});
 {% else %}    select distinct
         {{ row.display_item | sas_string }} as item length=200
@@ -97,42 +73,41 @@ proc sql;
 {% endif %}quit;
 {% endfor %}
 
-/* Combine all row counts before calculating percentages */
+/* Combine all row counts before calculating percentages. */
 data {{ work_counts }};
     set
 {% for row in rows %}        {{ row.member }}
 {% endfor %}    ;
 run;
 
-/* Calculate n (%) once, after all rows have been combined */
+/* Calculate n (%) once, after all rows have been combined. */
 data {{ output_dataset }};
 {% if output_columns %}    if _n_ = 1 then set {{ work_denominator }};
 {% endif %}    set {{ work_counts }};
 {% if output_columns %}
-    length col1-col{{ output_columns }} $200;
-
+    /* cnt = numerator counts, den = denominator counts, col = display values. */
     array cnt {*} count1-count{{ output_columns }};
     array den {*} denom1-denom{{ output_columns }};
-    array col {*} $ col1-col{{ output_columns }};
+    array col {*} $200 col1-col{{ output_columns }};
 
     do i = 1 to dim(cnt);
         if den{i} = 0 then
             col{i} = '0 (—)';
         else do;
             _pct = cnt{i} / den{i} * 100;
-            col{i} = cat(
-                strip(put(cnt{i}, 3.)),
-                ' (',
-                strip(put(round(_pct, {{ round_increment }}), {{ 4 + digits }}.{{ digits }})),
-                ')'
-            );
+            col{i} = "   " || strip(put(cnt{i}, best.)) ||
+                ' (' ||
+                strip(put(round(_pct, {{ round_increment }}), {{ 4 + digits }}.{{ digits }})) ||
+                ')';
         end;
     end;
 
     label
         item = 'Event'
-{% for level in levels %}        col{{ level.order }} = {{ (level.label ~ " n (%)") | sas_string }}
-{% endfor %}{% if total_enabled %}        col{{ total_order }} = 'Total n (%)'
+{% for level in levels %}        col{{ level.order }} = {% if denominator.type == "population" %}{{ (level.label ~ " (N=&n" ~ level.order ~ ") n (%)") | sas_double_string }}{% else %}{{ (level.label ~ " n (%)") | sas_string }}{% endif %}
+{% endfor %}{% if total_enabled %}{% if denominator.type == "population" %}        col{{ total_order }} = "Total (N=&{{ total_n_macro }}) n (%)"
+{% else %}        col{{ total_order }} = 'Total n (%)'
+{% endif %}
 {% endif %}    ;
 
     keep item col1-col{{ output_columns }};
@@ -145,13 +120,16 @@ proc datasets library=work nolist;
     delete
         {{ work_source }}
 {% if denominator.type == "population" %}        {{ work_population }}
-{% endif %}{% for row in rows %}{% if row.has_filter %}        {{ row.source_member }}
-{% endif %}        {{ row.member }}
+{% endif %}{% for row in rows %}        {{ row.member }}
 {% endfor %}        {{ work_counts }}
         {{ work_denominator }}
     ;
 quit;
 {% if denominator.type == "population" %}
+{% if denominator.population.input.format == "xpt" %}
 libname pop clear;
 {% endif %}
+{% endif %}
+{% if source.format == "xpt" %}
 libname {{ source_library }} clear;
+{% endif %}
