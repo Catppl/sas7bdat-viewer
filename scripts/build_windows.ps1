@@ -32,7 +32,7 @@ $VenvPython = (Resolve-Path ".venv\Scripts\python.exe").Path
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install -r requirements-build.txt
 & .\.venv\Scripts\ruff.exe check clinical_data_viewer tests run.py scripts\p21_bundle.py
-& .\.venv\Scripts\ruff.exe format --check clinical_data_viewer\integrations\p21 tests\test_p21_integration.py tests\test_p21_packaging.py run.py scripts\p21_bundle.py
+& .\.venv\Scripts\ruff.exe format --check clinical_data_viewer\integrations\p21 tests\test_p21_integration.py tests\test_p21_packaging.py tests\test_p21_excel_export.py run.py scripts\p21_bundle.py
 & $VenvPython -m compileall -q clinical_data_viewer tests run.py scripts\p21_bundle.py
 $PreviousQtPlatform = $env:QT_QPA_PLATFORM
 $env:QT_QPA_PLATFORM = "offscreen"

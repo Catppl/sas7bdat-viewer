@@ -23,6 +23,7 @@ from ..matching import (
     RuleMatchCache,
 )
 from ..models import (
+    DomainExportRequest,
     IssueMatchResult,
     IssueOpenRequest,
     IssueStatus,
@@ -136,6 +137,92 @@ class _RuleMatchTask(QRunnable):
             self.signals.finished.emit()
 
 
+class _DomainExportTask(QRunnable):
+    def __init__(
+        self,
+        provider: SnapshotProvider,
+        domain: str,
+        issues: tuple[P21Issue, ...],
+        report_fingerprint: str,
+        report_name: str,
+        cache: RuleMatchCache,
+    ) -> None:
+        super().__init__()
+        self.provider = provider
+        self.domain = domain
+        self.issues = issues
+        self.report_fingerprint = report_fingerprint
+        self.report_name = report_name
+        self.cache = cache
+        self.signals = _MatchSignals()
+        self._cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            by_rule: dict[str, list[P21Issue]] = {}
+            for issue in self.issues:
+                by_rule.setdefault(issue.rule_id, []).append(issue)
+            grouped_results: list[tuple[str, tuple[IssueMatchResult, ...]]] = []
+            completed = 0
+            total = len(self.issues)
+            with self.provider.open_snapshot(
+                self.domain, _requested_snapshot_variables(self.issues)
+            ) as snapshot:
+                for rule_id in sorted(by_rule, key=str.casefold):
+                    if self._cancelled.is_set():
+                        return
+                    rule_issues = tuple(by_rule[rule_id])
+                    key = MatchCacheKey(
+                        self.report_fingerprint,
+                        self.domain.upper(),
+                        rule_id,
+                        snapshot.manifest.source_fingerprint,
+                    )
+                    cached = self.cache.get(key)
+                    if cached is not None:
+                        results = cached.results
+                        completed += len(rule_issues)
+                        self.signals.progress.emit(completed, total)
+                    else:
+                        matched: list[IssueMatchResult] = []
+                        for issue in rule_issues:
+                            if self._cancelled.is_set():
+                                return
+                            matched.append(
+                                IssueMatcher().match(
+                                    issue,
+                                    snapshot,
+                                    cancelled=self._cancelled.is_set,
+                                )
+                            )
+                            completed += 1
+                            self.signals.progress.emit(completed, total)
+                        results = tuple(matched)
+                        self.cache.put(
+                            key,
+                            CachedRuleMatch(results, summarize_rule(results)),
+                        )
+                    grouped_results.append((rule_id, results))
+            if not self._cancelled.is_set():
+                self.signals.succeeded.emit(
+                    DomainExportRequest.from_results(
+                        self.domain,
+                        self.report_name,
+                        snapshot.manifest.source_fingerprint,
+                        tuple(grouped_results),
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 - worker boundary reports failures
+            if not self._cancelled.is_set():
+                self.signals.failed.emit(str(exc))
+        finally:
+            self.signals.finished.emit()
+
+
 def _requested_snapshot_variables(
     issues: tuple[P21Issue, ...],
 ) -> tuple[str, ...]:
@@ -158,6 +245,7 @@ def _requested_snapshot_variables(
 class ExplorerPage(ImportPage):
     open_issue_requested = Signal(object)
     filter_all_requested = Signal(object)
+    export_domain_requested = Signal(object)
 
     def __init__(
         self,
@@ -169,7 +257,9 @@ class ExplorerPage(ImportPage):
         self.snapshot_provider = snapshot_provider
         self._match_generation = 0
         self._current_task: _RuleMatchTask | None = None
+        self._current_export_task: _DomainExportTask | None = None
         self._active_match_tasks: set[_RuleMatchTask] = set()
+        self._active_export_tasks: set[_DomainExportTask] = set()
         self.current_results: tuple[IssueMatchResult, ...] = ()
         self.current_summary: RuleMatchSummary | None = None
         self.match_cache = RuleMatchCache()
@@ -193,6 +283,11 @@ class ExplorerPage(ImportPage):
         self.run_match_button.clicked.connect(self._start_selected_rule)
         rule_row.addWidget(self.run_match_button)
         selection_form.addRow("Rule ID", rule_row)
+        self.export_domain_button = QPushButton("Export Domain Matched Records…")
+        self.export_domain_button.setObjectName("exportDomainMatchedRecordsButton")
+        self.export_domain_button.setEnabled(False)
+        self.export_domain_button.clicked.connect(self._start_domain_export)
+        selection_form.addRow("Excel", self.export_domain_button)
         self.main_layout.addLayout(selection_form)
 
         progress_row = QHBoxLayout()
@@ -236,6 +331,7 @@ class ExplorerPage(ImportPage):
             self.rule_combo.clear()
         self.rule_combo.setEnabled(False)
         self.run_match_button.setEnabled(False)
+        self.export_domain_button.setEnabled(False)
         self.match_status.setText("Importing the latest P21 report…")
 
     @Slot(object)
@@ -266,6 +362,9 @@ class ExplorerPage(ImportPage):
                 self.rule_combo.addItem(f"{rule_id} ({count} {suffix})", rule_id)
         self.rule_combo.setEnabled(bool(rule_counts))
         self.run_match_button.setEnabled(bool(rule_counts))
+        self.export_domain_button.setEnabled(
+            bool(rule_counts) and self.snapshot_provider is not None
+        )
         if rule_counts:
             self._start_selected_rule()
         else:
@@ -340,19 +439,76 @@ class ExplorerPage(ImportPage):
         )
         self.thread_pool.start(task)
 
+    def _start_domain_export(self) -> None:
+        domain = self.domain_combo.currentText()
+        if self.report is None or not domain:
+            return
+        if self.snapshot_provider is None:
+            self.match_status.setText(
+                f"Cannot export {domain}: current data snapshot is unavailable."
+            )
+            return
+        issues = tuple(
+            issue
+            for issue in self.report.issues
+            if issue.dataset.casefold() == domain.casefold()
+        )
+        if not issues:
+            self.match_status.setText(f"No eligible issues are available for {domain}.")
+            return
+        generation = self._invalidate_matching()
+        self._set_matching_busy(True, len(issues))
+        self.match_status.setText(
+            f"Preparing Excel export for {len(issues)} P21 issue(s) in {domain}…"
+        )
+        task = _DomainExportTask(
+            self.snapshot_provider,
+            domain,
+            issues,
+            self.report.fingerprint,
+            self.report.source_path.name,
+            self.match_cache,
+        )
+        self._current_export_task = task
+        self._active_export_tasks.add(task)
+        task.signals.progress.connect(
+            lambda current, total, current_generation=generation: (
+                self._match_progressed(current_generation, current, total)
+            )
+        )
+        task.signals.succeeded.connect(
+            lambda request, current_generation=generation: self._export_succeeded(
+                current_generation, request
+            )
+        )
+        task.signals.failed.connect(
+            lambda message, current_generation=generation: self._export_failed(
+                current_generation, message
+            )
+        )
+        task.signals.finished.connect(
+            lambda current_generation=generation, current_task=task: (
+                self._export_finished(current_generation, current_task)
+            )
+        )
+        self.thread_pool.start(task)
+
     @Slot()
     def cancel_matching(self) -> None:
-        if self._current_task is None:
+        if self._current_task is None and self._current_export_task is None:
             return
         self._invalidate_matching()
         self._set_matching_busy(False, 0)
-        self.match_status.setText("Matching cancelled. Select a Rule ID to run again.")
+        self.match_status.setText("Operation cancelled.")
 
     def _invalidate_matching(self) -> int:
         self._match_generation += 1
         if self._current_task is not None:
             self._current_task.cancel()
             self._current_task = None
+        if self._current_export_task is not None:
+            self._current_export_task.cancel()
+            self._current_export_task = None
         return self._match_generation
 
     def _match_progressed(self, generation: int, current: int, total: int) -> None:
@@ -366,8 +522,8 @@ class ExplorerPage(ImportPage):
         self._apply_results(payload.results, payload.summary)
         status = (
             f"Matched {payload.summary.p21_issue_count} issue(s); "
-            f"found {payload.summary.current_candidate_record_count} unique current "
-            "candidate record(s)."
+            f"found {payload.summary.current_candidate_record_count} current "
+            "candidate row(s), preserving repeated matches."
         )
         if payload.cache_hit:
             status += " Cached result reused."
@@ -384,6 +540,26 @@ class ExplorerPage(ImportPage):
             candidate_count=payload.summary.current_candidate_record_count,
             cache_hit=payload.cache_hit,
         )
+
+    def _export_succeeded(self, generation: int, request: DomainExportRequest) -> None:
+        if generation != self._match_generation:
+            return
+        row_count = sum(len(rule.rows) for rule in request.rules)
+        matched_rules = sum(bool(rule.rows) for rule in request.rules)
+        if row_count == 0:
+            self.match_status.setText(
+                f"No matched records are available to export for {request.domain}."
+            )
+            return
+        self.match_status.setText(
+            f"Prepared {row_count:,} export row(s) across {matched_rules} Rule ID(s). "
+            "Choose the Excel destination in SASDataViewer."
+        )
+        self.export_domain_requested.emit(request)
+
+    def _export_failed(self, generation: int, message: str) -> None:
+        if generation == self._match_generation:
+            self.match_status.setText(f"Excel export preparation failed: {message}")
 
     def _apply_unavailable(
         self,
@@ -427,6 +603,13 @@ class ExplorerPage(ImportPage):
                 self._current_task = None
             self._set_matching_busy(False, 0)
 
+    def _export_finished(self, generation: int, task: _DomainExportTask) -> None:
+        self._active_export_tasks.discard(task)
+        if generation == self._match_generation:
+            if self._current_export_task is task:
+                self._current_export_task = None
+            self._set_matching_busy(False, 0)
+
     def _set_matching_busy(self, busy: bool, total: int) -> None:
         self.match_progress.setVisible(busy)
         self.match_progress.setRange(0, max(total, 1))
@@ -435,6 +618,12 @@ class ExplorerPage(ImportPage):
         self.domain_combo.setEnabled(self.domain_combo.count() > 0)
         self.rule_combo.setEnabled(self.rule_combo.count() > 0)
         self.run_match_button.setEnabled(not busy and self.rule_combo.count() > 0)
+        self.export_domain_button.setEnabled(
+            not busy
+            and self.snapshot_provider is not None
+            and self.report is not None
+            and self.domain_combo.currentText() != ""
+        )
 
     def _clear_results(self) -> None:
         self.current_results = ()

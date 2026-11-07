@@ -60,21 +60,68 @@ class RuleOpenRequest:
         summary: RuleMatchSummary,
         results: tuple[IssueMatchResult, ...],
     ) -> RuleOpenRequest:
-        status_by_row: dict[object, IssueStatus] = {}
-        for result in results:
-            for candidate in result.candidates:
-                existing = status_by_row.get(candidate.source_row)
-                if existing is None or candidate.status is IssueStatus.MATCHED_EXACT:
-                    status_by_row[candidate.source_row] = candidate.status
+        rows = tuple(
+            candidate.source_row
+            for result in results
+            for candidate in result.candidates
+        )
+        styles = tuple(
+            CandidateRowStyle(candidate.source_row, candidate.status)
+            for result in results
+            for candidate in result.candidates
+        )
         return cls(
             domain=domain,
             rule_id=summary.rule_id,
-            source_rows=summary.candidate_source_rows,
-            row_styles=tuple(
-                CandidateRowStyle(source_row, status_by_row[source_row])
-                for source_row in summary.candidate_source_rows
-            ),
+            source_rows=rows,
+            row_styles=styles,
             p21_issue_count=summary.p21_issue_count,
             exact_record_count=summary.current_exact_record_count,
             review_record_count=summary.current_review_record_count,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ExportCandidateRow:
+    source_row: object
+    status: IssueStatus
+    issue_id: str
+    issue_sheet_row: int
+
+
+@dataclass(frozen=True, slots=True)
+class ExportRuleGroup:
+    rule_id: str
+    p21_issue_count: int
+    rows: tuple[ExportCandidateRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DomainExportRequest:
+    domain: str
+    report_name: str
+    source_fingerprint: str
+    rules: tuple[ExportRuleGroup, ...]
+
+    @classmethod
+    def from_results(
+        cls,
+        domain: str,
+        report_name: str,
+        source_fingerprint: str,
+        grouped_results: tuple[tuple[str, tuple[IssueMatchResult, ...]], ...],
+    ) -> DomainExportRequest:
+        rules = []
+        for rule_id, results in grouped_results:
+            rows = tuple(
+                ExportCandidateRow(
+                    source_row=candidate.source_row,
+                    status=candidate.status,
+                    issue_id=result.issue.issue_id,
+                    issue_sheet_row=result.issue.sheet_row,
+                )
+                for result in results
+                for candidate in result.candidates
+            )
+            rules.append(ExportRuleGroup(rule_id, len(results), rows))
+        return cls(domain, report_name, source_fingerprint, tuple(rules))

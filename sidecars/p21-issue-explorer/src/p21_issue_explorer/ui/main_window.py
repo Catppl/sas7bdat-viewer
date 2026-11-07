@@ -41,6 +41,9 @@ class P21IssueExplorerWindow(QMainWindow):
             self.explorer_page.filter_all_requested.connect(
                 ipc_client.send_rule_request
             )
+            self.explorer_page.export_domain_requested.connect(
+                ipc_client.send_domain_export_request
+            )
             ipc_client.connected_to_viewer.connect(
                 lambda: self.statusBar().showMessage("Connected to SASDataViewer")
             )

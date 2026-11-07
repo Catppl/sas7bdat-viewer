@@ -54,30 +54,33 @@ class P21ResultBuilder:
                 + definitions
                 + ")"
             )
-            source_rows = tuple(dict.fromkeys(int(item) for item in spec.source_rows))
+            source_rows = tuple(int(item) for item in spec.source_rows)
             row_count = 0
             if source_rows:
                 source_uri = source.database_path.resolve().as_uri() + "?mode=ro"
                 with closing(sqlite3.connect(source_uri, uri=True)) as input_connection:
                     input_connection.execute(
                         "CREATE TEMP TABLE selected_source_rows "
-                        "(_source_row INTEGER PRIMARY KEY)"
+                        "(ordinal INTEGER PRIMARY KEY, source_row INTEGER NOT NULL)"
                     )
                     for offset in range(0, len(source_rows), 2_000):
                         if cancelled is not None and cancelled():
                             raise RuntimeError("P21 result creation cancelled.")
                         input_connection.executemany(
-                            "INSERT INTO selected_source_rows VALUES (?)",
+                            "INSERT INTO selected_source_rows VALUES (?, ?)",
                             (
-                                (source_row,)
-                                for source_row in source_rows[offset : offset + 2_000]
+                                (ordinal, source_row)
+                                for ordinal, source_row in enumerate(
+                                    source_rows[offset : offset + 2_000],
+                                    start=offset + 1,
+                                )
                             ),
                         )
                     cursor = input_connection.execute(
-                        f"SELECT source._source_row, {columns} FROM dataset AS source "
+                        f"SELECT selected.ordinal, {columns} FROM dataset AS source "
                         "INNER JOIN selected_source_rows AS selected "
-                        "ON selected._source_row = source._source_row "
-                        "ORDER BY source._source_row"
+                        "ON selected.source_row = source._source_row "
+                        "ORDER BY selected.ordinal"
                     )
                     insert = (
                         "INSERT INTO dataset VALUES ("
@@ -91,6 +94,12 @@ class P21ResultBuilder:
                         row_count += len(rows)
                         if progress is not None:
                             progress(row_count)
+                if row_count != len(source_rows):
+                    raise RuntimeError(
+                        "Current data changed while building the P21 result view; "
+                        f"expected {len(source_rows):,} candidate rows but found "
+                        f"{row_count:,}."
+                    )
             target.execute(
                 "CREATE TABLE cache_info (cached_rows INTEGER NOT NULL, "
                 "total_rows INTEGER, complete INTEGER NOT NULL)"

@@ -11,6 +11,9 @@ from .match import (
 )
 from .view_request import (
     CandidateRowStyle,
+    DomainExportRequest,
+    ExportCandidateRow,
+    ExportRuleGroup,
     IssueOpenRequest,
     RuleOpenRequest,
 )
@@ -20,6 +23,9 @@ __all__ = [
     "CandidatePath",
     "CandidateRowStyle",
     "ComparisonResult",
+    "DomainExportRequest",
+    "ExportCandidateRow",
+    "ExportRuleGroup",
     "IssueMatchResult",
     "IssueOpenRequest",
     "IssueStatus",

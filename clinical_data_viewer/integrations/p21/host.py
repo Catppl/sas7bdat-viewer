@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtCore import QObject, QProcess, QThreadPool, Signal
@@ -21,6 +22,25 @@ from .protocol import (
 )
 from .snapshot import BuiltSnapshot, SnapshotBuilder, SnapshotRegistry
 
+_MAX_EXPORT_CHUNK_ROWS = 5_000
+
+
+@dataclass(slots=True)
+class _PendingDomainExport:
+    domain: str
+    report_name: str
+    source_fingerprint: str
+    rules: list[dict[str, Any]]
+    by_rule: dict[str, dict[str, Any]]
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "domain": self.domain,
+            "report_name": self.report_name,
+            "source_fingerprint": self.source_fingerprint,
+            "rules": self.rules,
+        }
+
 
 class P21HostController(QObject):
     """Own the optional process and expose only generic Viewer host capabilities."""
@@ -36,18 +56,22 @@ class P21HostController(QObject):
         workspace_context: Callable[[], dict[str, Any]],
         result_handler: Callable[[str, dict[str, Any]], dict[str, Any]],
         parent=None,
+        *,
+        export_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(parent)
         self.manifest = manifest
         self.dataset_resolver = dataset_resolver
         self.workspace_context = workspace_context
         self.result_handler = result_handler
+        self.export_handler = export_handler
         self.server = QLocalServer(self)
         self.process = QProcess(self)
         self.snapshot_builder = SnapshotBuilder(temp_manager)
         self.snapshots = SnapshotRegistry(temp_manager)
         self.pool = QThreadPool.globalInstance()
         self._snapshot_workers: set[Worker] = set()
+        self._pending_domain_exports: dict[str, _PendingDomainExport] = {}
         self.socket: QLocalSocket | None = None
         self.decoder = FrameDecoder()
         self.server_name = ""
@@ -148,6 +172,10 @@ class P21HostController(QObject):
             "request_dataset_snapshot": self._snapshot_requested,
             "open_result_view": self._result_requested,
             "update_result_view": self._result_requested,
+            "export_domain_records": self._export_requested,
+            "begin_domain_export": self._begin_export_requested,
+            "append_domain_export_rows": self._append_export_requested,
+            "finish_domain_export": self._finish_export_requested,
             "release_snapshot": self._release_snapshot,
             "shutdown_ack": lambda _message: None,
             "error": lambda _message: None,
@@ -159,6 +187,12 @@ class P21HostController(QObject):
         try:
             handler(message)
         except Exception as error:  # noqa: BLE001 - IPC boundary must isolate Viewer
+            if message.message_type in {
+                "begin_domain_export",
+                "append_domain_export_rows",
+                "finish_domain_export",
+            }:
+                self._pending_domain_exports.pop(message.request_id, None)
             self._send_error(message.request_id, str(error))
 
     def _workspace_requested(self, message: ProtocolMessage) -> None:
@@ -245,6 +279,83 @@ class P21HostController(QObject):
         result = self.result_handler(message.message_type, message.payload)
         self._send("result_view_opened", result, message.request_id)
 
+    def _export_requested(self, message: ProtocolMessage) -> None:
+        if self.export_handler is None:
+            raise RuntimeError("P21 Excel export is unavailable in this Viewer.")
+        result = self.export_handler(message.payload)
+        self._send("export_started", result, message.request_id)
+
+    def _begin_export_requested(self, message: ProtocolMessage) -> None:
+        if self.export_handler is None:
+            raise RuntimeError("P21 Excel export is unavailable in this Viewer.")
+        if message.request_id in self._pending_domain_exports:
+            raise ValueError("P21 export request is already in progress.")
+        domain = message.payload.get("domain")
+        report_name = message.payload.get("report_name", "")
+        source_fingerprint = message.payload.get("source_fingerprint")
+        raw_rules = message.payload.get("rules")
+        if not isinstance(domain, str) or not domain.strip():
+            raise ValueError("P21 export requires a domain.")
+        if (
+            not isinstance(report_name, str)
+            or not isinstance(source_fingerprint, str)
+            or not source_fingerprint
+            or not isinstance(raw_rules, list)
+        ):
+            raise TypeError("P21 export report name or rules are invalid.")
+        rules: list[dict[str, Any]] = []
+        by_rule: dict[str, dict[str, Any]] = {}
+        for raw_rule in raw_rules:
+            if not isinstance(raw_rule, dict):
+                raise TypeError("P21 export rules must be objects.")
+            rule_id = raw_rule.get("rule_id")
+            issue_count = raw_rule.get("p21_issue_count")
+            if (
+                not isinstance(rule_id, str)
+                or not rule_id.strip()
+                or not isinstance(issue_count, int)
+                or issue_count < 0
+            ):
+                raise ValueError("P21 export rule metadata is invalid.")
+            if rule_id in by_rule:
+                raise ValueError(f"Duplicate P21 export Rule ID: {rule_id}")
+            rule = {
+                "rule_id": rule_id,
+                "p21_issue_count": issue_count,
+                "rows": [],
+            }
+            rules.append(rule)
+            by_rule[rule_id] = rule
+        self._pending_domain_exports[message.request_id] = _PendingDomainExport(
+            domain.strip(), report_name, source_fingerprint, rules, by_rule
+        )
+
+    def _append_export_requested(self, message: ProtocolMessage) -> None:
+        pending = self._pending_domain_exports.get(message.request_id)
+        if pending is None:
+            raise ValueError("P21 export request was not started.")
+        rule_id = message.payload.get("rule_id")
+        rows = message.payload.get("rows")
+        if not isinstance(rule_id, str) or rule_id not in pending.by_rule:
+            raise ValueError("P21 export chunk has an unknown Rule ID.")
+        if (
+            not isinstance(rows, list)
+            or not rows
+            or len(rows) > _MAX_EXPORT_CHUNK_ROWS
+            or not all(isinstance(row, dict) for row in rows)
+        ):
+            raise ValueError("P21 export chunk rows are invalid.")
+        pending.by_rule[rule_id]["rows"].extend(rows)
+
+    def _finish_export_requested(self, message: ProtocolMessage) -> None:
+        pending = self._pending_domain_exports.pop(message.request_id, None)
+        if pending is None:
+            raise ValueError("P21 export request was not started.")
+        if self.export_handler is None:
+            raise RuntimeError("P21 Excel export is unavailable in this Viewer.")
+        result = self.export_handler(pending.payload())
+        self._send("export_started", result, message.request_id)
+
     def _release_snapshot(self, message: ProtocolMessage) -> None:
         snapshot_id = message.payload.get("snapshot_id")
         if isinstance(snapshot_id, str):
@@ -276,6 +387,7 @@ class P21HostController(QObject):
             self.socket.deleteLater()
         self.socket = None
         self._authenticated = False
+        self._pending_domain_exports.clear()
 
     def _process_finished(self, *_args: object) -> None:
         self._cancel_snapshot_workers()
@@ -291,6 +403,7 @@ class P21HostController(QObject):
             worker.cancel()
 
     def _reset_transport(self) -> None:
+        self._pending_domain_exports.clear()
         if self.socket is not None:
             socket = self.socket
             self.socket = None

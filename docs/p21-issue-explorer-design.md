@@ -1,8 +1,8 @@
 # P21 Issue Explorer 架构设计
 
-状态：第一版设计基线已确认；P0–P5 已实现，P6 双版本打包代码已实现、Windows 实机验收待完成
+状态：第一版设计基线已确认；P0–P5 已实现，P6 双版本打包代码已实现、Windows 实机验收待完成；Domain Excel 导出 adapter 已实现
 
-更新日期：2026-11-05
+更新日期：2026-11-07
 
 ## 1. 文档目的
 
@@ -21,7 +21,7 @@
 - side-car 不直接依赖 Viewer 的内部数据库结构或 UI 类。
 - 数据只在本机传递，不启动 TCP 服务，也不访问外部网络。
 - 基础版与 P21 扩展版使用同一代码仓库，但分别打包。
-- 保留未来独立测试、独立升级和增加 Excel 导出的空间。
+- 保留独立测试和独立升级能力，并通过稳定 adapter 提供 Domain 匹配记录 Excel 导出。
 
 ## 3. 总体结构
 
@@ -31,7 +31,8 @@ SAS Viewer 主进程
 ├── P21 Host Adapter
 │   ├── 本地 IPC Server
 │   ├── Dataset Snapshot Builder
-│   └── P21 Result View Adapter
+│   ├── P21 Result View Adapter
+│   └── P21 Domain Excel Export Adapter
 └── Viewer 原有数据与查询能力
           │
           │ 本地 IPC：QLocalServer / QLocalSocket
@@ -41,7 +42,8 @@ P21 Issue Explorer side-car 进程
 ├── Matching Engine
 ├── SAS WHERE Builder
 ├── Issue Explorer UI
-└── Snapshot Reader
+├── Snapshot Reader
+└── Domain Export Request Builder
 ```
 
 SAS Viewer 只提供通用能力：启动进程、提供当前工作区信息、生成只读数据快照、打开结果视图。P21 文件解析、匹配、颜色状态和规则汇总全部留在 side-car 中。
@@ -137,6 +139,9 @@ side-car → Viewer：
 - `request_dataset_snapshot`
 - `open_result_view`
 - `update_result_view`
+- `begin_domain_export`
+- `append_domain_export_rows`
+- `finish_domain_export`
 - `release_snapshot`
 - `shutdown_ack`
 - `error`
@@ -147,6 +152,7 @@ Viewer → side-car：
 - `workspace_context`
 - `snapshot_ready`
 - `result_view_opened`
+- `export_started`
 - `shutdown`
 - `error`
 
@@ -238,7 +244,7 @@ side-car 不应直接读取 Viewer 当前内部缓存数据库。内部数据库
 
 ### 7.2 Rule ID 汇总结果
 
-`Filter All Matched Records` 使用候选 `_source_row` 集合生成结果，并在显示前去重。不要把所有 issue WHERE 拼成超长 OR 语句。
+`Filter All Matched Records` 使用按 issue/candidate 顺序排列的 `_source_row` 列表生成结果，不在显示前去重。不要把所有 issue WHERE 拼成超长 OR 语句。同一 `_source_row` 因模糊匹配碰撞重复出现时，结果视图保留每次出现并分别应用 Exact/Review 颜色。
 
 汇总结果仍显示来源 domain、Rule ID、P21 issue 数和 strict exact/review candidate 数。Where 区域显示这是 materialized candidate selection；具体可执行 WHERE 仍在单条 issue 视图中检查。
 
@@ -261,6 +267,7 @@ side-car 不应直接读取 Viewer 当前内部缓存数据库。内部数据库
 - Dataset Snapshot 生成。
 - Rule ID 匹配。
 - 大批候选结果加载。
+- Domain 全 Rule ID 导出匹配准备和 workbook 写入。
 
 界面显示阶段和进度；用户可以取消未完成操作。切换 domain、Rule ID 或重新导入 report 时，旧任务结果必须通过 generation ID 丢弃，不能覆盖当前页面。
 
@@ -306,6 +313,13 @@ side-car 使用独立 `pyproject.toml` 和 PyInstaller spec。第一版允许 Vi
 - 日志默认记录计数、状态、变量名和技术错误，不记录完整患者值。
 - 崩溃报告如未来启用，必须先脱敏。
 
-## 12. 后续扩展
+## 12. Domain Excel 导出边界
 
-Excel issue 导出不在第一版实现。未来由 side-car 生成导出内容，可以调用 Viewer 已有的通用 Excel 能力，但应通过稳定 adapter 使用，不直接引用 Viewer UI 内部类。
+- side-car 拥有 P21 业务语义：确定当前 domain 的 eligible issues、执行或复用匹配、保留每个 issue/candidate 对应关系，并按 Rule ID 形成分块的 `begin_domain_export` / `append_domain_export_rows` / `finish_domain_export` 请求。
+- 分块请求避免整个 domain 的匹配清单超过单帧 16 MB IPC 上限；所有分块共用一个 request ID，Viewer 仅在收到 finish 后开始保存和写入。
+- Viewer 不实现匹配规则，只负责校验当前 domain 数据集、显示保存位置、读取 `_source_row` 对应的完整当前记录并生成 Excel。
+- 请求携带匹配 snapshot 的 source fingerprint；Viewer 在打开保存对话框前重新计算当前 source fingerprint，不一致时拒绝导出。
+- 导出请求和 Rule ID 结果视图都明确保留重复 `_source_row`，页面记录数与 Excel 导出行数采用相同口径。
+- Viewer 的 `integrations/p21/excel_export.py` 是独立 adapter，不把 workbook 逻辑写入现有通用 Viewer 导出 UI。
+- workbook 写入使用临时文件并在成功后原子替换，后台任务支持取消；数据变化导致任何请求行无法回读时整次失败，不静默少导。
+- worksheet 以 Rule ID 与实际行数命名，处理 Excel 非法字符、31 字符限制、重名和单页行数上限。

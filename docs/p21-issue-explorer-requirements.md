@@ -1,8 +1,8 @@
 # P21 Issue Explorer 第一版需求
 
-状态：第一版需求与用户决策已确认；P0–P5 已实现，P6 打包实现已完成、Windows 实机验收待完成
+状态：第一版需求与用户决策已确认；P0–P5 已实现，P6 打包实现已完成、Windows 实机验收待完成；Domain 匹配记录 Excel 导出已实现
 
-更新日期：2026-11-05
+更新日期：2026-11-07
 
 ## 1. 文档目的
 
@@ -39,7 +39,6 @@ P21 Issue Explorer 用于读取 Pinnacle 21（P21）验证报告，在每天更�
 - `DATASET:VARIABLE` 格式的跨数据集引用字段，例如 `DM:RFICDTC`。
 - 自动判断 issue 是否已解决。
 - 重新运行 P21 验证规则。
-- Excel issue 导出；该功能保留为后续版本需求。
 
 ## 4. P21 report 导入
 
@@ -77,6 +76,7 @@ P21 Issue Explorer 用于读取 Pinnacle 21（P21）验证报告，在每天更�
 5. 界面显示该 domain 和 Rule ID 的汇总数量及 issue 明细。
 6. 用户可以点击单条 issue 查看候选 records。
 7. 用户可以点击 `Filter All Matched Records` 查看当前 Rule ID 的全部候选 records。
+8. 用户可以导出当前 domain 下所有 Rule ID 实际匹配到的 records。
 
 如果 P21 report 中存在某个 domain，但当前 SAS Viewer 工作区没有对应数据集，界面显示当前数据不可用，不把它解释为 issue 已解决。
 
@@ -85,17 +85,17 @@ P21 Issue Explorer 用于读取 Pinnacle 21（P21）验证报告，在每天更�
 选择 domain 和 Rule ID 后，至少显示：
 
 - `P21 Issue Count`：第一版范围内的 P21 issue 明细行数。
-- `Current Match Count`：当前数据中 strict exact 和黄色 review candidates 合并去重后的 record 数量。
+- `Current Match Count`：当前数据中 strict exact 和黄色 review candidate rows 的总数，不按当前 `_source_row` 去重。
 - `Matched Issue Count`：至少存在一个 strict exact candidate 的 issue 数量。
 - `Partial Review Issue Count`：没有 strict exact、但存在 partial 或 lenient review candidate 的 issue 数量。
 - `Not Found Issue Count`：没有 strict exact 或黄色 review candidate 的 issue 数量。
 - `Cannot Evaluate Issue Count`：由于当前数据、变量、类型或值映射不足而无法评估的 issue 数量。
-- `Current Exact Record Count`：去重后的 strict exact records 数量。
-- `Current Review Record Count`：去重后的黄色 review records 数量，包括 partial 和 lenient character matches。
+- `Current Exact Candidate Rows`：strict exact candidate rows 数量，不按当前 `_source_row` 去重。
+- `Current Review Candidate Rows`：黄色 review candidate rows 数量，包括 partial 和 lenient character matches，不按当前 `_source_row` 去重。
 
 `Current Match Count` 不得命名为 `Count`，避免与 P21 report 原始 `Count` 字段混淆。
 
-同一个当前 record 被同一 Rule ID 下多个 issue 匹配时，在 Rule ID 汇总中只计算一次。
+同一个当前 record 被同一 Rule ID 下多个 issue 匹配时，每个 issue/candidate 对应关系分别计数。正常情况下不会重复；如果数据更新后发生模糊匹配碰撞，重复 candidate rows 必须保留供用户检查。
 
 ## 7. Issue 明细列表
 
@@ -188,12 +188,12 @@ Domain + Rule ID
 ```
 
 - 合并该 Rule ID 下所有 strict exact 和黄色 review candidates。
-- 根据当前数据的 source-row identity 去重。
+- 按 issue/candidate 对应关系原样保留，不根据当前 source-row identity 去重。
 - 新开或复用 P21 Result View。
 - 第一版不要求把全部 issue 拼接成一个巨大的 SAS WHERE；可以使用 materialized result selection。
 - Review records 仍保持淡黄色提示，供用户人工判断。
 
-Rule ID 汇总筛选包含 strict exact 和黄色 review candidates，并按当前 record 去重。
+Rule ID 汇总筛选包含 strict exact 和黄色 review candidates；页面记录数与 Excel 导出采用相同的不去重口径。
 
 ## 12. Not Found 的含义
 
@@ -242,30 +242,40 @@ Rule ID 汇总筛选包含 strict exact 和黄色 review candidates，并按当�
 - 点击 issue 后打开或复用 P21 Result View。
 - Applied WHERE 可见、可编辑，并能由现有 Where parser 执行。
 - 原始 dataset view 不被修改。
-- Rule ID 全部结果按当前 record 去重。
+- Rule ID 全部结果按 issue/candidate 对应关系保留，不按当前 record 去重。
+- Domain Excel 导出只包含各 Rule ID 的 strict exact 和黄色 review 匹配记录，不导出整个 domain 数据集。
+- Excel 导出按 P21 issue 与 candidate 的对应关系逐条保留，不对相同当前 record 去重。
+- 每个有匹配记录的 Rule ID 使用独立 worksheet，sheet 名包含 Rule ID 和该 sheet 的实际导出行数。
 - side-car 缺失、崩溃或协议不兼容不影响 SAS Viewer 核心功能。
 - 基础版隐藏菜单；扩展版 lazy 启动 side-car。
-- 第一版不实现 Excel 导出或 P21 规则重跑。
+- 不实现 P21 规则重跑。
 
-## 15. 后续版本：Excel issue 导出
+## 15. Domain 匹配记录 Excel 导出
 
-该功能已记录但不属于第一版。
+该功能导出当前所选 domain 中，各 Rule ID 实际匹配到的 strict exact 和黄色 review records。它不导出整个 domain 数据集，也不导出 Not Found/Cannot Evaluate 的空记录。
 
-计划 workbook：
+Workbook 结构：
 
 ```text
-Issue Summary
-Issue Details
-<Rule ID 1>
-<Rule ID 2>
-...
+Export Summary
 Export Info
+<Rule ID 1> (<row count>)
+<Rule ID 2> (<row count>)
+...
 ```
 
-- 每个 Rule ID 的匹配 records 单独放在一张 worksheet。
-- worksheet 默认使用 Rule ID 命名。
-- 同一 Rule ID 下相同当前 record 去重。
-- Issue Details 保留 Strict Exact/Review/Not Found 状态和颜色。
+- 导出入口位于 P21 Issue Explorer，作用范围是当前选择的 domain。
+- side-car 负责对该 domain 的全部 eligible issues 执行或复用匹配，并按 Rule ID 组织导出请求；Viewer 使用当前已打开且缓存完整的同名数据集写入 workbook。
+- 导出请求携带匹配 snapshot 的 source fingerprint；若当前数据在匹配后已 Reload 或改变，Viewer 拒绝导出并要求重新执行，避免相同 `_source_row` 指向不同记录。
+- 每个有匹配 records 的 Rule ID 单独放在 worksheet；无匹配的 Rule ID 只保留在 `Export Summary`，不创建空 worksheet。
+- worksheet 名格式优先为 `<Rule ID> (<实际导出行数>)`，例如 `CT2002 (24)`。非法字符、31 字符上限和重名由程序安全处理。
+- 超过 Excel 单 sheet 行数上限时拆分为多个 part，名称中的条数是该 part 的实际记录数。
+- 每条导出记录包含当前 domain 数据集的全部变量，并追加 `_P21_RULE_ID`、`_P21_MATCH_STATUS`、`_P21_ISSUE_ID`、`_P21_SHEET_ROW`。
+- strict exact 行使用淡绿色背景，review 行使用淡黄色背景。
+- 不去重：同一个当前 record 被同一 Rule ID 下多个 P21 issue 匹配时，每个 issue/candidate 对应关系都保留为独立导出行。sheet 名和 summary 的导出条数均包含这些重复行。
+- `Export Summary` 分 Rule ID 显示 P21 issue 数、Exact 导出行数、Review 导出行数、总导出行数和对应 worksheet。
+- `Export Info` 记录 domain、P21 report、当前数据集、来源、导出时间、导出总行数和不去重策略。
+- 导出在后台运行，默认文件名为 `P21_Issues_<DOMAIN>_<timestamp>.xlsx`；取消或失败不得留下不完整的目标文件。
 - 导出结果只用于 review，不替代 P21 验证。
 
 ## 16. 用户确认状态

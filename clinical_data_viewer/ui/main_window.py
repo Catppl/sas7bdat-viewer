@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer
@@ -38,12 +39,17 @@ from ..integrations.p21 import (
     P21SidecarManifest,
     discover_sidecar_manifest,
 )
+from ..integrations.p21.excel_export import (
+    P21DomainExcelExporter,
+    P21DomainExportSpec,
+)
 from ..integrations.p21.result_view import (
     EXACT_COLOR,
     REVIEW_COLOR,
     P21ResultBuilder,
     P21ResultSpec,
 )
+from ..integrations.p21.snapshot import SnapshotBuilder
 from ..merge_datasets import MergeDatasetsEngine
 from ..resources import resource_path
 from ..sas_reader import SasDatasetReader
@@ -142,6 +148,7 @@ class MainWindow(QMainWindow):
         self._p21_result_tab: DatasetTab | None = None
         self._p21_result_generation = 0
         self._p21_result_builder = P21ResultBuilder(temp_manager)
+        self._p21_excel_exporter = P21DomainExcelExporter()
         self.setWindowTitle("SASDataViewer")
         self.resize(1280, 790)
         self.setMinimumSize(850, 560)
@@ -593,6 +600,7 @@ class MainWindow(QMainWindow):
             self._p21_workspace_context,
             self._handle_p21_result_request,
             self,
+            export_handler=self._handle_p21_export_request,
         )
         self._p21_host.status_changed.connect(self.task_status.setText)
         self._p21_host.launch_failed.connect(
@@ -652,7 +660,7 @@ class MainWindow(QMainWindow):
         if not isinstance(raw_rows, list):
             raise TypeError("P21 result source_rows must be an array.")
         try:
-            source_rows = tuple(dict.fromkeys(int(item) for item in raw_rows))
+            source_rows = tuple(int(item) for item in raw_rows)
         except (TypeError, ValueError) as error:
             raise ValueError("P21 result source_rows must contain integers.") from error
         source = self._resolve_p21_dataset(domain)
@@ -662,17 +670,12 @@ class MainWindow(QMainWindow):
             )
         colors: dict[int, str] = {}
         if isinstance(raw_styles, list):
-            for item in raw_styles:
+            for output_row, item in enumerate(raw_styles, start=1):
                 if not isinstance(item, dict):
-                    continue
-                try:
-                    source_row = int(item.get("source_row"))
-                except (TypeError, ValueError):
                     continue
                 status = str(item.get("status", ""))
                 color = EXACT_COLOR if "Exact" in status else REVIEW_COLOR
-                if source_row not in colors or color == EXACT_COLOR:
-                    colors[source_row] = color
+                colors[output_row] = color
         is_rule_summary = message_type == "update_result_view"
         where_text = str(payload.get("where_text", ""))
         expected_where = str(payload.get("expected_where", ""))
@@ -733,6 +736,76 @@ class MainWindow(QMainWindow):
             "accepted": True,
         }
 
+    def _handle_p21_export_request(
+        self, payload: dict[str, object]
+    ) -> dict[str, object]:
+        spec = P21DomainExportSpec.from_payload(payload)
+        source = self._resolve_p21_dataset(spec.domain)
+        if source is None:
+            raise ValueError(
+                f"No open current dataset is available for domain {spec.domain}."
+            )
+        if SnapshotBuilder.source_fingerprint(source) != spec.source_fingerprint:
+            raise ValueError(
+                f"Current {spec.domain} data changed after P21 matching. "
+                "Run the domain export again."
+            )
+        initial_directory = Path(
+            self.settings.last_export_directory or str(source.source_path.parent)
+        )
+        timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+        suggested = initial_directory / (
+            f"P21_Issues_{spec.domain.upper()}_{timestamp}.xlsx"
+        )
+        destination, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export P21 Domain Matched Records",
+            str(suggested),
+            "Excel files (*.xlsx)",
+        )
+        if not destination:
+            return {"accepted": False, "reason": "cancelled"}
+        path = Path(destination)
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+        self.settings.last_export_directory = str(path.parent)
+        self.settings.save()
+        source_directory = source.temporary_path.parent
+        self._retain_directory(source_directory)
+
+        def completed(row_count: int) -> None:
+            self._release_directory(source_directory)
+            self.task_status.setText(
+                f"Exported {row_count:,} P21 matched rows to {path.name}"
+            )
+            QMessageBox.information(
+                self,
+                "P21 Excel Export Complete",
+                f"Exported {row_count:,} matched rows to:\n{path}",
+            )
+
+        def failed(message: str, details: str) -> None:
+            self._release_directory(source_directory)
+            self._show_error("P21 Excel Export Failed", message, details)
+
+        self._submit(
+            self,
+            lambda worker: self._p21_excel_exporter.export(
+                source,
+                spec,
+                path,
+                progress=worker.report,
+                cancelled=lambda: worker.cancelled,
+            ),
+            completed,
+            failed,
+        )
+        return {
+            "accepted": True,
+            "destination": path.name,
+            "planned_rows": sum(len(rule.rows) for rule in spec.rules),
+        }
+
     def _show_p21_result(
         self,
         handle: DatasetHandle,
@@ -750,8 +823,8 @@ class MainWindow(QMainWindow):
             review_count = int(payload.get("review_record_count", 0))
             tab.set_context_notice(
                 f"Domain: {spec.domain} | Rule ID: {spec.rule_id} | P21 issues: "
-                f"{issue_count} | Exact records: {exact_count} | "
-                f"Review records: {review_count} | Unique candidates: "
+                f"{issue_count} | Exact candidate rows: {exact_count} | "
+                f"Review candidate rows: {review_count} | Candidate rows: "
                 f"{len(spec.source_rows)}"
             )
             tab.set_materialized_where_description(spec.materialized_description)

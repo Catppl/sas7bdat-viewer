@@ -285,7 +285,7 @@ class MatchingRuleTests(unittest.TestCase):
         self.assertIs(missing.status, IssueStatus.CANNOT_EVALUATE)
         self.assertIs(ignored.status, IssueStatus.CANNOT_EVALUATE)
 
-    def test_rule_summary_deduplicates_current_source_rows(self) -> None:
+    def test_rule_summary_preserves_repeated_current_source_rows(self) -> None:
         first = self._match(
             {"A": "character"},
             [{"_source_row": 1, "A": "x"}],
@@ -298,8 +298,9 @@ class MatchingRuleTests(unittest.TestCase):
         )
         summary = summarize_rule((first, second))
         self.assertEqual(summary.p21_issue_count, 2)
-        self.assertEqual(summary.current_exact_record_count, 1)
-        self.assertEqual(summary.current_candidate_record_count, 1)
+        self.assertEqual(summary.current_exact_record_count, 2)
+        self.assertEqual(summary.current_candidate_record_count, 2)
+        self.assertEqual(summary.candidate_source_rows, (1, 1))
 
 
 if __name__ == "__main__":

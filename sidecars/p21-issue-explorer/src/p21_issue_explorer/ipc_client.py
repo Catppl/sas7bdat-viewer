@@ -18,7 +18,9 @@ from .integration.protocol import (
     encode_message,
 )
 from .integration.snapshot_reader import DatasetSnapshot, SnapshotReader
-from .models import IssueOpenRequest, RuleOpenRequest
+from .models import DomainExportRequest, IssueOpenRequest, RuleOpenRequest
+
+_EXPORT_CHUNK_ROWS = 5_000
 
 
 @dataclass(slots=True)
@@ -116,6 +118,40 @@ class P21IpcClient(QObject):
 
     def send_rule_request(self, request: RuleOpenRequest) -> None:
         self._send("update_result_view", _json_value(request))
+
+    def send_domain_export_request(self, request: DomainExportRequest) -> None:
+        request_id = uuid.uuid4().hex
+        self._send(
+            "begin_domain_export",
+            {
+                "domain": request.domain,
+                "report_name": request.report_name,
+                "source_fingerprint": request.source_fingerprint,
+                "rules": [
+                    {
+                        "rule_id": rule.rule_id,
+                        "p21_issue_count": rule.p21_issue_count,
+                    }
+                    for rule in request.rules
+                ],
+            },
+            request_id=request_id,
+        )
+        for rule in request.rules:
+            rows = rule.rows
+            for offset in range(0, len(rows), _EXPORT_CHUNK_ROWS):
+                self._send(
+                    "append_domain_export_rows",
+                    {
+                        "rule_id": rule.rule_id,
+                        "rows": [
+                            _json_value(row)
+                            for row in rows[offset : offset + _EXPORT_CHUNK_ROWS]
+                        ],
+                    },
+                    request_id=request_id,
+                )
+        self._send("finish_domain_export", {}, request_id=request_id)
 
     @Slot(object)
     def _request_snapshot(self, request: _SnapshotRequest) -> None:

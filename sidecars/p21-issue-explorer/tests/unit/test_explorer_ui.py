@@ -11,7 +11,12 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from p21_issue_explorer.integration import MappingSnapshotProvider
-from p21_issue_explorer.models import IssueOpenRequest, IssueStatus, RuleOpenRequest
+from p21_issue_explorer.models import (
+    DomainExportRequest,
+    IssueOpenRequest,
+    IssueStatus,
+    RuleOpenRequest,
+)
 from p21_issue_explorer.report import P21ReportReader
 from p21_issue_explorer.ui import ExplorerPage
 from p21_issue_explorer.ui.issue_table import STATUS_COLORS
@@ -239,6 +244,35 @@ class ExplorerUiTests(unittest.TestCase):
             self.assertIn("soft limit", page.match_status.text())
             self.assertIn("no records were omitted", page.match_status.text())
             self.assertEqual(len(page.current_results[0].candidates), 2)
+        finally:
+            page.close()
+
+    def test_export_domain_matches_all_rules_and_emits_export_request(self) -> None:
+        page = ExplorerPage(snapshot_provider=self.provider)
+        requests: list[DomainExportRequest] = []
+        page.export_domain_requested.connect(requests.append)
+        try:
+            page.apply_report(self.report)
+            self._wait_until(lambda: page.export_domain_button.isEnabled())
+            page.export_domain_button.click()
+            self._wait_until(lambda: bool(requests))
+
+            request = requests[0]
+            self.assertEqual(request.domain, "AE")
+            expected_rule_ids = {
+                issue.rule_id for issue in self.report.issues if issue.dataset == "AE"
+            }
+            self.assertEqual(
+                {rule.rule_id for rule in request.rules}, expected_rule_ids
+            )
+            multiple = next(
+                rule for rule in request.rules if rule.rule_id == "SYNTH-MULTIPLE"
+            )
+            self.assertEqual(len(multiple.rows), 2)
+            not_found = next(
+                rule for rule in request.rules if rule.rule_id == "SYNTH-NOT-FOUND"
+            )
+            self.assertEqual(not_found.rows, ())
         finally:
             page.close()
 

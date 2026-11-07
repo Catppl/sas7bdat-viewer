@@ -26,12 +26,12 @@ class RuleSummaryWidget(QGroupBox):
         ),
         (
             "currentExactRecordCount",
-            "Current Exact Record Count",
+            "Current Exact Candidate Rows",
             "current_exact_record_count",
         ),
         (
             "currentReviewRecordCount",
-            "Current Review Record Count",
+            "Current Review Candidate Rows",
             "current_review_record_count",
         ),
     )

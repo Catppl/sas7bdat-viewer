@@ -112,19 +112,21 @@ def summarize_rule(results: tuple[IssueMatchResult, ...]) -> RuleMatchSummary:
     domain = results[0].issue.dataset.casefold()
     if any(result.issue.dataset.casefold() != domain for result in results):
         raise ValueError("All issue results must have the same domain.")
-    exact_rows = {
+    exact_rows = [
         candidate.source_row
         for result in results
         for candidate in result.candidates
         if candidate.status is IssueStatus.MATCHED_EXACT
-    }
-    review_rows = {
+    ]
+    review_rows = [
         candidate.source_row
         for result in results
         for candidate in result.candidates
         if candidate.status is IssueStatus.REVIEW
-    }
-    all_rows = exact_rows | review_rows
+    ]
+    all_rows = [
+        candidate.source_row for result in results for candidate in result.candidates
+    ]
     return RuleMatchSummary(
         rule_id=rule_id,
         p21_issue_count=len(results),
@@ -143,5 +145,5 @@ def summarize_rule(results: tuple[IssueMatchResult, ...]) -> RuleMatchSummary:
         current_exact_record_count=len(exact_rows),
         current_review_record_count=len(review_rows),
         current_candidate_record_count=len(all_rows),
-        candidate_source_rows=tuple(sorted(all_rows, key=str)),
+        candidate_source_rows=tuple(all_rows),
     )

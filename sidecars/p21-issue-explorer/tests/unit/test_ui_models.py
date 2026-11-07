@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from p21_issue_explorer.models import (
     CandidateMatch,
+    DomainExportRequest,
     IssueMatchResult,
     IssueStatus,
     P21Issue,
@@ -89,7 +90,7 @@ class UiModelTests(unittest.TestCase):
             [item.issue.record for item in model.results], ["10", "20", "3", "4"]
         )
 
-    def test_rule_summary_numbers_and_materialized_request_are_deduplicated(
+    def test_rule_summary_and_materialized_request_preserve_repeated_matches(
         self,
     ) -> None:
         exact = _result(1, IssueStatus.MATCHED_EXACT, (7, 8))
@@ -102,7 +103,7 @@ class UiModelTests(unittest.TestCase):
         try:
             widget.set_summary(summary)
             self.assertEqual(widget.value_labels["p21IssueCount"].text(), "4")
-            self.assertEqual(widget.value_labels["currentMatchCount"].text(), "3")
+            self.assertEqual(widget.value_labels["currentMatchCount"].text(), "4")
             self.assertEqual(widget.value_labels["matchedIssueCount"].text(), "1")
             self.assertEqual(widget.value_labels["partialReviewIssueCount"].text(), "1")
             self.assertEqual(widget.value_labels["notFoundIssueCount"].text(), "1")
@@ -112,13 +113,39 @@ class UiModelTests(unittest.TestCase):
             self.assertTrue(widget.filter_all_button.isEnabled())
 
             request = RuleOpenRequest.from_results("AE", summary, results)
-            self.assertEqual(request.source_rows, (7, 8, 9))
-            status_by_row = {
-                item.source_row: item.status for item in request.row_styles
-            }
-            self.assertIs(status_by_row[8], IssueStatus.MATCHED_EXACT)
+            self.assertEqual(request.source_rows, (7, 8, 8, 9))
+            self.assertEqual(
+                [item.status for item in request.row_styles],
+                [
+                    IssueStatus.MATCHED_EXACT,
+                    IssueStatus.MATCHED_EXACT,
+                    IssueStatus.REVIEW,
+                    IssueStatus.REVIEW,
+                ],
+            )
         finally:
             widget.close()
+
+    def test_domain_export_request_preserves_duplicate_current_records(self) -> None:
+        exact = _result(1, IssueStatus.MATCHED_EXACT, (8,))
+        review = _result(2, IssueStatus.REVIEW, (8,))
+
+        request = DomainExportRequest.from_results(
+            "AE",
+            "report.xlsx",
+            "source-fingerprint",
+            (("SHARED-RULE", (exact, review)),),
+        )
+
+        self.assertEqual(len(request.rules), 1)
+        self.assertEqual(
+            [row.source_row for row in request.rules[0].rows],
+            [8, 8],
+        )
+        self.assertEqual(
+            [row.issue_sheet_row for row in request.rules[0].rows],
+            [1, 2],
+        )
 
 
 if __name__ == "__main__":

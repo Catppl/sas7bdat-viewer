@@ -1,12 +1,12 @@
 # P21 Issue Explorer 具体施工计划
 
-状态：P0–P5 已完成；P6 打包实现已完成，等待干净 Windows 验收
+状态：P0–P5 已完成；P6 打包实现已完成，等待干净 Windows 验收；P7 Domain Excel 导出已实现并通过本机回归
 
-更新日期：2026-11-05
+更新日期：2026-11-07
 
 ## 1. 施工目标
 
-在不把 P21 业务逻辑写入 SAS Viewer 主体的前提下，实现一个可选 side-car：读取最新 P21 report、定位当前数据中的 strict exact/review candidates、生成可检查的 SAS-style WHERE，并通过 Viewer 新结果视图展示。
+在不把 P21 业务逻辑写入 SAS Viewer 主体的前提下，实现一个可选 side-car：读取最新 P21 report、定位当前数据中的 strict exact/review candidates、生成可检查的 SAS-style WHERE、通过 Viewer 新结果视图展示，并可按 Rule ID 导出当前 domain 的全部匹配记录。
 
 相关文档：
 
@@ -34,7 +34,6 @@
 - 跨 domain 值联查。
 - 重新执行 P21 validation rule。
 - 自动判断 issue 已解决。
-- Excel issue 导出。
 - macOS/Linux 正式发布包；第一版以现有 Windows 打包流程为验收目标。
 
 ## 3. 现有代码接入点
@@ -65,7 +64,8 @@ clinical_data_viewer/
     ├── host.py                  # side-car lifecycle / IPC server
     ├── protocol.py              # versioned message schema and framing
     ├── snapshot.py              # Dataset Snapshot v1 builder
-    └── result_view_adapter.py   # Viewer result tab boundary
+    ├── result_view_adapter.py   # Viewer result tab boundary
+    └── excel_export.py          # Domain matched-record workbook adapter
 
 sidecars/p21-issue-explorer/
 ├── pyproject.toml
@@ -180,7 +180,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 实现变量分类和数据类型解析。
 - 实现 character/numeric/DTC/null 标准化。
 - 实现 comma-safe Values 动态对齐。
-- 实现 strict exact pass、`ceil(0.8 × N)` review pass、lenient character pass 和 `_source_row` 去重。
+- 实现 strict exact pass、`ceil(0.8 × N)` review pass、lenient character pass；单个 issue 的多个合法 value mapping 产生相同 candidate 时，在该 issue 内按 `_source_row` 合并重复路径。
 - 实现 issue/rule 计数。
 - 实现 Expected WHERE 和 Applied WHERE builder。
 
@@ -201,7 +201,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 已固化 Dataset Snapshot v1 manifest，并实现 schema version、domain、变量类型、表/列、行数及 `_source_row` 唯一索引验证。
 - side-car 通过 SQLite URI `mode=ro` 和 `query_only` 读取 snapshot，不写入 Viewer 内部存储。
 - 已实现 metadata 驱动的 character/numeric/DTC/null 比较；numeric 使用十进制语义，character lenient 仅忽略大小写和首尾空格。
-- Values 对齐保留原始逗号与空格，运行所有受类型约束的合法映射，再由完整 record candidate 结果消歧；歧义映射全部保留并按 `_source_row` 去重。
+- Values 对齐保留原始逗号与空格，运行所有受类型约束的合法映射，再由完整 record candidate 结果消歧；歧义映射全部保留，同一 issue 内相同 `_source_row` 的重复路径合并。不同 P21 issue 之间不去重。
 - 已实现 strict exact、`ceil(0.8 × N)` review、USUBJID anchor、SEQ/cross-domain 排除以及 Q15 exact 命中后停止。
 - 已实现 Expected WHERE、candidate-specific Applied WHERE、单 issue 计数、Rule ID 汇总和可序列化解释模型。
 - 40 个 side-car tests 已通过，覆盖冻结的 9 条端到端合同、阈值上下边界、多逗号、歧义、重复运行一致性和 Viewer WHERE parser/filter engine 兼容性。
@@ -255,7 +255,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 增加 manifest 检测和 Tools 菜单隐藏逻辑。
 - 实现单 issue 的新建/复用 P21 Result View。
 - 把 Applied WHERE 放入 Viewer Where 框并执行。
-- 实现 Rule ID 去重 `_source_row` 汇总视图。
+- 实现 Rule ID 按 issue/candidate 顺序保留 `_source_row` 的汇总视图，不去重。
 - 保持原始数据 tab 不变。
 
 ### 验证
@@ -263,7 +263,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - 协议分帧、半包、多包、非法长度、错误 token 和版本不兼容测试。
 - side-car 崩溃、Viewer 关闭和 snapshot 清理测试。
 - single issue strict exact/review/not found 结果视图测试。
-- Rule ID 汇总去重测试。
+- Rule ID 汇总重复 candidate 保留测试。
 - side-car 不存在或损坏时菜单隐藏。
 
 ### 完成门槛
@@ -277,7 +277,7 @@ side-car 第一版计划使用 `PySide6` 构建 UI 和本地 socket，使用 `op
 - `QProcess` 只管理 side-car 生命周期，`QLocalServer/QLocalSocket` 承担业务通信；side-car 退出或 Viewer 关闭时会回收 socket、server 和本会话 snapshots，重新点击菜单可重启。
 - Viewer 已实现 Dataset Snapshot v1 builder，只导出请求变量与可用的 `STUDYID`/`USUBJID`，并由 side-car 只读打开；正常关闭 snapshot 时发送 `release_snapshot`。
 - Tools 菜单只在 manifest、协议版本、executable 和 SHA-256 完整性全部有效时显示入口；基础版或损坏扩展保持隐藏。
-- 单条 issue 与 Rule ID 汇总均新建或复用唯一的 `P21 Result View`；单条 WHERE 可见、可编辑且自动执行，Rule 汇总按 `_source_row` 去重并显示 materialized selection 及汇总数字。
+- 单条 issue 与 Rule ID 汇总均新建或复用唯一的 `P21 Result View`；单条 WHERE 可见、可编辑且自动执行，Rule 汇总按 issue/candidate 顺序保留重复 `_source_row`，并显示 materialized selection 及不去重汇总数字。
 - exact rows 使用淡绿色、review rows 使用淡黄色；Not Found 仍能打开空结果视图并保留 Expected WHERE，原始 dataset tab 的 WHERE、排序、列选择和位置不变。
 - P21 匹配、状态判断和 WHERE 生成仍全部位于 side-car；Viewer 新增代码只包含通用协议、snapshot、进程和结果视图 adapter。
 - 52 个 side-car tests 与 460 个 Viewer tests 已通过；另在沙箱外完成真实 `QLocalServer/QLocalSocket` handshake → snapshot → release 往返，以及 `QProcess` 启动 → 认证 → 关闭 side-car 的 smoke test。
@@ -373,6 +373,50 @@ P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 �
 
 - 当前环境不能交叉生成或验收 Windows EXE，因此尚未生成最终 Windows ZIP，也未在干净 Windows 10/11 x64 主机执行第 28–32 项。完成这些实机检查前，P6 不能标记为完全验收通过。
 
+## 11.1 阶段 7：Domain 匹配记录 Excel 导出
+
+状态：已实现（2026-11-07）；Windows 扩展包实机验收仍随 P6 执行
+
+### 已确认合同
+
+- 只导出当前选择 domain 下，各 Rule ID 实际匹配到的 strict exact 和黄色 review records；不导出整个数据集。
+- 不去重。同一当前 record 因多个 P21 issue/candidate 对应关系重复出现时，全部保留。
+- 每个有匹配 records 的 Rule ID 使用独立 worksheet；名称优先为 `<Rule ID> (<实际行数>)`。
+- 无匹配的 Rule ID 只出现在 `Export Summary`，不创建空 worksheet。
+- 每行包含当前数据集全部变量以及 Rule ID、匹配状态、issue ID、P21 sheet row 四个追踪字段。
+
+### 实施边界
+
+- side-car 新增 domain export 后台任务，使用同一个 domain snapshot 的变量并集执行或复用全部 Rule ID 匹配；请求构造不对 `_source_row` 去重。
+- IPC 新增 `begin_domain_export` / `append_domain_export_rows` / `finish_domain_export` / `export_started`，以 5,000 行为上限分块传输明确的 Rule 分组、匹配状态和 source-row identity，避免超过单帧 16 MB 上限。
+- 请求同时携带匹配 snapshot 的 source fingerprint；Viewer 保存前验证当前数据版本，避免 Reload 后旧 `_source_row` 被用于新数据。
+- Viewer 新增独立 `integrations/p21/excel_export.py` adapter，复用当前 domain 的完整只读 SQLite 数据和 SAS temporal metadata；`MainWindow` 只负责保存对话框和后台任务接线。
+- workbook 使用临时文件写入并在成功后原子替换。取消、数据版本变化或行回读不完整时删除临时文件并报告失败。
+- sheet 名处理非法字符、31 字符上限和冲突；超过 Excel 单页记录上限时自动分 part。
+
+### Workbook 合同
+
+```text
+Export Summary
+Export Info
+<Rule ID> (<row count>)
+...
+```
+
+- `Export Summary`：Rule ID、P21 Issue Count、Exact Export Rows、Review Export Rows、Total Export Rows、Worksheets。
+- `Export Info`：Domain、P21 Report、Current Dataset、Source、Exported At、Export Rows、Duplicate Policy。
+- Rule sheets：全部当前数据变量 + `_P21_RULE_ID`、`_P21_MATCH_STATUS`、`_P21_ISSUE_ID`、`_P21_SHEET_ROW`；Exact 淡绿色，Review 淡黄色。
+- 默认文件名：`P21_Issues_<DOMAIN>_<timestamp>.xlsx`。
+
+### 验证
+
+- side-car model/UI 测试验证所有 Rule ID 均纳入、零匹配 Rule 保留 summary 语义、重复 source row 不去重。
+- Viewer exporter 测试验证重复行、完整变量、追踪字段、背景状态、summary、零匹配 sheet 跳过、sheet 名清理和冲突处理。
+- Host/UI 集成测试验证 IPC dispatch、保存对话框、后台写入和目标 workbook 生成。
+- Windows build 的 scoped Ruff 清单已纳入新增 exporter test；最终扩展 ZIP 仍需在干净 Windows 10/11 x64 主机执行真实导出验收。
+
+本机验证结果：side-car 63/63 通过；Viewer 全套 476 项通过，其中 2 项受当前沙箱本地 socket 限制按既有条件跳过；Ruff、format check、compileall 和 `git diff --check` 通过。
+
 ## 12. 用户确认结果
 
 以下选择均已由用户确认。施工时以已勾选项为准；未勾选项仅保留决策背景。
@@ -401,13 +445,13 @@ P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 �
 
 ### Q4. Current Match Count 口径
 
-- [x] A（推荐）：显示 strict exact + review 去重总数，并同时显示 Exact Count 和 Review Count。
+- [x] A（2026-11-07 更新）：显示 strict exact + review candidate rows 总数，不按 `_source_row` 去重，并同时显示 Exact Count 和 Review Count。
 - [ ] B：只把 exact 算入 Current Match Count，partial 另列。
 - [ ] C：其他口径：__________。
 
 ### Q5. Filter All Matched Records 是否包含 partial
 
-- [x] A（推荐）：包含 strict exact 和 review candidates，去重展示；review 行保持黄色。
+- [x] A（2026-11-07 更新）：包含 strict exact 和 review candidates，不去重展示；review 行保持黄色。
 - [ ] B：只包含 exact；partial 只能逐条 issue 查看。
 - [ ] C：增加 UI 开关，默认：__________。
 
@@ -431,7 +475,7 @@ P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 �
 
 ### Q9. Rule ID 汇总视图的 Where 框
 
-- [x] A（推荐）：用去重 `_source_row` 集合物化结果；Where 区域显示“Materialized P21 candidate selection”，不生成超长 OR。单 issue 仍显示可执行 WHERE。
+- [x] A（2026-11-07 更新）：用按 issue/candidate 顺序保留的 `_source_row` 列表物化结果，不去重；Where 区域显示“Materialized P21 candidate selection”，不生成超长 OR。单 issue 仍显示可执行 WHERE。
 - [ ] B：尝试生成所有 issue 的 OR WHERE，即使表达式很长。
 - [ ] C：Rule ID 汇总视图隐藏 Where 区域。
 
@@ -454,7 +498,7 @@ P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 �
 
 ### Q13. Values 存在多个合法映射时
 
-- [x] A（推荐）：运行所有合法映射、合并去重候选，并标记 `Ambiguous Value Mapping`。
+- [x] A（推荐）：运行所有合法映射；同一 issue 内合并重复 candidate path，并标记 `Ambiguous Value Mapping`。不同 issue 之间不去重。
 - [ ] B：停止该 issue，标记 `Cannot Evaluate`，不搜索候选。
 - [ ] C：按候选数最少的映射自动选择一个。
 
@@ -481,7 +525,9 @@ P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 �
 | 当前数据更新后缓存过期 | source fingerprint 参与缓存键 |
 | side-car 故障拖垮 Viewer | 独立进程、超时、错误隔离和资源清理 |
 | 真实临床数据进入仓库或日志 | 合成 fixture、日志脱敏、快照会话清理 |
-| 汇总 WHERE 过长 | `_source_row` 去重集合物化结果 |
+| 汇总 WHERE 过长 | 按 issue/candidate 顺序保留的 `_source_row` 列表物化结果，不生成超长 OR |
+| 导出重复行被误去重 | 导出 model 按 issue/candidate 顺序保留每个 `_source_row`，并以 workbook 测试固定合同 |
+| 导出过程数据变化或失败留下半成品 | 回读行数强校验、临时文件写入、成功后原子替换 |
 
 ## 14. 回退策略
 
@@ -492,4 +538,4 @@ P5 自动验证结果：side-car 58/58 通过；Viewer P21 集成测试 13/13 �
 
 ## 15. 建议施工顺序
 
-建议先完成第 12 节确认，然后严格按阶段 0 → 6 施工。阶段 1–3 可主要在 side-car 目录独立完成；直到匹配合同和独立 UI 稳定后，再进入 Viewer 集成和 Windows 打包，从而把主程序回归风险控制在后半段。
+阶段 0 → 6 已按顺序施工；阶段 7 在既有匹配合同稳定后增加，并继续遵守 side-car 负责 P21 语义、Viewer 只提供 adapter 的边界。后续发布验收重点是干净 Windows 扩展包中的真实 report、真实 SAS domain 和 Excel 导出全流程。

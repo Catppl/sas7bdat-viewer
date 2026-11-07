@@ -11,6 +11,7 @@ import time
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from clinical_data_viewer.domain import DatasetHandle, DatasetMetadata, VariableMetadata
 from clinical_data_viewer.integrations.p21.host import P21HostController
@@ -469,6 +470,113 @@ class P21ProtocolTests(unittest.TestCase):
             host.socket = None
             host.snapshots.clear()
 
+    def test_host_dispatches_domain_export_request(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        application = QApplication.instance() or QApplication([])
+
+        class FakeSocket:
+            def __init__(self) -> None:
+                self.written = bytearray()
+
+            def write(self, value: bytes) -> int:
+                self.written.extend(value)
+                return len(value)
+
+            def flush(self) -> bool:
+                return True
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "sidecar"
+            executable.touch()
+            export_calls: list[dict[str, object]] = []
+
+            def export_handler(payload: dict[str, object]) -> dict[str, object]:
+                export_calls.append(payload)
+                return {"accepted": True, "planned_rows": 2}
+
+            host = P21HostController(
+                P21SidecarManifest(
+                    root / "manifest.json",
+                    executable,
+                    (),
+                    PROTOCOL_VERSION,
+                    "0" * 64,
+                ),
+                TempManager(root / "temp"),
+                lambda _domain: None,
+                dict,
+                lambda _kind, _payload: {},
+                export_handler=export_handler,
+            )
+            socket = FakeSocket()
+            host.socket = socket  # type: ignore[assignment]
+            host._authenticated = True
+            host.session_token = "token"
+            host._handle_message(
+                ProtocolMessage(
+                    PROTOCOL_VERSION,
+                    "export-1",
+                    "begin_domain_export",
+                    "token",
+                    {
+                        "domain": "AE",
+                        "report_name": "report.xlsx",
+                        "source_fingerprint": "source-fingerprint",
+                        "rules": [{"rule_id": "CT2002", "p21_issue_count": 1}],
+                    },
+                )
+            )
+            self.assertFalse(export_calls)
+            row = {
+                "source_row": 1,
+                "status": "Matched – Exact",
+                "issue_id": "issue-1",
+                "issue_sheet_row": 8,
+            }
+            host._handle_message(
+                ProtocolMessage(
+                    PROTOCOL_VERSION,
+                    "export-1",
+                    "append_domain_export_rows",
+                    "token",
+                    {"rule_id": "CT2002", "rows": [row, row]},
+                )
+            )
+            host._handle_message(
+                ProtocolMessage(
+                    PROTOCOL_VERSION,
+                    "export-1",
+                    "finish_domain_export",
+                    "token",
+                    {},
+                )
+            )
+            self.assertEqual(
+                export_calls,
+                [
+                    {
+                        "domain": "AE",
+                        "report_name": "report.xlsx",
+                        "source_fingerprint": "source-fingerprint",
+                        "rules": [
+                            {
+                                "rule_id": "CT2002",
+                                "p21_issue_count": 1,
+                                "rows": [row, row],
+                            }
+                        ],
+                    }
+                ],
+            )
+            response = FrameDecoder().feed(socket.written)[0]
+            self.assertEqual(response.message_type, "export_started")
+            self.assertEqual(response.request_id, "export-1")
+            self.assertEqual(response.payload["planned_rows"], 2)
+            host.socket = None
+            application.processEvents()
+
 
 class P21ManifestTests(unittest.TestCase):
     def test_manifest_requires_matching_executable_hash(self) -> None:
@@ -552,7 +660,7 @@ class P21SnapshotTests(unittest.TestCase):
             registry.invalidate_changed_source("AE", "changed-source-fingerprint")
             self.assertFalse(snapshot.root.exists())
 
-    def test_result_builder_deduplicates_source_rows(self) -> None:
+    def test_result_builder_preserves_repeated_source_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manager = TempManager(root / "temp")
@@ -563,9 +671,9 @@ class P21SnapshotTests(unittest.TestCase):
             )
             with closing(sqlite3.connect(result.database_path)) as connection:
                 rows = connection.execute(
-                    "SELECT _source_row FROM dataset ORDER BY _source_row"
+                    "SELECT _source_row, USUBJID FROM dataset ORDER BY _source_row"
                 ).fetchall()
-            self.assertEqual(rows, [(1,), (2,)])
+            self.assertEqual(rows, [(1, "02"), (2, "02"), (3, "01")])
 
     def test_25k_snapshot_and_result_materialization_performance_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -594,6 +702,111 @@ class P21SnapshotTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("QT_QPA_PLATFORM") == "offscreen", "Qt UI test")
 class P21ResultViewTests(unittest.TestCase):
+    def test_domain_export_rejects_changed_current_data(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = TempManager(root / "temp")
+            window = MainWindow(
+                TestSettings(), manager, FilterHistory(root / "history.sqlite")
+            )
+            source_tab = window._make_dataset_tab(make_source(root))
+            window.tabs.addTab(source_tab, "AE")
+            source_tab.start()
+            with self.assertRaisesRegex(ValueError, "changed after P21 matching"):
+                window._handle_p21_export_request(
+                    {
+                        "domain": "AE",
+                        "report_name": "report.xlsx",
+                        "source_fingerprint": "stale-fingerprint",
+                        "rules": [],
+                    }
+                )
+            window.close()
+            application.processEvents()
+
+    def test_domain_export_is_dispatched_and_writes_workbook(self) -> None:
+        from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+
+        from clinical_data_viewer.filter_history import FilterHistory
+        from clinical_data_viewer.settings import AppSettings
+        from clinical_data_viewer.ui.main_window import MainWindow
+
+        class TestSettings(AppSettings):
+            def save(self, path=None):
+                return None
+
+        application = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = TempManager(root / "temp")
+            window = MainWindow(
+                TestSettings(), manager, FilterHistory(root / "history.sqlite")
+            )
+            source_tab = window._make_dataset_tab(make_source(root))
+            window.tabs.addTab(source_tab, "AE")
+            source_tab.start()
+            destination = root / "p21-domain.xlsx"
+            payload = {
+                "domain": "AE",
+                "report_name": "report.xlsx",
+                "source_fingerprint": SnapshotBuilder.source_fingerprint(
+                    source_tab.handle
+                ),
+                "rules": [
+                    {
+                        "rule_id": "CT2002",
+                        "p21_issue_count": 2,
+                        "rows": [
+                            {
+                                "source_row": 1,
+                                "status": "Matched – Exact",
+                                "issue_id": "issue-1",
+                                "issue_sheet_row": 8,
+                            },
+                            {
+                                "source_row": 1,
+                                "status": "Review – Partial/Lenient Match",
+                                "issue_id": "issue-2",
+                                "issue_sheet_row": 9,
+                            },
+                        ],
+                    }
+                ],
+            }
+            with (
+                patch.object(
+                    QFileDialog,
+                    "getSaveFileName",
+                    return_value=(str(destination), "Excel files (*.xlsx)"),
+                ),
+                patch.object(
+                    QMessageBox, "information", return_value=None
+                ) as information,
+            ):
+                response = window._handle_p21_export_request(payload)
+                self.assertTrue(response["accepted"])
+                self.assertEqual(response["planned_rows"], 2)
+                deadline = time.monotonic() + 3
+                while not information.called and time.monotonic() < deadline:
+                    application.processEvents()
+                    time.sleep(0.005)
+                self.assertTrue(information.called)
+            self.assertTrue(destination.exists())
+            self.assertGreater(destination.stat().st_size, 0)
+            window.close()
+            application.processEvents()
+
     def test_large_result_build_is_dispatched_without_blocking_viewer(self) -> None:
         from PySide6.QtWidgets import QApplication
 
@@ -708,11 +921,12 @@ class P21ResultViewTests(unittest.TestCase):
                 "source_rows": [1, 1, 2],
                 "row_styles": [
                     {"source_row": 1, "status": "Matched – Exact"},
+                    {"source_row": 1, "status": "Review – Partial/Lenient Match"},
                     {"source_row": 2, "status": "Review – Partial/Lenient Match"},
                 ],
                 "p21_issue_count": 3,
                 "exact_record_count": 1,
-                "review_record_count": 1,
+                "review_record_count": 2,
                 "selection_description": "Materialized P21 candidate selection",
             }
             window._handle_p21_result_request("update_result_view", summary)
@@ -726,7 +940,15 @@ class P21ResultViewTests(unittest.TestCase):
             self.assertIsNot(window._p21_result_tab, result_tab)
             assert window._p21_result_tab is not None
             self.assertTrue(window._p21_result_tab.where_editor.isReadOnly())
-            self.assertEqual(window._p21_result_tab.handle.metadata.row_count, 2)
+            self.assertEqual(window._p21_result_tab.handle.metadata.row_count, 3)
+            self.assertEqual(
+                window._p21_result_tab.model.source_row_highlights[1].name(),
+                "#dff3e5",
+            )
+            self.assertEqual(
+                window._p21_result_tab.model.source_row_highlights[2].name(),
+                "#fff2b2",
+            )
 
             not_found = dict(exact)
             not_found.update(
