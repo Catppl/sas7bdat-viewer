@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,15 @@ from tests.test_shift_table import make_analysis, make_config, make_population
 
 
 class ShiftTableSasCodegenTests(unittest.TestCase):
+    def test_review_fixture_is_generated_from_json_contract(self) -> None:
+        fixture_dir = Path(__file__).parent / "fixtures" / "sas_codegen" / "shift_table"
+        configuration = json.loads(
+            (fixture_dir / "shift_table_config.json").read_text()
+        )
+        expected = (fixture_dir / "shift_table_generated.sas").read_text()
+
+        self.assertEqual(SasShiftTableGenerator().generate(configuration), expected)
+
     def test_generator_uses_jinja_and_emits_readable_distinct_subject_program(
         self,
     ) -> None:
@@ -29,6 +39,11 @@ class ShiftTableSasCodegenTests(unittest.TestCase):
             self.assertIn("data visit_ord;", folded)
             self.assertIn("data trt_ord;", folded)
             self.assertIn("data grade_ord;", folded)
+            self.assertNotRegex(code, r"\n[ \t]*\n[ \t]*\n")
+            self.assertLess(
+                code.index("/* 2. Calculate Population N */"),
+                code.index("data raw;"),
+            )
             self.assertIn("count(distinct usubjid)", folded)
             self.assertIn("work.shift_table_long", folded)
             self.assertIn("work.shift_table", folded)

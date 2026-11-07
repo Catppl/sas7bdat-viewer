@@ -53,6 +53,11 @@ def _literal(value: object, kind: str, label: str) -> str:
     return format(float(value), ".15g")
 
 
+def _normalize_sas_spacing(code: str) -> str:
+    """Keep at most one blank line between generated SAS code blocks."""
+    return re.sub(r"(?:[ \t]*\n){3,}", "\n\n", code)
+
+
 class SasShiftTableGenerator:
     """Render readable SAS from the Shift Table JSON v1 contract."""
 
@@ -285,7 +290,10 @@ class SasShiftTableGenerator:
     def generate(self, configuration: Mapping[str, object]) -> str:
         context = self._prepare(configuration)
         try:
-            return self.environment.get_template("shift_table.sas.j2").render(**context)
+            rendered = self.environment.get_template("shift_table.sas.j2").render(
+                **context
+            )
+            return _normalize_sas_spacing(rendered)
         except TemplateError as error:
             raise ValueError(f"Unable to render Shift Table SAS: {error}") from error
 

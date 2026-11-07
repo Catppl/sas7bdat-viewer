@@ -7,31 +7,32 @@
 /* 1. Prepare analysis source and centralized labels */
 data parm_ord;
     length parm_label $200;
-{% for level in parameters %}
-    parm_raw = {{ level.literal }}; parm_ord = {{ level.order }}; parm_label = {{ level.label|sas_string }}; output;
-{% endfor %}
-run;
+{% for level in parameters %}    parm_raw = {{ level.literal }}; parm_ord = {{ level.order }}; parm_label = {{ level.label|sas_string }}; output;
+{% endfor %}run;
 
 data visit_ord;
     length visit_label $200;
-{% for level in visits %}
-    visit_raw = {{ level.literal }}; visit_ord = {{ level.order }}; visit_label = {{ level.label|sas_string }}; output;
-{% endfor %}
-run;
+{% for level in visits %}    visit_raw = {{ level.literal }}; visit_ord = {{ level.order }}; visit_label = {{ level.label|sas_string }}; output;
+{% endfor %}run;
 
 data trt_ord;
     length trt_label $200;
-{% for level in treatments %}
-    trt_raw = {{ level.literal }}; trt_ord = {{ level.order }}; trt_label = {{ level.label|sas_string }}; output;
-{% endfor %}
-run;
+{% for level in treatments %}    trt_raw = {{ level.literal }}; trt_ord = {{ level.order }}; trt_label = {{ level.label|sas_string }}; output;
+{% endfor %}run;
 
 data grade_ord;
     length grade_label $200;
-{% for level in grades %}
-    grade_raw = {{ level.literal }}; grade_ord = {{ level.order }}; grade_label = {{ level.label|sas_string }}; output;
-{% endfor %}
-run;
+{% for level in grades %}    grade_raw = {{ level.literal }}; grade_ord = {{ level.order }}; grade_label = {{ level.label|sas_string }}; output;
+{% endfor %}run;
+
+/* 2. Calculate Population N */
+proc sql noprint;
+{% for level in treatments %}    select count(distinct {{ population_subject }}) into :n{{ loop.index }} trimmed from {{ population_reference }} where {% if population_where %}{{ population_where }} and {% endif %}{{ population_treatment }} = {{ level.literal }};
+{% endfor %}{% if include_total %}    select count(distinct {{ population_subject }}) into :nt trimmed from {{ population_reference }} where {% if population_where %}{{ population_where }} and {% endif %}{{ population_treatment }} in ({% for level in treatments %}{{ level.literal }}{% if not loop.last %}, {% endif %}{% endfor %});
+{% endif %}quit;
+{% for level in treatments %}%let n{{ loop.index }}=&n{{ loop.index }};
+{% endfor %}{% if include_total %}%let nt=&nt;
+{% endif %}
 
 data raw;
     set {{ source_reference }};
@@ -51,22 +52,6 @@ proc sql;
     inner join grade_ord as b on a.{{ variables.baseline_grade }} = b.grade_raw
     inner join grade_ord as g on a.{{ variables.post_grade }} = g.grade_raw;
 quit;
-
-/* 2. Calculate Population N */
-proc sql noprint;
-{% for level in treatments %}
-    select count(distinct {{ population_subject }}) into :n{{ loop.index }} trimmed from {{ population_reference }} where {% if population_where %}{{ population_where }} and {% endif %}{{ population_treatment }} = {{ level.literal }};
-{% endfor %}
-{% if include_total %}
-    select count(distinct {{ population_subject }}) into :nt trimmed from {{ population_reference }} where {% if population_where %}{{ population_where }} and {% endif %}{{ population_treatment }} in ({% for level in treatments %}{{ level.literal }}{% if not loop.last %}, {% endif %}{% endfor %});
-{% endif %}
-quit;
-{% for level in treatments %}
-%let n{{ loop.index }}=&n{{ loop.index }};
-{% endfor %}
-{% if include_total %}
-%let nt=&nt;
-{% endif %}
 
 /* 3. Calculate analyzable denominators and observed cells */
 proc sql;

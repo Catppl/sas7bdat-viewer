@@ -1,0 +1,118 @@
+{
+  "type": "shift_table",
+  "version": 1,
+  "input": {
+    "kind": "sas",
+    "format": "sas7bdat",
+    "dataset": "ADLB",
+    "source_path": "/data/analysis/adam/adlb.sas7bdat",
+    "source_directory": "/data/analysis/adam"
+  },
+  "variable_metadata": {
+    "USUBJID": {"type": "character", "label": "", "length": null, "format": ""},
+    "SAFFL": {"type": "character", "label": "", "length": null, "format": ""},
+    "PARAMCD": {"type": "character", "label": "", "length": null, "format": ""},
+    "AVISIT": {"type": "character", "label": "", "length": null, "format": ""},
+    "TRTA": {"type": "character", "label": "", "length": null, "format": ""},
+    "BGRD": {"type": "numeric", "label": "", "length": null, "format": ""},
+    "PGRD": {"type": "numeric", "label": "", "length": null, "format": ""},
+    "ANL01FL": {"type": "character", "label": "", "length": null, "format": ""}
+  },
+  "dataset_filter": {
+    "language": "sas_like",
+    "text": "SAFFL = \"Y\"",
+    "ast": {
+      "type": "comparison",
+      "operator": "=",
+      "operand": {"type": "literal", "value_type": "character", "value": "Y"},
+      "prefix": false,
+      "variable": "SAFFL"
+    }
+  },
+  "variables": {
+    "subject": "USUBJID",
+    "parameter": "PARAMCD",
+    "visit": "AVISIT",
+    "treatment": "TRTA",
+    "baseline_grade": "BGRD",
+    "post_grade": "PGRD",
+    "analysis_flag": "ANL01FL",
+    "analysis_flag_value": "Y"
+  },
+  "ordering": {
+    "parameters": [
+      {"raw": "AST", "label": "AST", "order": 1},
+      {"raw": "ALT", "label": "ALT", "order": 2}
+    ],
+    "visits": [
+      {"raw": "Week 4", "label": "Week 4", "order": 1},
+      {"raw": "Week 8", "label": "Week 8", "order": 2}
+    ],
+    "treatments": [
+      {"raw": "A", "label": "Drug A", "order": 1},
+      {"raw": "B", "label": "Drug B", "order": 2}
+    ],
+    "grade_levels": [
+      {"raw": 0, "label": "0", "order": 1},
+      {"raw": 1, "label": "1", "order": 2},
+      {"raw": 2, "label": "2", "order": 3}
+    ]
+  },
+  "population": {
+    "input": {
+      "kind": "sas",
+      "format": "sas7bdat",
+      "dataset": "ADSL",
+      "source_path": "/data/analysis/adam/adsl.sas7bdat",
+      "source_directory": "/data/analysis/adam"
+    },
+    "variable_metadata": {
+      "USUBJID": {"type": "character", "label": "", "length": null, "format": ""},
+      "SAFFL": {"type": "character", "label": "", "length": null, "format": ""},
+      "TRT01A": {"type": "character", "label": "", "length": null, "format": ""}
+    },
+    "subject_variable": "USUBJID",
+    "treatment_variable": "TRT01A",
+    "filter": {
+      "language": "sas_like",
+      "text": "SAFFL = \"Y\"",
+      "ast": {
+        "type": "comparison",
+        "operator": "=",
+        "operand": {"type": "literal", "value_type": "character", "value": "Y"},
+        "prefix": false,
+        "variable": "SAFFL"
+      }
+    }
+  },
+  "calculation": {
+    "reference_engine": "python_shift_table_v1",
+    "count": "distinct_subjects",
+    "denominator": "parameter_visit_treatment_complete_grade_subjects",
+    "duplicate_policy": "warn_and_continue",
+    "duplicates_confirmed": false,
+    "missing_grade_policy": "exclude_with_summary",
+    "total_policy": "independent_distinct_subject",
+    "include_overall_total": true
+  },
+  "display": {
+    "parameter_layout": "vertical_sections",
+    "visit_layout": "vertical_sections",
+    "treatment_layout": "across_columns",
+    "percent_digits": 1,
+    "rounding": "half_up",
+    "zero_denominator": "0 (-)",
+    "footnote": false
+  },
+  "drilldown": {"enabled": true, "analysis_cells": true, "population_headers": true},
+  "targets": {
+    "sas": {
+      "source_library": "adam",
+      "source_member": "adlb",
+      "population_library": "adam",
+      "population_member": "adsl",
+      "output_dataset": "work.shift_table",
+      "long_output_dataset": "work.shift_table_long"
+    }
+  }
+}
